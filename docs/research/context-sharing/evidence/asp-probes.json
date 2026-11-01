@@ -1,0 +1,362 @@
+[
+  {
+    "name": "claude_rewind",
+    "input": [
+      {
+        "type": "user",
+        "uuid": "u0",
+        "parentUuid": null,
+        "sessionId": "synthetic-session",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "start"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "uuid": "a1",
+        "parentUuid": "u0",
+        "sessionId": "synthetic-session",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "old branch"
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "u2",
+        "parentUuid": "a1",
+        "sessionId": "synthetic-session",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "old choice"
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "u3",
+        "parentUuid": "a1",
+        "sessionId": "synthetic-session",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "new choice"
+            }
+          ]
+        }
+      }
+    ],
+    "output": [
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "session_init",
+        "sessionId": "synthetic-session",
+        "cwd": "",
+        "agent": "claude"
+      },
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "start"
+      },
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "assistant_message",
+        "text": "old branch"
+      },
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "old choice"
+      },
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "new choice"
+      }
+    ]
+  },
+  {
+    "name": "claude_image_unknown_block",
+    "input": [
+      {
+        "type": "user",
+        "uuid": "u0",
+        "parentUuid": null,
+        "sessionId": "synthetic-session",
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "text"
+            },
+            {
+              "type": "image",
+              "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "c3ludGhldGlj"
+              }
+            },
+            {
+              "type": "future_block",
+              "marker": "must retain in archive"
+            }
+          ]
+        }
+      }
+    ],
+    "output": [
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "session_init",
+        "sessionId": "synthetic-session",
+        "cwd": "",
+        "agent": "claude"
+      },
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "text"
+      }
+    ]
+  },
+  {
+    "name": "codex_rollback",
+    "input": [
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "response_item",
+        "payload": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "first"
+            }
+          ]
+        }
+      },
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "response_item",
+        "payload": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "rolled back"
+            }
+          ]
+        }
+      },
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "event_msg",
+        "payload": {
+          "type": "thread_rolled_back",
+          "num_turns": 1
+        }
+      },
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "response_item",
+        "payload": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "replacement"
+            }
+          ]
+        }
+      }
+    ],
+    "output": [
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "first"
+      },
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "rolled back"
+      },
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "replacement"
+      }
+    ]
+  },
+  {
+    "name": "codex_paginated_user_only",
+    "input": [
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "event_msg",
+        "payload": {
+          "type": "item_completed",
+          "thread_id": "t",
+          "turn_id": "u",
+          "item": {
+            "type": "UserMessage",
+            "id": "i",
+            "content": [
+              {
+                "type": "text",
+                "text": "only canonical user",
+                "text_elements": []
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "output": []
+  },
+  {
+    "name": "codex_future_event",
+    "input": [
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "response_item",
+        "payload": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "first"
+            }
+          ]
+        }
+      },
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "future_event",
+        "payload": {
+          "marker": "retain"
+        }
+      }
+    ],
+    "output": [
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "first"
+      }
+    ]
+  },
+  {
+    "name": "codex_compacted_replacement",
+    "input": [
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "session_meta",
+        "payload": {
+          "id": "synthetic-session",
+          "cwd": "/synthetic"
+        }
+      },
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "response_item",
+        "payload": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "before"
+            }
+          ]
+        }
+      },
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "compacted",
+        "payload": {
+          "message": "summary",
+          "replacement_history": [
+            {
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "replacement summary"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "type": "response_item",
+        "payload": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "after"
+            }
+          ]
+        }
+      }
+    ],
+    "output": [
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "compaction"
+      },
+      {
+        "v": 1,
+        "ts": 1767225600000,
+        "type": "user_message",
+        "text": "after"
+      }
+    ]
+  }
+]

@@ -1,0 +1,43 @@
+{
+  "source_commit": "babe30a7e6c185346c85859da30b58183e5964f0",
+  "source_sha256": {
+    "session_manager": "df17da0ba0f3519c6b0a057eac1c51f38c041fc33738de2e449f86118aef565e",
+    "messages": "5397e3c96c9504266e4ee8b6e88d5098b3280ee7dbb0c687b74708c62a06c8d4",
+    "transform_messages": "1afe70d8ab9ac24fcfc7ee46bf002b24f9557396ffe3c61e44d3e35c692e27f4"
+  },
+  "node": "v24.15.0",
+  "scope": "Pinned pure source functions after type stripping; synthetic inputs; not CLI or provider integration",
+  "cases": [
+    {
+      "name": "branch_compaction_checkpoint",
+      "passed": true,
+      "selected_ids": [
+        "compact",
+        "keep",
+        "next"
+      ],
+      "message_roles": [
+        "system",
+        "compactionSummary",
+        "user",
+        "user"
+      ],
+      "raw_unchanged": true
+    },
+    {
+      "name": "branch_relative_context_edit",
+      "passed": true,
+      "observed": "Selected branch projection changed; sibling and raw message unchanged"
+    },
+    {
+      "name": "cross_provider_content_and_ids",
+      "passed": true,
+      "observed": "Foreign thinking/signatures dropped; call/result IDs normalized together; same-model signed thinking retained; source unchanged"
+    },
+    {
+      "name": "orphan_tool_call",
+      "passed": true,
+      "observed": "Synthetic error result inserted for missing tool result"
+    }
+  ]
+}

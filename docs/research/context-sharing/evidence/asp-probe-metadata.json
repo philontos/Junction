@@ -1,0 +1,38 @@
+{
+  "repository": "https://github.com/kevin-dp/agent-session-protocol",
+  "revision": "470b9242d8c5eb5a35b6b330405b8edd52756a06",
+  "node_version": "v24.15.0",
+  "source_sha256": {
+    "src/tools.ts": "8ad49b1f8495eb0ab37a8a30098873eb8daa3f6aa66c22461c82b9f9f2f995ce",
+    "src/normalize/claude.ts": "f256d96fd0b42a88ae156323c54eb2dab5315a023ae4b59970e9846f2a3691bb",
+    "src/normalize/codex.ts": "caa85cbdc06f792c7b663af491290385192638152447f988a9f1dc722ad18da1"
+  },
+  "fixture_sha256": "b8589ee732c965823af0f11f20c7428fbfa5f7480b642d3e8a2eeeb3ba7d2ae2",
+  "cases": [
+    {
+      "name": "claude_rewind",
+      "output_count": 5
+    },
+    {
+      "name": "claude_image_unknown_block",
+      "output_count": 2
+    },
+    {
+      "name": "codex_rollback",
+      "output_count": 3
+    },
+    {
+      "name": "codex_paginated_user_only",
+      "output_count": 0
+    },
+    {
+      "name": "codex_future_event",
+      "output_count": 1
+    },
+    {
+      "name": "codex_compacted_replacement",
+      "output_count": 2
+    }
+  ],
+  "result": "Recorded outputs reproduced; not an end-to-end native resume test"
+}

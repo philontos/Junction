@@ -1,0 +1,57 @@
+{
+  "observed_on": "2026-10-31",
+  "scope": "Bounded local schema/type inspection; no transcript text, private identifiers, credentials, or tool output included.",
+  "not_a_consistent_backup": true,
+  "versions": {
+    "codex_cli": "0.157.1",
+    "claude_cli": "2.1.203",
+    "sampled_claude_transcript_versions_include": ["2.1.202", "2.1.201", "2.1.185"]
+  },
+  "path_overrides_unset": ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "XDG_CONFIG_HOME"],
+  "codex": {
+    "observed_locations_relative_to_default_home": [
+      "sessions", "archived_sessions", "state_5.sqlite", "thread_history_1.sqlite",
+      "memories_1.sqlite", "history.jsonl", "session_index.jsonl"
+    ],
+    "bounded_thread_observation": {
+      "rows_inspected": 310,
+      "history_mode_counts": {"paginated": 309, "legacy": 1},
+      "referenced_rollout_files_present": 310
+    },
+    "observed_rollout_record_types_include": [
+      "session_meta", "response_item", "event_msg", "world_state", "turn_context", "token_usage_record"
+    ],
+    "observed_paginated_rollout_user_item_path": "event_msg.payload.item.type = UserMessage",
+    "observed_projected_item_types_include": ["userMessage", "agentMessage", "commandExecution", "reasoning", "webSearch"],
+    "state_tables_include": ["threads", "thread_spawn_edges", "thread_dynamic_tools"],
+    "history_tables_include": ["thread_items", "thread_turns", "thread_history_projection_state", "realtime_items"],
+    "thread_items_fields_include": ["thread_id", "turn_id", "item_id", "rollout_ordinal", "item_json", "item_type", "updated_at_ordinal"],
+    "projection_state_fields_include": ["next_rollout_byte_offset", "next_rollout_ordinal"],
+    "memory_tables_include": ["stage1_outputs", "jobs"],
+    "memory_feature_activation_inferred": false,
+    "local_generated_app_server_schema": {
+      "ThreadRead_includeTurns_deprecated": true,
+      "ThreadTurnsList_cursor_type": "string",
+      "ThreadTurnsList_fields_include": ["cursor", "limit", "sortDirection", "itemsView"],
+      "ThreadItemsList_fields_include": ["cursor", "threadId", "turnId"],
+      "Thread_fields_include": ["id", "sessionId", "forkedFromId", "historyMode", "path", "cwd"]
+    }
+  },
+  "claude": {
+    "layout_patterns": [
+      "projects/<encoded-project>/<session-id>.jsonl",
+      "projects/<encoded-project>/<session-id>/subagents/agent-<id>.jsonl",
+      "projects/<encoded-project>/memory",
+      "history.jsonl"
+    ],
+    "observed_record_types_include": [
+      "user", "assistant", "system", "attachment", "file-history-snapshot", "last-prompt", "mode",
+      "permission-mode", "bridge-session", "ai-title", "pr-link", "queue-operation"
+    ],
+    "observed_envelope_fields_include": ["uuid", "parentUuid", "isSidechain", "sessionId", "timestamp", "version", "cwd", "gitBranch"],
+    "observed_content_block_types_include": ["text", "thinking", "tool_use", "tool_result"],
+    "observed_system_subtypes_include": ["stop_hook_summary", "turn_duration", "away_summary"],
+    "observed_history_fields_include": ["display", "pastedContents", "project", "sessionId", "timestamp"],
+    "memory_file_contents_copied": false
+  }
+}

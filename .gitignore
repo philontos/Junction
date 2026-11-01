@@ -1,0 +1,15 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+
+# Local source checkouts and session experiments.
+.local/
+.source-checkouts/
+asp-context-research/
+claude-sdk-review/
+pi-review/
+asp-probe-output.json*
+claude-fork-output.json
+pi-context-output.json

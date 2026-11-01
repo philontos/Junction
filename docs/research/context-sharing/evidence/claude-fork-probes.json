@@ -1,0 +1,27 @@
+{
+  "source_commit": "2146f9d8985513053e904b13200c8f744b36785a",
+  "source_sha256": "16653fb5dbb6e9963e05ef1522e43ba4b8e28fd0b037e4749dde865ca9e4e675",
+  "python": "3.12.13",
+  "scope": "Original pure AST functions; synthetic entries; not CLI resume or fork integration",
+  "cases": [
+    {
+      "name": "fork_identity_and_edges",
+      "passed": true,
+      "observed": "Session/message UUIDs remapped; progress parent bypassed; compaction logical parent remapped; tool-call IDs and unknown field retained"
+    },
+    {
+      "name": "fork_scope_and_source",
+      "passed": true,
+      "observed": "Sidechain/progress/file-history snapshot omitted; isMeta retained; input unchanged",
+      "retained_messages": 5
+    },
+    {
+      "name": "inclusive_cutoff",
+      "passed": true,
+      "retained_source_ids": [
+        "u1",
+        "a1"
+      ]
+    }
+  ]
+}
