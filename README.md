@@ -1,4 +1,4 @@
-# Agent Context
+# Junction
 
 研究并实现跨 Agent 的 Context 持久化、接续与协作。先覆盖 Codex 和 Claude Code，以 Pi 作为扩展研究对象。
 
