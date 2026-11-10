@@ -1,0 +1,596 @@
+{
+  "$defs": {
+    "Block": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "text",
+            "reasoning",
+            "tool_call",
+            "tool_result",
+            "attachment",
+            "marker",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Call Id"
+        },
+        "arguments": {
+          "default": null,
+          "title": "Arguments"
+        },
+        "output": {
+          "default": null,
+          "title": "Output"
+        },
+        "is_error": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Error"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Resource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "native_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Type"
+        },
+        "pair_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "matched",
+                "missing_call",
+                "missing_result",
+                "ambiguous",
+                "missing_id"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pair Status"
+        },
+        "related_messages": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Messages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Block",
+      "type": "object"
+    },
+    "Diagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "severity": {
+          "default": "warning",
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ],
+      "title": "Diagnostic",
+      "type": "object"
+    },
+    "Message": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant",
+            "tool",
+            "system",
+            "developer",
+            "unknown"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp"
+        },
+        "content": {
+          "items": {
+            "$ref": "#/$defs/Block"
+          },
+          "title": "Content",
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceLocation"
+        },
+        "is_meta": {
+          "default": false,
+          "title": "Is Meta",
+          "type": "boolean"
+        },
+        "is_sidechain": {
+          "default": false,
+          "title": "Is Sidechain",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "sequence",
+        "turn_id",
+        "role",
+        "content",
+        "source"
+      ],
+      "title": "Message",
+      "type": "object"
+    },
+    "Resource": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "path",
+            "url",
+            "embedded",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference"
+        },
+        "media_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Media Type"
+        },
+        "availability": {
+          "enum": [
+            "external_unverified",
+            "raw_only",
+            "unknown"
+          ],
+          "title": "Availability",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "availability"
+      ],
+      "title": "Resource",
+      "type": "object"
+    },
+    "Session": {
+      "additionalProperties": false,
+      "properties": {
+        "native_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Id"
+        },
+        "source_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Version"
+        },
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cwd"
+        },
+        "history_semantics": {
+          "const": "recorded_history",
+          "default": "recorded_history",
+          "title": "History Semantics",
+          "type": "string"
+        },
+        "effective_history": {
+          "const": "not_reconstructed",
+          "default": "not_reconstructed",
+          "title": "Effective History",
+          "type": "string"
+        },
+        "turns": {
+          "items": {
+            "$ref": "#/$defs/Turn"
+          },
+          "title": "Turns",
+          "type": "array"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/Message"
+          },
+          "title": "Messages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "turns",
+        "messages"
+      ],
+      "title": "Session",
+      "type": "object"
+    },
+    "SourceLocation": {
+      "additionalProperties": false,
+      "properties": {
+        "lines": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Lines",
+          "type": "array"
+        },
+        "native_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Id"
+        },
+        "native_message_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Message Id"
+        },
+        "native_parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Parent Id"
+        },
+        "native_logical_parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Logical Parent Id"
+        },
+        "native_turn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Turn Id"
+        },
+        "native_session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Session Id"
+        },
+        "record_type": {
+          "title": "Record Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lines",
+        "record_type"
+      ],
+      "title": "SourceLocation",
+      "type": "object"
+    },
+    "Turn": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "boundary": {
+          "enum": [
+            "native",
+            "inferred",
+            "preamble"
+          ],
+          "title": "Boundary",
+          "type": "string"
+        },
+        "native_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Id"
+        },
+        "first_message_id": {
+          "title": "First Message Id",
+          "type": "string"
+        },
+        "message_count": {
+          "title": "Message Count",
+          "type": "integer"
+        },
+        "preview": {
+          "title": "Preview",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sequence",
+        "boundary",
+        "first_message_id",
+        "message_count",
+        "preview"
+      ],
+      "title": "Turn",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "junction.context/1",
+      "default": "junction.context/1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "provider": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "parser_version": {
+      "default": "0.1.0",
+      "title": "Parser Version",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ready",
+        "partial",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "source_sha256": {
+      "title": "Source Sha256",
+      "type": "string"
+    },
+    "source_bytes": {
+      "title": "Source Bytes",
+      "type": "integer"
+    },
+    "record_count": {
+      "title": "Record Count",
+      "type": "integer"
+    },
+    "recognized_record_count": {
+      "title": "Recognized Record Count",
+      "type": "integer"
+    },
+    "session": {
+      "$ref": "#/$defs/Session"
+    },
+    "diagnostics": {
+      "items": {
+        "$ref": "#/$defs/Diagnostic"
+      },
+      "title": "Diagnostics",
+      "type": "array"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    }
+  },
+  "required": [
+    "provider",
+    "status",
+    "source_sha256",
+    "source_bytes",
+    "record_count",
+    "recognized_record_count",
+    "session",
+    "diagnostics"
+  ],
+  "title": "NormalizedContext",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,40 +1,94 @@
 # Junction
 
-研究并实现跨 Agent 的 Context 持久化、接续与协作。先覆盖 Codex 和 Claude Code，以 Pi 作为扩展研究对象。
+保存、查询和共享 Agent 的历史上下文。v0.1 提供可在本机运行的 HTTP 服务、CLI，以及 Claude Code / Codex 通用的交接 skill。
 
-目前处于研究与功能确认阶段，已有产品草案、固定版本源码分析及合成验证脚本，尚未实现存储服务或确定通用协议。
+导入已有 JSONL，同时保存原始字节和标准化记录；选择一个固定版本分享，接收方读取历史后，在自己的工作环境继续任务。Junction 不运行 Agent，也不管理仓库、worktree 或当前执行权限。
 
-## 当前方向
+## 本地启动
 
-- 原生会话档案作为持久化原件，保留来源版本和必要依赖。
-- 优先复用官方 resume、fork、导入和外部存储能力。
-- 先验证直接转换，再决定是否需要薄的通用内容层。
-- Context 与 Worktree、仓库、终端等执行环境分开管理。
-- 协作目标是租户隔离、选择分享、引用和独立派生；具体实现待验证。
+需要 Python 3.11+，推荐 3.12。本版为单机、单进程服务；默认仅监听本机地址。
 
-本项目可配合 Agent 工具独立使用。Switchyard 是未来可选的接入方：复用其任务、终端和工作环境管理，在同一界面中选择 Context、继续工作并回存历史。本项目先专注 Context，不承担完整工作台的建设。
+```sh
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.lock
+.venv/bin/python -m pip install --no-deps -e .
+source .venv/bin/activate
 
-## 阅读顺序
+junction user-add local --output-token .local/local.token
+junction user-add reviewer --output-token .local/reviewer.token
+junction serve --data-dir .local/data --host 127.0.0.1 --port 8767
+```
 
-1. [功能清单](docs/product/context-collaboration.md)
-2. [原生结构、完整性与 fork 研究](docs/research/context-sharing/native-storage.md#9-原生完整性与生命周期复核)
-3. [行业实践调研](docs/research/context-sharing/README.md)
-4. [来源与版本](docs/research/context-sharing/sources.md)
-5. [合成验证与复现](docs/research/context-sharing/evidence/README.md)
+`requirements.lock` 包含运行与验证所用的精确依赖版本。用户已创建时不必再次创建；需要轮换时执行 `user-add USER --rotate --output-token 新文件`。凭证只写文件，CLI 不打印明文。`.local/` 已排除在 Git 之外。
 
-[架构](docs/research/context-sharing/architecture.md)和[协议契约](docs/research/context-sharing/protocol-contract.md)保留为待验证候选，尚未选定，不作为实现前提。
+另开终端，仍在仓库目录运行：
 
-## 下一步
+```sh
+source .venv/bin/activate
+export JUNCTION_URL=http://127.0.0.1:8767
+export JUNCTION_TOKEN_FILE="$PWD/.local/local.token"
+junction whoami
+junction import tests/fixtures/claude-handoff.jsonl --provider claude
+junction import tests/fixtures/codex-handoff.jsonl --provider codex
+junction list
+```
 
-1. 固定 Agent / SDK 版本与会话样本范围。
-2. 验证原生归档后能否通过官方能力恢复和 fork。
-3. 验证跨 Agent 转换，明确哪些内容保留、降级或无法使用。
-4. 根据实验结果收敛存储边界及必要的公共结构。
+服务健康检查：[http://127.0.0.1:8767/healthz](http://127.0.0.1:8767/healthz)。API 文档：[http://127.0.0.1:8767/docs](http://127.0.0.1:8767/docs)。完整调用示例见[本地联调](docs/local-handoff.md)。
 
-后续用 Switchyard 验证一次“保存 → 恢复 → 继续 → 回存”的接入流程，再根据实际需要决定产品整合方式。
+## 查询与共享
 
-## 验证材料
+下面的 `CONTEXT`、`REVISION` 使用导入结果中的 `context_id` 和 `id` 替换。CLI 始终返回普通 JSON，无须 `--json`。
 
-`docs/research/context-sharing/evidence/` 包含合成输入、纯函数探针和脱敏结构统计，不包含真实会话正文。已有 ASP 六个解析案例、Claude 官方 fork 三个案例、Pi 官方投影与模型转换四个案例；这些不是端到端恢复验收。
+```sh
+junction get CONTEXT
+junction get CONTEXT --revision REVISION --view conversation --turns 3
+junction get CONTEXT --revision REVISION --view trace
+junction get CONTEXT --revision REVISION --view diagnostics
+junction share CONTEXT --revision REVISION --user reviewer
 
-验证脚本的运行环境、上游固定提交和复现命令见[证据说明](docs/research/context-sharing/evidence/README.md)。上游源码需另行获取，不随本仓库分发。
+# 接收方身份
+export JUNCTION_TOKEN_FILE="$PWD/.local/reviewer.token"
+junction list
+junction export CONTEXT --revision REVISION --output .local/received-context.json
+```
+
+分享默认只包含标准化历史；若还需原件，所有者显式加 `--include-raw`。撤销用 `junction revoke CONTEXT --revision REVISION --user reviewer`，已下载的副本不会被收回。所有者可通过 `import … --context CONTEXT` 追加新快照，新版本须另行分享。
+
+原件不是脱敏备份，标准化历史也可能包含敏感文本。上传前选好要共享的资料。本仓库测试数据全部为合成内容。
+
+## 交接 skill
+
+交给目标 Agent 阅读 [skills/junction-context/SKILL.md](skills/junction-context/SKILL.md)，并提供 Context ID / Revision ID。该 skill 使用同一套 CLI，适用于 Claude Code 与 Codex。先显式读取即可联调，不要求改动全局 skills 配置。也可按所用 Agent 的 skill 安装方式复制这个目录。
+
+查询输出作为工具结果进入目标模型的当前会话。历史中的指令与权限只作资料；目标 Agent 检查当前仓库、文件、技能和权限后继续执行。日志压缩、回滚、分叉、未知字段和缺失附件会通过状态与 diagnostics 提示，不承诺恢复原 Agent 完整运行状态。
+
+## 数据与维护
+
+数据目录包含 `junction.sqlite3` 和 `raw/`；SQLite 保存用户、Context、版本、标准化记录与分享关系，`raw/` 保存按 SHA-256 寻址的不可变原件。
+
+```sh
+junction check --data-dir .local/data
+junction backup .local/backup-001 --data-dir .local/data
+# 备份含 BACKUP_COMPLETE.json 且校验通过后，可用独立端口启动恢复验证
+junction serve --data-dir .local/backup-001 --port 8768
+```
+
+保留所有数据目录内容；运行时备份使用上面的命令，不单独复制正在写入的 SQLite 主文件。恢复后的用户与授权保持一致，客户端仍使用自己的 token 文件。
+
+## 验证与接口
+
+```sh
+.venv/bin/pytest -q
+.venv/bin/ruff check src tests
+```
+
+测试覆盖两种解析器、重复展示记录、工具配对、坏行与未来字段、共享隔离与撤销、版本分页、长内容导出、并发导入、重启及备份恢复。尚需用户使用实际代码任务完成 Claude Code ↔ Codex 双向交接；合成数据的服务验收不等同于 Agent 成功接续。
+
+- [功能清单](docs/product/context-collaboration.md)
+- [本地联调与接入说明](docs/local-handoff.md)
+- [v1 协议与存储边界](docs/protocol-v1.md)
+- [标准化 JSON Schema](schemas/context-v1.schema.json)
+- [原生结构研究](docs/research/context-sharing/native-storage.md)
+- [行业调研](docs/research/context-sharing/README.md)与[来源版本](docs/research/context-sharing/sources.md)
+
+研究目录中的 architecture / protocol-contract 是历史候选，当前实现以 `docs/protocol-v1.md` 为准。分组治理、公开分享、派生关系、Git 扩展与 Switchyard 接入留待这一层联调完成后推进。云端部署使用相同服务和数据结构，部署配置另行完成。
