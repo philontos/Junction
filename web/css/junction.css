@@ -16,6 +16,14 @@
 .jx-card { display: block; width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 9px; padding: 14px; margin-bottom: 9px; background: var(--surface-2); color: var(--text); }
 .jx-card:hover, .jx-card:focus, .jx-card.active { border-color: var(--accent); background: var(--surface-3); }
 .jx-card strong { font-size: 13px; font-weight: 600; display: block; line-height: 1.5; overflow-wrap: anywhere; }
+.jx-context-card { border: 1px solid var(--border); border-radius: 9px; margin-bottom: 9px; overflow: hidden; background: var(--surface-2); }
+.jx-context-card .jx-card { border: 0; border-radius: 0; margin: 0; }
+.jx-context-card:has(.jx-card.active) { border-color: var(--accent); }
+.jx-versions { padding: 8px 14px; border-top: 1px solid var(--border); }
+.jx-versions > summary { color: var(--muted); }
+.jx-version { display: block; width: 100%; text-align: left; background: none; color: var(--text); border: 0; border-radius: 5px; padding: 8px; margin: 5px 0; font-size: 12px; }
+.jx-version:hover, .jx-version.active { background: var(--surface-3); color: var(--accent-text); }
+.jx-versions .jx-note { margin: 8px 0; }
 .jx-meta { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .jx-ids { display: block; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; line-height: 1.8; }
 .jx-warning { color: var(--accent-text-hi); background: #d9775714; padding: 12px 16px; border: 1px solid #d9775744; border-radius: 8px; font-size: 12px; line-height: 1.7; margin: 10px 0; overflow-wrap: anywhere; }

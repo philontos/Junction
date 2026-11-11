@@ -91,7 +91,7 @@ export function registerJunctionRoutes(app: Express) {
   }));
   app.get("/api/junction/contexts/:cid/revisions", wrap(async (req, res) => {
     revisionPath(req.params.cid, req.params.cid);
-    const q = new URLSearchParams({ limit: "100" });
+    const q = new URLSearchParams({ limit: "20", shared_only: "true" });
     if (typeof req.query.cursor === "string") q.set("cursor", req.query.cursor);
     res.json(await clientFor(req).request(`/v1/contexts/${req.params.cid}/revisions?${q}`));
   }));
@@ -145,7 +145,8 @@ export function registerJunctionRoutes(app: Express) {
       progress("snapshot", `已固定会话快照，${raw.length} 字节；已记录可用的仓库和分支信息。`);
       for (const item of src.notes) progress("annotation", item.detail);
       const extensions = src.workspace ? { [WORKSPACE_EXTENSION]: src.workspace } : { "switchyard.capture/1": { ...src.capture, notes: src.notes } };
-      const q = new URLSearchParams({ provider: src.task.agent, source_name: path.basename(src.file), shared: "true", extensions: JSON.stringify(extensions) });
+      const q = new URLSearchParams({ provider: src.task.agent, source_name: path.basename(src.file), shared: "true", extensions: JSON.stringify(extensions),
+        source_key: `switchyard:${NS}:task:${src.task.id}` });
       const title = src.task.title.trim().slice(0, 200);
       if (title) q.set("title", title);
       if (req.body.context_id) {

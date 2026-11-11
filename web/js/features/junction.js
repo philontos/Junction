@@ -43,19 +43,22 @@ async function loadList(append = false, choose = false) {
   const list = $("jx-list"); if (!append) list.replaceChildren();
   for (const item of page.items) {
     const r = item.revision;
+    const group = el("div", undefined, "jx-context-card");
     const card = button("", () => openDetail(item.id, r.id), "jx-card");
     card.dataset.contextId = item.id;
     card.classList.toggle("active", selectedContext?.cid === item.id);
-    card.append(el("strong", item.title), el("span", `${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}`, "jx-meta"),
+    card.append(el("strong", item.title), el("span", `v${r.number} · ${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}`, "jx-meta"),
       el("span", new Date(r.created_at).toLocaleString(), "jx-meta"));
-    list.append(card);
+    group.append(card);
+    if (r.number > 1) group.append(versionList(item));
+    list.append(group);
   }
   if (!list.children.length) list.append(note(L("还没有共享的 Context。分享一个任务，从这里开始接续。", "No shared contexts yet. Share a task to get started.")));
   listCursor = page.next_cursor;
   $("jx-more").hidden = !listCursor;
   if (choose) {
     const item = page.items.find(item => item.id === selectedContext?.cid) || page.items[0];
-    const target = preferredContext || (item && { cid: item.id, rid: item.revision.id });
+    const target = preferredContext || (item && (selectedContext?.cid === item.id ? selectedContext : { cid: item.id, rid: item.revision.id }));
     if (target) await openDetail(target.cid, target.rid);
     else {
       selectedContext = null;
@@ -63,17 +66,49 @@ async function loadList(append = false, choose = false) {
     }
   }
 }
+function versionList(item) {
+  const details = el("details", undefined, "jx-versions");
+  details.append(el("summary", L("版本记录", "Versions")));
+  const rows = el("div"), controls = el("div"); details.append(rows, controls);
+  let loaded = false, loading = false, cursor = null;
+  const load = async (more = false) => {
+    if (loading) return;
+    loading = true;
+    controls.replaceChildren(note(L("读取中…", "Loading…")));
+    try {
+      const q = more && cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      const page = await call(`/contexts/${item.id}/revisions${q}`);
+      if (!details.isConnected) return;
+      if (!more) rows.replaceChildren();
+      for (const revision of page.items) {
+        const b = button("", () => openDetail(item.id, revision.id), "jx-version");
+        b.dataset.revisionId = revision.id;
+        b.classList.toggle("active", selectedContext?.rid === revision.id);
+        b.append(el("span", `v${revision.number}${revision.id === item.revision.id ? L(" · 最新", " · Latest") : ""}`),
+          el("span", new Date(revision.created_at).toLocaleString(), "jx-meta"));
+        rows.append(b);
+      }
+      loaded = true; cursor = page.next_cursor; controls.replaceChildren();
+      if (cursor) controls.append(button(L("更多版本", "More versions"), () => load(true)));
+    } catch (e) {
+      if (details.isConnected) controls.replaceChildren(note(e.message), button(L("重试", "Retry"), () => load(more)));
+    } finally { loading = false; }
+  };
+  details.ontoggle = () => { if (details.open && !loaded) load(); };
+  return details;
+}
 async function openDetail(cid, rid) {
   const epoch = ++generation;
   selectedContext = { cid, rid };
   preferredContext = null;
   detailRoot().append(note(L("正在读取 Context…", "Loading context…")));
   for (const card of $("jx-list").querySelectorAll(".jx-card")) card.classList.toggle("active", card.dataset.contextId === cid);
+  for (const version of $("jx-list").querySelectorAll(".jx-version")) version.classList.toggle("active", version.dataset.revisionId === rid);
   const meta = await call(`/contexts/${cid}/revisions/${rid}`);
   if (epoch !== generation) return;
   const r = meta.revision, w = r.normalized.extensions?.["switchyard.workspace/1"];
   const d = detailRoot();
-  d.append(el("h2", meta.title), note(`${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`));
+  d.append(el("h2", meta.title), note(`v${r.number} · ${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`));
   d.append(el("div", undefined, "jx-continuation"));
   showContinue(meta);
   const history = el("details", undefined, "jx-section");
