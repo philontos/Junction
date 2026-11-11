@@ -68,6 +68,8 @@ junction export CONTEXT --revision REVISION --output .local/received-context.jso
 
 数据目录包含 `junction.sqlite3` 和 `raw/`；SQLite 保存用户、Context、版本、标准化记录与分享关系，`raw/` 保存按 SHA-256 寻址的不可变原件。
 
+同一工作来源可用 `junction import ... --source-key tool:task:123 --shared` 持续共享到同一个 Context。内容与工作信息未变时复用原版本；变化后生成新版本，旧版本保持不变。只有元数据改变时，各版本共用同一份 JSONL 原件。相同来源键在不同用户之间独立；不按标题或仓库合并任务。
+
 ```sh
 junction check --data-dir .local/data
 junction backup .local/backup-001 --data-dir .local/data

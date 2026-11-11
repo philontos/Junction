@@ -22,7 +22,7 @@ from .parsers.common import json_text
 MAX_IMPORT_BYTES = 32 * 1024 * 1024
 MAX_INLINE_CHARS = 4096
 MAX_CHUNK_CHARS = 16384
-DB_VERSION = 3
+DB_VERSION = 4
 
 DDL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS revisions (
  provider TEXT NOT NULL, source_sha256 TEXT NOT NULL, source_bytes INTEGER NOT NULL,
  source_name TEXT NOT NULL, parser_version TEXT NOT NULL, status TEXT NOT NULL,
  created_at TEXT NOT NULL, header_json TEXT NOT NULL, message_count INTEGER NOT NULL,
- turn_count INTEGER NOT NULL, diagnostic_count INTEGER NOT NULL,
- UNIQUE(context_id, number), UNIQUE(context_id, provider, source_sha256, parser_version)
+ turn_count INTEGER NOT NULL, diagnostic_count INTEGER NOT NULL, snapshot_sha256 TEXT NOT NULL,
+ UNIQUE(context_id, number), UNIQUE(context_id, snapshot_sha256)
 );
 CREATE INDEX IF NOT EXISTS revisions_context ON revisions(context_id, number DESC);
 CREATE INDEX IF NOT EXISTS revisions_source ON revisions(provider, source_sha256, parser_version);
@@ -69,6 +69,10 @@ CREATE TABLE IF NOT EXISTS publications (
 CREATE TABLE IF NOT EXISTS revision_overviews (
  revision_id TEXT PRIMARY KEY REFERENCES revisions(id), data_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS context_sources (
+ owner_id TEXT NOT NULL REFERENCES users(id), source_key TEXT NOT NULL,
+ context_id TEXT NOT NULL UNIQUE REFERENCES contexts(id), PRIMARY KEY(owner_id, source_key)
+);
 """
 
 
@@ -78,6 +82,57 @@ def now() -> str:
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def snapshot_digest(provider, sha, parser_version, extensions):
+    value = [provider, sha, parser_version, extensions]
+    return digest(json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False,
+                             separators=(",", ":")).encode())
+
+
+def migrate_revisions(db):
+    """Rebuild only the catalog constraint; immutable ids, headers and child rows stay intact."""
+    columns = [r[1] for r in db.execute("PRAGMA table_info(revisions)")]
+    if "snapshot_sha256" in columns:
+        return
+    definition = DDL[DDL.index("CREATE TABLE IF NOT EXISTS revisions ("):DDL.index("CREATE INDEX IF NOT EXISTS revisions_context")]
+    db.execute(definition.replace("IF NOT EXISTS revisions", "revisions_v4"))
+    for row in db.execute("SELECT * FROM revisions").fetchall():
+        values = dict(zip(columns, row))
+        fingerprint = snapshot_digest(values["provider"], values["source_sha256"], values["parser_version"],
+                                      json.loads(values["header_json"]).get("extensions", {}))
+        db.execute("INSERT INTO revisions_v4 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (*row, fingerprint))
+    db.execute("DROP TABLE revisions")
+    db.execute("ALTER TABLE revisions_v4 RENAME TO revisions")
+
+
+def bind_legacy_sources(db):
+    """One-time compatibility for previously published Switchyard task identities.
+
+    Ambiguous historical identities are left untouched; never merge by title, repo or raw bytes.
+    New writes use the generic, caller-supplied source_key instead.
+    """
+    sources = {}
+    for owner, cid, header in db.execute(
+        "SELECT c.owner_id,c.id,r.header_json FROM contexts c JOIN revisions r ON r.context_id=c.id"
+    ):
+        extensions = json.loads(header).get("extensions", {})
+        workspace = extensions.get("switchyard.workspace/1") or extensions.get("switchyard.capture/1")
+        source = workspace.get("source") if isinstance(workspace, dict) else None
+        if not isinstance(source, dict):
+            continue
+        node, task = source.get("node_id"), source.get("task_id")
+        if isinstance(node, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", node) and type(task) is int and task > 0:
+            key = f"switchyard:{node}:task:{task}"
+            sources.setdefault((owner, key), set()).add(cid)
+    # A context that claimed several different task identities is ambiguous too.
+    counts = {}
+    for ids in sources.values():
+        for cid in ids:
+            counts[cid] = counts.get(cid, 0) + 1
+    for (owner, key), ids in sources.items():
+        if len(ids) == 1 and counts[next(iter(ids))] == 1:
+            db.execute("INSERT OR IGNORE INTO context_sources VALUES (?,?,?)", (owner, key, next(iter(ids))))
 
 
 def new_token() -> str:
@@ -126,11 +181,25 @@ class Store:
         db = sqlite3.connect(self.db_path, timeout=15, isolation_level=None)
         try:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, DB_VERSION):
+            if version not in (0, 1, 2, 3, DB_VERSION):
                 raise RuntimeError(f"Unsupported database version {version}; refusing to modify it.")
             db.execute("PRAGMA journal_mode=WAL")
-            db.execute("PRAGMA foreign_keys=ON")
-            db.executescript("BEGIN IMMEDIATE;\n" + DDL + f"\nPRAGMA user_version={DB_VERSION};\nCOMMIT;")
+            # SQLite table rebuilds require FK enforcement off before BEGIN. Validate before commit.
+            db.execute("PRAGMA foreign_keys=OFF")
+            db.executescript("BEGIN IMMEDIATE;\n" + DDL)
+            if version < DB_VERSION:
+                migrate_revisions(db)
+                for statement in DDL.split(";"):
+                    if statement.strip():
+                        db.execute(statement)
+                bind_legacy_sources(db)
+            if db.execute("PRAGMA foreign_key_check").fetchone():
+                raise RuntimeError("Foreign key validation failed; migration rolled back.")
+            db.execute(f"PRAGMA user_version={DB_VERSION}")
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
         finally:
             db.close()
         self.db_path.chmod(0o600)
@@ -219,6 +288,7 @@ class Store:
         *,
         source_name: str = "upload.jsonl",
         context_id: str | None = None,
+        source_key: str | None = None,
         title: str | None = None,
         extensions: dict | None = None,
         shared: bool = False,
@@ -234,6 +304,10 @@ class Store:
             raise Problem(400, "invalid_source_name", "Provide a filename of 1–255 printable characters.")
         if title is not None and (not title.strip() or len(title) > 200):
             raise Problem(400, "invalid_title", "Title must contain 1–200 characters.")
+        if source_key is not None and (
+            not isinstance(source_key, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}", source_key)
+        ):
+            raise Problem(400, "invalid_source_key", "Source key must be 1–256 letters, digits or . _ : / -.")
         if extensions is not None:
             try:
                 encoded = json.dumps(extensions, ensure_ascii=True, allow_nan=False)
@@ -250,21 +324,42 @@ class Store:
         parsed = normalize(raw, provider)
         parsed.extensions = extensions or {}
         header = parsed.model_dump(exclude={"session": {"messages", "turns"}, "diagnostics": True})
+        fingerprint = snapshot_digest(provider, parsed.source_sha256, PARSER_VERSION, parsed.extensions)
         with self.connection(write=True) as db:
             if context_id:
                 self._owner(db, user, context_id)
+            if source_key is not None:
+                binding = db.execute("SELECT context_id FROM context_sources WHERE owner_id=? AND source_key=?",
+                                     (user, source_key)).fetchone()
+                if binding:
+                    if context_id and context_id != binding["context_id"]:
+                        raise Problem(409, "source_conflict", "Source key is already bound to another Context.")
+                    context_id = binding["context_id"]
+                if context_id:
+                    other = db.execute("SELECT source_key FROM context_sources WHERE context_id=?",
+                                       (context_id,)).fetchone()
+                    if other and other["source_key"] != source_key:
+                        raise Problem(409, "source_conflict", "Context already belongs to another source.")
             query = """SELECT r.* FROM revisions r JOIN contexts c ON c.id=r.context_id
                        WHERE c.owner_id=? AND r.provider=? AND r.source_sha256=? AND r.parser_version=?"""
             args = [user, provider, parsed.source_sha256, PARSER_VERSION]
+            if extensions is not None:
+                query += " AND r.snapshot_sha256=?"
+                args.append(fingerprint)
             if context_id:
                 query += " AND c.id=?"
                 args.append(context_id)
-            old = db.execute(query + " ORDER BY r.created_at,r.id LIMIT 1", args).fetchone()
+            elif source_key is not None:
+                # A new source has its own identity, even if an unbound import has identical bytes.
+                # Attaching it to an existing Context requires an explicit context_id (or migration).
+                query += " AND 0"
+            old = db.execute(query + " ORDER BY r.created_at DESC,r.id LIMIT 1", args).fetchone()
             # A successful idempotent import also guarantees that its original is readable.
             self.archive(raw, parsed.source_sha256)
             if old:
-                if extensions is not None and json.loads(old["header_json"]).get("extensions", {}) != extensions:
-                    raise Problem(409, "extensions_conflict", "This snapshot already exists with different immutable extensions.")
+                if source_key is not None:
+                    db.execute("INSERT OR IGNORE INTO context_sources VALUES (?,?,?)",
+                               (user, source_key, old["context_id"]))
                 if shared:
                     db.execute("INSERT OR IGNORE INTO publications VALUES (?,?)", (old["id"], now()))
                 old_title = db.execute("SELECT title FROM contexts WHERE id=?", (old["context_id"],)).fetchone()[0]
@@ -277,12 +372,14 @@ class Store:
                     "INSERT INTO contexts VALUES (?,?,?,?)",
                     (context_id, user, title or build_overview(parsed)["title"], created_at),
                 )
+            if source_key is not None:
+                db.execute("INSERT OR IGNORE INTO context_sources VALUES (?,?,?)", (user, source_key, context_id))
             number = db.execute(
                 "SELECT coalesce(max(number),0)+1 FROM revisions WHERE context_id=?", (context_id,)
             ).fetchone()[0]
             rid = str(uuid.uuid4())
             db.execute(
-                "INSERT INTO revisions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO revisions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     rid,
                     context_id,
@@ -298,6 +395,7 @@ class Store:
                     len(parsed.session.messages),
                     len(parsed.session.turns),
                     len(parsed.diagnostics),
+                    fingerprint,
                 ),
             )
             db.executemany(
@@ -373,6 +471,7 @@ class Store:
             "number",
             "provider",
             "source_sha256",
+            "snapshot_sha256",
             "source_bytes",
             "source_name",
             "parser_version",
@@ -427,19 +526,20 @@ class Store:
                 },
             }
 
-    def list_revisions(self, user, context_id, *, limit=20, cursor=None):
-        scope = f"revisions:{context_id}"
+    def list_revisions(self, user, context_id, *, limit=20, cursor=None, shared_only=False):
+        scope = f"revisions:{context_id}" + (":shared" if shared_only else "")
         position = decode_cursor(cursor, scope, 2**63 - 1)
         with self.connection() as db:
-            self._visible(db, user, context_id)
+            self._visible(db, user, context_id, shared_only=shared_only)
             rows = db.execute(
                 """SELECT r.* FROM revisions r JOIN contexts c ON c.id=r.context_id
                 LEFT JOIN grants g ON g.revision_id=r.id AND g.user_id=?
                 LEFT JOIN publications p ON p.revision_id=r.id
                 WHERE r.context_id=? AND r.number<?
                 AND (c.owner_id=? OR g.user_id IS NOT NULL OR p.revision_id IS NOT NULL)
+                AND (?=0 OR p.revision_id IS NOT NULL)
                 ORDER BY r.number DESC LIMIT ?""",
-                (user, context_id, position, user, limit + 1),
+                (user, context_id, position, user, shared_only, limit + 1),
             ).fetchall()
             items = [self._revision(db, r) for r in rows[:limit]]
         return {
@@ -620,8 +720,11 @@ class Store:
         for rev in revisions:
             try:
                 value = self.export(rev["owner_id"], rev["context_id"], rev["id"])
+                fingerprint = snapshot_digest(rev["provider"], rev["source_sha256"], rev["parser_version"],
+                                              json.loads(rev["header_json"]).get("extensions", {}))
                 if (
-                    value["source_sha256"] != rev["source_sha256"]
+                    fingerprint != rev["snapshot_sha256"]
+                    or value["source_sha256"] != rev["source_sha256"]
                     or value["source_bytes"] != rev["source_bytes"]
                     or value["provider"] != rev["provider"]
                     or value["parser_version"] != rev["parser_version"]

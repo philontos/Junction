@@ -93,6 +93,7 @@ def create_app(data_dir: str | Path) -> FastAPI:
         request: Request,
         provider: Provider,
         context_id: str | None = None,
+        source_key: str | None = Query(None, max_length=256),
         title: str | None = Query(None, max_length=200),
         source_name: str = Query("upload.jsonl", max_length=1024),
         extensions: str | None = Query(None, max_length=8192),
@@ -132,6 +133,7 @@ def create_app(data_dir: str | Path) -> FastAPI:
                 provider,
                 source_name=source_name,
                 context_id=context_id,
+                source_key=source_key,
                 title=title,
                 extensions=metadata,
                 shared=shared,
@@ -157,9 +159,10 @@ def create_app(data_dir: str | Path) -> FastAPI:
         context_id: str,
         limit: int = Query(20, ge=1, le=100),
         cursor: str | None = None,
+        shared_only: bool = False,
         user: str = Depends(current_user),
     ):
-        return app.state.store.list_revisions(user, context_id, limit=limit, cursor=cursor)
+        return app.state.store.list_revisions(user, context_id, limit=limit, cursor=cursor, shared_only=shared_only)
 
     revision_path = prefix + "/{revision_id}"
 

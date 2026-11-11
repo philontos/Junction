@@ -319,9 +319,9 @@ def test_workspace_extensions_are_immutable_and_survive_export(service, claude_b
     # Omitted extensions preserve the already recorded metadata.
     omitted, _ = upload(client, auth["alice"], claude_bytes)
     assert omitted["normalized"]["extensions"] == result["normalized"]["extensions"]
-    conflict = client.post("/v1/imports", params={"provider": "claude", "extensions": "{}"},
-                           content=claude_bytes, headers={**auth["alice"], "Content-Type": "application/x-ndjson"})
-    assert conflict.status_code == 409
+    newer, _ = upload(client, auth["alice"], claude_bytes, context_id=result["context_id"], extensions="{}")
+    assert newer["number"] == 2 and newer["source_sha256"] == result["source_sha256"]
+    assert newer["snapshot_sha256"] != result["snapshot_sha256"]
     client.put(path + "/grants/bob", json={}, headers=auth["alice"])
     assert store.export("bob", result["context_id"], result["id"])["extensions"] == result["normalized"]["extensions"]
     assert store.check()["ok"]

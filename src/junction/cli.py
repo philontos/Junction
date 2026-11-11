@@ -148,6 +148,7 @@ def parser():
     imp.add_argument("file")
     imp.add_argument("--provider", choices=["claude", "codex"], required=True)
     imp.add_argument("--context", help="Append to an owned context; otherwise create or deduplicate")
+    imp.add_argument("--source-key", help="Stable source identity, scoped to this user; repeated shares become versions")
     imp.add_argument("--title")
     imp.add_argument("--extensions-file", help="JSON object with immutable namespaced metadata (max 8192 characters)")
     imp.add_argument("--shared", action="store_true", help="Share this snapshot with all Junction users")
@@ -261,6 +262,7 @@ def run(args):
                     "provider": args.provider,
                     "source_name": path.name,
                     "context_id": args.context,
+                    "source_key": args.source_key,
                     "title": args.title,
                     "extensions": Path(args.extensions_file).read_text() if args.extensions_file else None,
                     "shared": args.shared,

@@ -35,8 +35,10 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 - 只接受上传的 JSONL 字节，单份上限 32 MiB；前 100,000 条非空记录参与解析，超限部分留原件并产生诊断。JSON 嵌套超过 64 层视为无法解析的记录。
 - 空文件拒绝。非空文件含坏行、截断尾行或未知记录时，原件仍归档，返回诊断和状态；不会伪造补全。
-- 幂等身份是 `owner + provider + 原件 SHA-256 + parser_version`；指定 Context 时再限制在该 Context 内。文件改名不改变身份，空白字节变化会形成新快照。
-- 不指定 `context_id` 时，完全相同的上传返回原 Revision，否则创建 Context。**不会仅靠原生 session ID 自动追加**。指定自己的 Context 才追加完整快照；不合并两份日志、不增量 tail。已有 Context 的标题不会被追加导入改写。
+- 版本指纹 `snapshot_sha256` 覆盖 `provider + 原件 SHA-256 + parser_version + extensions`，对象键排序后计算。相同 Context 内的相同指纹复用已有 Revision；仅工作信息改变也形成新版本。文件改名不改变身份，空白字节变化会形成新快照。标题是 Context 属性，不纳入快照指纹。
+- 可传 `source_key`（1–256 个字母、数字或 `._:/-`）表示稳定来源。它在当前所有者内唯一，新来源键创建并绑定自己的 Context，以后自动追加或复用版本；绑定与落库在同一事务中完成。Switchyard 使用 `switchyard:<node_id>:task:<task_id>`，不同任务或所有者不会因原件相同而合并。要绑定已有 Context，须同时传 `context_id`；它必须与已有绑定一致，否则返回 `409 source_conflict`。
+- 不指定 `source_key` 或 `context_id` 时，完全相同的上传仍可返回原 Revision，否则创建 Context。**不会仅靠原生 session ID、标题或仓库自动归并**。各版本保存完整快照；不合并两份日志、不增量 tail。已有 Context 的标题不会被追加导入改写。相同旧快照再次分享不会生成新版本或提升它的序号。
+- 原件以 SHA-256 独立寻址。多个版本甚至不同 Context 可以引用同一个不可变文件，读取权限仍按版本判断；实际 JSONL 字节改变才保存新原件。不会把持续增长的活动日志当成多个旧版本共用的可变文件。
 - 原件先通过临时文件、文件 fsync、原子 rename 和目录 fsync 落盘，再在单个 SQLite 事务中提交 Revision、Turn、Message、Diagnostic。原件落盘后数据库提交失败，最多留下未引用归档；本版不自动清理它。
 - SQLite 使用 WAL、外键、FULL 同步及写事务串行化；读取授权和对应数据在同一读事务内完成。数据目录应在本机文件系统上，服务单进程运行。
 - 原件读取重新校验 SHA-256。`junction check` 检查 SQLite、外键、原件校验值与标准化结构/计数。`junction backup` 用 SQLite backup API 取得一致快照，复制其引用的不可变原件，再验证，最后写 `BACKUP_COMPLETE.json`。只有带完成标记的备份可用于恢复。
@@ -59,10 +61,10 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 | 接口 | 作用 |
 |---|---|
-| `POST /v1/imports?provider=claude` | JSONL 原始请求体；可选 context_id、source_name、title、extensions、shared |
+| `POST /v1/imports?provider=claude` | JSONL 原始请求体；可选 context_id、source_key、source_name、title、extensions、shared |
 | `GET /v1/contexts` | 可见记录；shared_only=true 仅列共享记录 |
 | `GET /v1/contexts/{c}` | 当前用户可见的最新版本及权限 |
-| `GET /v1/contexts/{c}/revisions` | 可见版本列表 |
+| `GET /v1/contexts/{c}/revisions` | 可见版本列表；`shared_only=true` 仅含已共享版本，包含分页游标隔离 |
 | `GET /v1/contexts/{c}/revisions/{r}` | 固定版本信息 |
 | `GET …/{r}/turns` | 轮次 |
 | `GET …/{r}/messages` | conversation / trace；可按 turn_id、tail_turns 过滤 |
@@ -88,15 +90,17 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 数据库版本 2 增加 publications 表；版本 3 增加 revision_overviews 表，保存自动整理的阅读说明。事务迁移不自动公开旧记录，不改写原件或原有标准化消息。旧版本重新导入时可补齐阅读说明，保留原版本 ID 与校验值。升级前制作完整备份。
 
+数据库版本 4 增加版本指纹和来源绑定，调整版本唯一约束以允许不同工作信息引用同一原件。迁移保留全部 Context / Revision ID、序号、权限与原文，校验外键后提交。旧 Switchyard 记录有唯一、明确的节点和任务来源时自动绑定；多个历史 Context 声称同一来源时不猜测合并。新的标准导入能力只依赖通用 `source_key`，旧扩展识别仅用于迁移兼容。
+
 后续按实际联调需要增加分组授权、派生关系及 Git 扩展，复用现有 Context / Revision / Grant 边界。云端部署再配置 TLS、反向代理上传限制、凭证分发和备份；当前实现不承诺公网生产运行所需的完整治理能力。
 
 ## Optional import extensions
 
 `POST /v1/imports` accepts an optional `extensions` query parameter containing a strict JSON object (maximum 8192 characters when serialized with ASCII escaping). Keys should be namespaced and versioned, for example `switchyard.workspace/1`. Junction stores these values in the immutable normalized header without interpreting them as executable instructions or authority. Clients must validate extensions they use. Never place credentials in extensions.
 
-The original JSONL bytes and checksum are unchanged. Re-importing the same raw snapshot with identical extensions is idempotent. Supplying different extensions for that already archived snapshot returns `409 extensions_conflict`; metadata is never silently overwritten. Omitting the parameter preserves the existing metadata on a duplicate import.
+The original JSONL bytes and checksum are unchanged. Re-importing the same raw snapshot with identical extensions is idempotent. Within a Context, different extensions produce a new immutable revision referencing the same raw archive; older metadata is never overwritten. Omitting the parameter preserves existing metadata when a matching raw snapshot is found. For automatic version grouping, supply the same source_key, or explicitly supply context_id.
 
-The CLI accepts `junction import ... --extensions-file metadata.json`. This allows a workspace adapter to carry repository identity, commit, dirty state and lineage while the Context schema stays independent of any worktree manager.
+The CLI accepts `junction import ... --source-key tool:task:123 --extensions-file metadata.json`. This allows a workspace adapter to carry repository identity, commit, dirty state and lineage while the Context schema stays independent of any worktree manager.
 
 ## 自动阅读说明
 

@@ -51,9 +51,6 @@ def test_publication_is_owner_controlled_idempotent_and_does_not_remove_grants(s
 def test_reimport_can_publish_but_never_unpublishes_or_duplicates(service, claude_bytes):
     client, store, auth = service
     rev, path = upload(client, auth["alice"], claude_bytes, extensions=json.dumps({"test/1": {}}))
-    conflict = client.post("/v1/imports?provider=claude&shared=true&extensions={}",
-                          content=claude_bytes, headers={**auth["alice"], "Content-Type": "application/x-ndjson"})
-    assert conflict.status_code == 409
     assert client.get(path, headers=auth["bob"]).status_code == 404
     same, _ = upload(client, auth["alice"], claude_bytes, shared=True)
     assert same["id"] == rev["id"] and same["reused"]
