@@ -84,3 +84,11 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 当前写入器仅写 `junction.context/1`；解析器升级允许同一原件生成新 Revision，不修改旧解释。破坏性核心结构变更使用新 schema_version；数据库迁移显式增加 user_version，未知版本拒绝启动。HTTP 兼容演进在 `/v1` 内增加能力，破坏性变更另开版本。
 
 后续按实际联调需要增加分组授权、派生关系及 Git 扩展，复用现有 Context / Revision / Grant 边界。云端部署再配置 TLS、反向代理上传限制、凭证分发和备份；当前实现不承诺公网生产运行所需的完整治理能力。
+
+## Optional import extensions
+
+`POST /v1/imports` accepts an optional `extensions` query parameter containing a strict JSON object (maximum 8192 characters when serialized with ASCII escaping). Keys should be namespaced and versioned, for example `switchyard.workspace/1`. Junction stores these values in the immutable normalized header without interpreting them as executable instructions or authority. Clients must validate extensions they use. Never place credentials in extensions.
+
+The original JSONL bytes and checksum are unchanged. Re-importing the same raw snapshot with identical extensions is idempotent. Supplying different extensions for that already archived snapshot returns `409 extensions_conflict`; metadata is never silently overwritten. Omitting the parameter preserves the existing metadata on a duplicate import.
+
+The CLI accepts `junction import ... --extensions-file metadata.json`. This allows a workspace adapter to carry repository identity, commit, dirty state and lineage while the Context schema stays independent of any worktree manager.

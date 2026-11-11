@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from . import __version__
 from .errors import Problem
 from .models import Model, Provider, context_schema
+from .parsers.common import strict_json
 from .store import MAX_CHUNK_CHARS, MAX_IMPORT_BYTES, Store
 
 log = logging.getLogger("junction")
@@ -94,9 +95,16 @@ def create_app(data_dir: str | Path) -> FastAPI:
         context_id: str | None = None,
         title: str | None = Query(None, max_length=200),
         source_name: str = Query("upload.jsonl", max_length=1024),
+        extensions: str | None = Query(None, max_length=8192),
         user: str = Depends(current_user),
     ):
         """Upload a byte-for-byte JSONL snapshot. No server-side path or URL imports."""
+        try:
+            metadata = strict_json(extensions) if extensions is not None else None
+        except (ValueError, RecursionError):
+            raise Problem(400, "invalid_extensions", "Extensions must be a JSON object.") from None
+        if extensions is not None and not isinstance(metadata, dict):
+            raise Problem(400, "invalid_extensions", "Extensions must be a JSON object.")
         content_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
         if content_type not in {"application/x-ndjson", "application/jsonl", "application/octet-stream"}:
             raise Problem(415, "unsupported_media_type", "Send the JSONL bytes as application/x-ndjson.")
@@ -124,6 +132,7 @@ def create_app(data_dir: str | Path) -> FastAPI:
                 source_name=source_name,
                 context_id=context_id,
                 title=title,
+                extensions=metadata,
             )
         return JSONResponse(result, status_code=200 if result["reused"] else 201)
 

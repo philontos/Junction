@@ -213,6 +213,7 @@ class Store:
         source_name: str = "upload.jsonl",
         context_id: str | None = None,
         title: str | None = None,
+        extensions: dict | None = None,
     ) -> dict:
         if provider not in {"claude", "codex"}:
             raise Problem(400, "invalid_provider", "Provider must be claude or codex.")
@@ -225,11 +226,19 @@ class Store:
             raise Problem(400, "invalid_source_name", "Provide a filename of 1–255 printable characters.")
         if title is not None and (not title.strip() or len(title) > 200):
             raise Problem(400, "invalid_title", "Title must contain 1–200 characters.")
+        if extensions is not None:
+            try:
+                encoded = json.dumps(extensions, ensure_ascii=True, allow_nan=False)
+                if not isinstance(extensions, dict) or len(encoded) > 8192:
+                    raise ValueError
+            except (TypeError, ValueError, RecursionError):
+                raise Problem(400, "invalid_extensions", "Extensions must be a JSON object of at most 8192 characters.") from None
         # Check ownership before spending work on normalization. Repeat inside the write transaction.
         if context_id:
             with self.connection() as db:
                 self._owner(db, user, context_id)
         parsed = normalize(raw, provider)
+        parsed.extensions = extensions or {}
         header = parsed.model_dump(exclude={"session": {"messages", "turns"}, "diagnostics": True})
         with self.connection(write=True) as db:
             if context_id:
@@ -244,6 +253,8 @@ class Store:
             # A successful idempotent import also guarantees that its original is readable.
             self.archive(raw, parsed.source_sha256)
             if old:
+                if extensions is not None and json.loads(old["header_json"]).get("extensions", {}) != extensions:
+                    raise Problem(409, "extensions_conflict", "This snapshot already exists with different immutable extensions.")
                 return {**self._revision(old), "reused": True}
             created_at = now()
             if context_id is None:

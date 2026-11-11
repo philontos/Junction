@@ -74,3 +74,13 @@ junction revoke "$CONTEXT" --revision "$REVISION" --user reviewer
 前台运行 `junction serve` 时按 Ctrl-C 停止。重新使用同一 `--data-dir` 启动即恢复数据；凭证文件保留在服务数据目录之外也可使用。若由 tmux 启动，服务重启仍使用同样的命令和数据目录。
 
 本地联调通过后再迁移到服务器：先用 `backup` 制作并验证快照，复制完整快照，在目标机器安装锁定依赖，以相同数据格式启动。公网入口需要 HTTPS 和反向代理；用户 token、上传限制和备份策略在部署时配置。v0.1 尚无用户分组、配额、审计平台或公网运维配置。
+
+## Bind to a private network
+
+On a machine that owns `10.10.0.3`, bind only loopback and the private network address:
+
+```sh
+junction serve --data-dir .local/data --hosts 127.0.0.1,10.10.0.3 --port 8767
+```
+
+All requested sockets are bound before serving. If any bind fails, startup fails and closes those already acquired. Data endpoints still require bearer authentication. `--host` remains supported for a single address.

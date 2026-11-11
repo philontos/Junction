@@ -132,6 +132,7 @@ def parser():
     serve.add_argument("--data-dir", default=".local/data")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", default=8767, type=int)
+    serve.add_argument("--hosts", help="Comma-separated bind addresses; overrides --host")
     admin = sub.add_parser("user-add", help="Create a user or rotate their token locally")
     admin.add_argument("user")
     admin.add_argument("--data-dir", default=".local/data")
@@ -148,6 +149,7 @@ def parser():
     imp.add_argument("--provider", choices=["claude", "codex"], required=True)
     imp.add_argument("--context", help="Append to an owned context; otherwise create or deduplicate")
     imp.add_argument("--title")
+    imp.add_argument("--extensions-file", help="JSON object with immutable namespaced metadata (max 8192 characters)")
     listing = sub.add_parser("list")
     listing.add_argument("--cursor")
     listing.add_argument("--limit", type=int, default=20)
@@ -185,15 +187,31 @@ def run(args):
 
         from .api import create_app
 
-        uvicorn.run(
+        config = uvicorn.Config(
             create_app(args.data_dir),
-            host=args.host,
-            port=args.port,
-            workers=1,
-            access_log=False,
-            timeout_keep_alive=5,
-            limit_concurrency=32,
+            host=args.host, port=args.port, workers=1, access_log=False,
+            timeout_keep_alive=5, limit_concurrency=32,
         )
+        if not args.hosts:
+            uvicorn.Server(config).run()
+        else:
+            import socket
+
+            sockets = []
+            try:
+                for host in dict.fromkeys(h.strip() for h in args.hosts.split(",") if h.strip()):
+                    family, kind, proto, _, address = socket.getaddrinfo(host, args.port, type=socket.SOCK_STREAM)[0]
+                    sock = socket.socket(family, kind, proto)
+                    sockets.append(sock)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.bind(address)
+                    sock.listen(128)
+                if not sockets:
+                    raise ValueError("--hosts requires at least one bind address")
+                uvicorn.Server(config).run(sockets=sockets)
+            finally:
+                for sock in sockets:
+                    sock.close()
         return
     if args.command == "user-add":
         token = new_token()
@@ -242,6 +260,7 @@ def run(args):
                     "source_name": path.name,
                     "context_id": args.context,
                     "title": args.title,
+                    "extensions": Path(args.extensions_file).read_text() if args.extensions_file else None,
                 },
             )
         )

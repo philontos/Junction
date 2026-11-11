@@ -306,3 +306,31 @@ def test_reimport_restores_a_missing_original_but_rejects_a_corrupt_one(service,
     path.write_bytes(b"damaged")
     with pytest.raises(Problem, match="checksum"):
         store.import_bytes("alice", claude_bytes, "claude")
+
+
+def test_workspace_extensions_are_immutable_and_survive_export(service, claude_bytes):
+    client, store, auth = service
+    metadata = {"switchyard.workspace/1": {"commit": "a" * 40, "dirty": True}}
+    result, path = upload(client, auth["alice"], claude_bytes, extensions=json.dumps(metadata))
+    assert result["normalized"]["extensions"] == metadata
+    assert client.get(path + "/raw", headers=auth["alice"]).content == claude_bytes
+    same, _ = upload(client, auth["alice"], claude_bytes, extensions=json.dumps(metadata))
+    assert same["id"] == result["id"] and same["reused"]
+    # Omitted extensions preserve the already recorded metadata.
+    omitted, _ = upload(client, auth["alice"], claude_bytes)
+    assert omitted["normalized"]["extensions"] == metadata
+    conflict = client.post("/v1/imports", params={"provider": "claude", "extensions": "{}"},
+                           content=claude_bytes, headers={**auth["alice"], "Content-Type": "application/x-ndjson"})
+    assert conflict.status_code == 409
+    client.put(path + "/grants/bob", json={}, headers=auth["alice"])
+    assert store.export("bob", result["context_id"], result["id"])["extensions"] == metadata
+    assert store.check()["ok"]
+
+
+@pytest.mark.parametrize("metadata", ['null', '[]', '{"x": NaN}', '{"x":1,"x":2}', '{broken'])
+def test_invalid_extensions_are_rejected(service, claude_bytes, metadata):
+    client, _, auth = service
+    response = client.post("/v1/imports", params={"provider": "claude", "extensions": metadata},
+                           content=claude_bytes, headers={**auth["alice"], "Content-Type": "application/x-ndjson"})
+    assert response.status_code == 400
+    assert client.get("/v1/contexts", headers=auth["alice"]).json()["items"] == []
