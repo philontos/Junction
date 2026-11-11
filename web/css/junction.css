@@ -42,3 +42,10 @@
 .jx-section { margin: 18px 0; }
 .jx-section > summary { color: var(--muted); padding: 6px 0; }
 #jx-extra { padding-top: 10px; }
+
+.jx-description { white-space: pre-wrap; }
+.jx-loading { width: 26px; height: 26px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: jx-spin 1s linear infinite; margin: 20px 0; }
+.jx-progress-log { padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.jx-progress-log li { margin: 8px 0; }
+@keyframes jx-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .jx-loading { animation: none; } }

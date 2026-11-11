@@ -37,18 +37,18 @@ HOSTS=127.0.0.1,10.10.0.3 PORT=4502 npm start
 
 ## 完整链路
 
-1. 在任务终端点击 **分享**，确认任务后分享；也可以从顶栏 **共享 Context → 分享任务** 进入。
+1. 在当前任务终端点击 **共享**，直接开始处理，无需填表或再次确认。系统自动定位 JSONL、固定快照并记录工作信息，上传后生成标题、描述和缺失标记。处理时显示 loading 与实时日志。
 2. 分享成功即进入同一 Junction 的共享列表。其他接入该服务的用户可以读取，无须逐个授权。分享只开放这份固定版本的标准化历史，原始 JSONL 保留作底稿。
 3. 打开共享记录，选择 Claude Code 或 Codex，点击 **继续工作**。已登记的来源仓库会自动匹配；未匹配时选择本机仓库。
 4. Switchyard 下载完整固定版本，新建独立 worktree，放入前情和查询工具，启动 Agent 读取记录、核对当前代码后继续工作。标题、模型和补充要求放在“更多设置”中。
 
-历史记录、导出和进入原任务放在折叠详情中。已有 JSONL 可从“更多 → 导入 JSONL”导入并分享。用户分组与定向分享留待后续细化。
+标题沿用任务名称，缺失时从首条可见用户记录生成；描述摘录首条及最近用户记录、最近助手回复，保留消息 ID 和原始行号，不推断任务完成度。历史记录、导出和进入原任务放在折叠详情中。已有 JSONL 可从“更多 → 导入 JSONL”导入并分享。用户分组与定向分享留待后续细化。
 
 原生 Agent 首次进入新目录可能要求信任目录、登录或确认工具权限。终端保留这些交互，不自动继承历史权限。
 
 ## 工作区边界
 
-发布任务时附带 `extensions["switchyard.workspace/1"]`：来源节点与任务 ID、无凭据仓库地址、分支、完整 commit、dirty 状态，以及可选 `derived_from`。Junction 将其作为不可执行的附加数据保存，核心协议不依赖 Switchyard。
+发布任务时附带 `extensions["switchyard.workspace/1"]`：来源节点与任务 ID、无凭据仓库地址、分支、完整 commit、dirty 状态，以及可选 `derived_from`。Junction 将其作为不可执行的附加数据保存，核心协议不依赖 Switchyard。工作目录已移除或 Git 信息不可读，但日志仍可定位时，使用 `switchyard.capture/1` 保存可用字段及缺失说明，不阻断会话归档。
 
 接续只使用接收方已经登记的仓库，不依据历史 URL 自动克隆或执行命令。有工作区元数据时必须匹配仓库，并从固定 commit 创建 worktree；缺少该提交时尝试从目标仓库已有 origin 获取，失败则明确提示先同步提交。JSONL 单独导入没有工作区信息时，由接收方指定仓库与分支。
 
@@ -71,9 +71,11 @@ HOSTS=127.0.0.1,10.10.0.3 PORT=4502 npm start
 | GET | 上述版本路径 + `/export` | 下载完整标准化 JSON |
 | GET / PUT / DELETE | 上述版本路径 + `/grants` 或 `/grants/:user` | 查看、授予、撤销版本权限 |
 | GET | `/tasks/:id/preview` | 预览本机任务的归档范围和代码状态 |
-| POST | `/publish` | 按任务 ID 归档并分享 JSONL，可指定已有 `context_id` 追加版本 |
+| POST | `/publish` | 按任务 ID 自动整理并分享；`?stream=1` 返回 NDJSON 处理日志及完成回执 |
 | POST | `/import?provider=claude&name=...&title=...` | 上传并分享 JSONL，最多 32 MiB |
 | POST | `/continue` | 固定版本、仓库、Agent 创建接续任务 |
+
+共享流的事件为 `progress`、`complete`、`error`。只有 `complete` 表示 Junction 已完成归档与分享；HTTP 200 或连接结束均不能代替完成回执。中断可重试，重复内容复用已有版本。普通 JSON 响应保留兼容。
 
 `/continue` 请求示例：
 

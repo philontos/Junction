@@ -32,27 +32,38 @@ async function taskSource(id: unknown) {
   const task = getTask.get(Number(id)) as Task | undefined;
   if (!task || task.kind === "local") throw new JunctionError(404, "找不到本机仓库任务。");
   if (!["claude", "codex"].includes(task.agent)) throw new JunctionError(409, "当前仅支持 Claude Code 和 Codex JSONL。");
-  if (!task.worktree_path || !(await localRunner.exists(task.worktree_path))) throw new JunctionError(409, "工作区已移除；请使用导入 JSONL 来归档历史。");
   const repo = getRepo.get(task.repo_id) as Repo;
   const file = await locateNativeJsonl(localRunner, task);
   if (!file) throw new JunctionError(409, "尚未找到该任务的 JSONL；请先启动 Agent 并进行一次对话。");
   let stat;
   try { stat = await fs.stat(file); } catch { throw new JunctionError(409, "会话 JSONL 尚不存在。"); }
   if (!stat.isFile() || stat.size > 32 * 1024 * 1024 || !stat.size) throw new JunctionError(413, "JSONL 必须是 1 字节至 32 MiB 的文件。");
-  const [commit, branch, status] = await Promise.all([
+  const checks = await Promise.allSettled([
     git(task.worktree_path, ["rev-parse", "HEAD"]),
     git(task.worktree_path, ["rev-parse", "--abbrev-ref", "HEAD"]),
     git(task.worktree_path, ["status", "--porcelain"]),
   ]);
+  const values = checks.map(r => r.status === "fulfilled" ? r.value.trim() : null);
+  const [commit, branch, dirty] = values;
+  const notes: { code: string; detail: string }[] = [];
+  for (const [i, field] of ["commit", "branch", "dirty"].entries()) {
+    if (values[i] === null) notes.push({ code: `${field}_unavailable`, detail: `无法读取当前 ${field}，已标记缺失。` });
+  }
+  if (dirty) notes.push({ code: "uncommitted_code_not_included", detail: "已记录未提交状态；代码改动不随 Context 上传。" });
   let derivedFrom;
-  try { const m = JSON.parse(await fs.readFile(path.join(task.worktree_path, ".tdsp/context/manifest.json"), "utf8"));
+  try { const recorded = await fs.readFile(path.join(task.worktree_path, ".tdsp/context/manifest.json"), "utf8")
+      .catch(() => fs.readFile(path.join(DATA_DIR, "tasks", String(task.id), "context.json"), "utf8"));
+    const m = JSON.parse(recorded);
     derivedFrom = { context_id: m.context_id, revision_id: m.revision_id }; } catch { /* ordinary task */ }
-  return { task, file, bytes: stat.size, workspace: {
+  const capture = {
     source: { node_id: NS, task_id: task.id }, repo_url: publicRepoUrl(repo.git_url), repo_name: repo.name,
-    branch: branch.trim(), commit: commit.trim(), dirty: !!status.trim(),
+    branch, commit, dirty: dirty === null ? null : !!dirty,
     ...(derivedFrom ? { derived_from: derivedFrom } : {}),
-  } };
+  };
+  const workspace = commit && branch && dirty !== null ? capture : null;
+  return { task, file, bytes: stat.size, workspace, capture, notes };
 }
+
 async function sourceBytes(file: string, size: number) {
   const handle = await fs.open(file, "r");
   try {
@@ -114,25 +125,54 @@ export function registerJunctionRoutes(app: Express) {
   }));
   app.get("/api/junction/tasks/:id/preview", wrap(async (req, res) => {
     const src = await taskSource(req.params.id);
-    res.json({ task_id: src.task.id, title: src.task.title, provider: src.task.agent, source_name: path.basename(src.file), bytes: src.bytes, workspace: src.workspace });
+    res.json({ task_id: src.task.id, title: src.task.title, provider: src.task.agent, source_name: path.basename(src.file), bytes: src.bytes, workspace: src.workspace, capture: src.capture, notes: src.notes });
   }));
   app.post("/api/junction/publish", wrap(async (req, res) => {
-    const client = clientFor(req);
-    const src = await taskSource(req.body?.task_id);
-    const q = new URLSearchParams({ provider: src.task.agent, source_name: path.basename(src.file), shared: "true",
-      title: src.task.title.slice(0, 200), extensions: JSON.stringify({ [WORKSPACE_EXTENSION]: src.workspace }) });
-    if (req.body.context_id) {
-      const id = str(req.body.context_id, 36);
-      revisionPath(id, id); q.set("context_id", id);
+    const streaming = req.query.stream === "1";
+    const emit = (event: object) => {
+      if (streaming && !res.destroyed) res.write(JSON.stringify({ ...event, time: new Date().toISOString() }) + "\n");
+    };
+    const progress = (stage: string, message: string) => emit({ type: "progress", stage, message });
+    if (streaming) {
+      res.status(200).set({ "Content-Type": "application/x-ndjson; charset=utf-8", "X-Accel-Buffering": "no" });
+      res.flushHeaders();
     }
-    const result = await client.request(`/v1/imports?${q}`, { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: new Uint8Array(await sourceBytes(src.file, src.bytes)).buffer });
-    res.status(result.reused ? 200 : 201).json(result);
+    try {
+      progress("collect", "正在读取当前任务与会话记录…");
+      const client = clientFor(req);
+      const src = await taskSource(req.body?.task_id);
+      const raw = await sourceBytes(src.file, src.bytes);
+      progress("snapshot", `已固定会话快照，${raw.length} 字节；已记录可用的仓库和分支信息。`);
+      for (const item of src.notes) progress("annotation", item.detail);
+      const extensions = src.workspace ? { [WORKSPACE_EXTENSION]: src.workspace } : { "switchyard.capture/1": { ...src.capture, notes: src.notes } };
+      const q = new URLSearchParams({ provider: src.task.agent, source_name: path.basename(src.file), shared: "true", extensions: JSON.stringify(extensions) });
+      const title = src.task.title.trim().slice(0, 200);
+      if (title) q.set("title", title);
+      if (req.body.context_id) {
+        const id = str(req.body.context_id, 36); revisionPath(id, id); q.set("context_id", id);
+      }
+      progress("upload", "正在上传原始会话，由 Junction 整理描述、标记缺失并存储…");
+      const result = await client.request(`/v1/imports?${q}`, { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: new Uint8Array(raw).buffer });
+      const overview = result.normalized.extensions?.["junction.overview/1"];
+      progress("stored", `${result.reused ? "已复用已有记录" : "已保存原始会话和标准化记录"}；${result.message_count} 条记录，${result.turn_count} 轮对话。`);
+      if (overview) progress("overview", `标题与描述已自动整理；缺失字段 ${overview.missing.length} 项，解析说明 ${result.diagnostic_count} 项。`);
+      if (result.status === "failed") progress("annotation", "原始资料已保存，但未识别出可接续的对话；已标记解析失败。");
+      emit({ type: "complete", result });
+      if (!streaming) res.status(result.reused ? 200 : 201).json(result);
+    } catch (error) {
+      if (!streaming) throw error;
+      const code = error instanceof JunctionError ? error.status : 500;
+      if (!(error instanceof JunctionError)) console.error("Junction sharing failed:", error instanceof Error ? error.name : "Error");
+      const message = error instanceof JunctionError ? error.message : "分享未完成，请重试或查看本机服务日志。";
+      emit({ type: "error", status: code, message });
+    } finally { if (streaming) res.end(); }
   }));
   // Explicit file selection supports pre-existing logs without arbitrary server filesystem access.
   app.post("/api/junction/import", express.raw({ type: "application/x-ndjson", limit: "32mb" }), wrap(async (req, res) => {
     if (!Buffer.isBuffer(req.body)) throw new JunctionError(415, "请选择 JSONL 文件。");
     if (!["claude", "codex"].includes(String(req.query.provider))) throw new JunctionError(400, "请选择 Claude 或 Codex。");
-    const q = new URLSearchParams({ provider: String(req.query.provider), shared: "true", source_name: str(req.query.name, 255) || "upload.jsonl", title: str(req.query.title, 200) || "导入的 Context" });
+    const q = new URLSearchParams({ provider: String(req.query.provider), shared: "true", source_name: str(req.query.name, 255) || "upload.jsonl" });
+    if (str(req.query.title, 200).trim()) q.set("title", str(req.query.title, 200).trim());
     const result = await clientFor(req).request(`/v1/imports?${q}`, { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: new Uint8Array(req.body).buffer });
     res.status(result.reused ? 200 : 201).json(result);
   }));
@@ -145,7 +185,9 @@ export function registerJunctionRoutes(app: Express) {
     const snapshot = await client.snapshot(b.context_id, b.revision_id);
     if (snapshot.meta.revision.status === "failed") throw new JunctionError(409, "该 Context 解析失败，不能接续。");
     const w = workspaceOf(snapshot.normalized);
-    if (w && repoIdentity(w.repo_url) !== repoIdentity(repo.git_url)) throw new JunctionError(409, "目标仓库与 Context 的来源仓库不一致。");
+    const capturedRepo = snapshot.normalized.extensions?.["switchyard.capture/1"]?.repo_url;
+    const sourceRepo = w?.repo_url || (typeof capturedRepo === "string" ? capturedRepo : null);
+    if (sourceRepo && repoIdentity(sourceRepo) !== repoIdentity(repo.git_url)) throw new JunctionError(409, "目标仓库与 Context 的来源仓库不一致。");
     if ((w?.dirty || !w || snapshot.meta.revision.status !== "ready") && b.acknowledge !== true) {
       throw new JunctionError(409, "请确认未提交代码、缺失环境或解析诊断，再接续任务。");
     }

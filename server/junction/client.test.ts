@@ -59,11 +59,14 @@ test("grant revocation during export aborts instead of producing a partial conte
 test("handoff preserves provenance and full history, with a working paginated offline reader", () => {
   const { dir } = fixture();
   const workspace = { repo_url: "git@github.com:org/repo.git", branch: "feature", commit: "a".repeat(40), dirty: true };
-  const normalized = { schema_version: "junction.context/1", extensions: { [WORKSPACE_EXTENSION]: workspace }, diagnostics: [],
+  const overview = { title: "Recorded task", description: "An excerpt with evidence", missing: [{ field: "cwd" }] };
+  const normalized = { schema_version: "junction.context/1", extensions: { [WORKSPACE_EXTENSION]: workspace, "junction.overview/1": overview }, diagnostics: [],
     session: { turns: [{ id: "t1" }], messages: [{ id: "m1", role: "user", content: [{ kind: "text", text: "x".repeat(4000) }] }] } };
   try {
     writeHandoff(dir, { meta: { id: cid, revision: { id: rid, source_sha256: "sha" } }, normalized }, "http://localhost:8767");
     const reader = path.join(dir, ".tdsp/context/read.mjs");
+    const info = JSON.parse(execFileSync(process.execPath, [reader, "info"], { encoding: "utf8" }));
+    assert.deepEqual(info.extensions["junction.overview/1"], overview);
     const page = JSON.parse(execFileSync(process.execPath, [reader, "messages", "0", "1"], { encoding: "utf8" }));
     assert.equal(page.next_offset, null); assert.equal(page.items[0].content, undefined);
     const full = JSON.parse(execFileSync(process.execPath, [reader, "message", "m1"], { encoding: "utf8" }));
