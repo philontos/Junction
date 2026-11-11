@@ -5,6 +5,7 @@ import express from "express";
 import path from "node:path";
 import { ROOT, WEB_DIR } from "../core/paths.js";
 import { registerRoutes } from "./routes.js";
+import { registerJunctionRoutes } from "../junction/routes.js";
 
 export function createApp() {
   const app = express();
@@ -15,5 +16,6 @@ export function createApp() {
   app.use("/vendor/highlight", express.static(path.join(ROOT, "node_modules", "@highlightjs", "cdn-assets")));
   app.use(express.static(WEB_DIR));
   registerRoutes(app);
+  registerJunctionRoutes(app);
   return app;
 }

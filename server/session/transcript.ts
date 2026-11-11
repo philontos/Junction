@@ -304,6 +304,17 @@ const escapeClaudeCwd = (cwd: string) => cwd.replace(/[/.]/g, "-");
 // worktree. Normal transcript reads reuse the cache; semantic live-turn checks can
 // refresh it to notice a new rollout after /new or a process restart.
 const codexPathCache = new Map<number, string>();
+/** Locate native JSONL on its owning node; no UI transcript truncation. */
+export async function locateNativeJsonl(runner: Runner, task: Task): Promise<string | null> {
+  if (runner.kind !== "local" || !task.worktree_path) return null;
+  const home = os.homedir();
+  if (task.agent === "codex") return locateCodex(runner, home, task.worktree_path, task.id, true);
+  if (task.agent !== "claude") return null;
+  const hook = await runner.readText(path.join(task.worktree_path, ".claude", "session-id")).catch(() => null);
+  const sid = hook?.trim() || task.claude_session;
+  if (!sid || !/^[a-zA-Z0-9_-]{1,128}$/.test(sid)) return null;
+  return path.join(home, ".claude", "projects", escapeClaudeCwd(task.worktree_path), `${sid}.jsonl`);
+}
 async function locateCodex(
   runner: Runner,
   home: string,

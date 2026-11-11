@@ -5,6 +5,7 @@
 //   2. wire language-switch re-rendering;
 //   3. run the boot sequence (init terminal + selects, first data load);
 //   4. register global listeners (modal backdrop / Esc) and pollers.
+import { initJunction, closeJunction, junctionIsOpen } from "./features/junction.js";
 import { $ } from "./core/dom.js";
 import { toast } from "./core/feedback.js";
 import { closeDialog } from "./core/dialog.js";
@@ -152,6 +153,7 @@ $("t-provider").dataset.ph = t("provider.default");   // model-backend picker
 csMount("t-provider", onProviderChange);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
 Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).then(() => { dismissBoot(); syncReadWaiting(); });
+initJunction({ allTasks, loadTasks, connect, loadFleet, connectNode });
 initOnboarding();             // independent: slow VPN/DNS checks never block the local dashboard
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
 setInterval(async () => { await loadTasks(); syncReadWaiting(); }, 4000);
@@ -168,6 +170,7 @@ $("onboarding-modal").addEventListener("click", e => { if (e.target.id === "onbo
 $("discovery-modal").addEventListener("click", e => { if (e.target.id === "discovery-modal") closeDiscoveryModal(); });
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
+  if (junctionIsOpen()) { closeJunction(); return; }
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if (isCodeViewOpen()) { closeCodeView(); return; }
   if (runtimeReferenceIsOpen()) { closeRuntimeReference(); return; }

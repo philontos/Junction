@@ -18,10 +18,11 @@
 <script>try{var _t=localStorage.getItem("theme");document.documentElement.dataset.theme=_t==="light"?"light":"dark";if(_t==="light"){var _m=document.querySelector('meta[name="theme-color"]');if(_m)_m.content="#f5f0e8";}}catch(e){document.documentElement.dataset.theme="dark";}</script>
 <link rel="stylesheet" href="/vendor/xterm.css" />
 <link rel="stylesheet" href="/css/app.css" />
+<link rel="stylesheet" href="/css/junction.css" />
 </head>
 <body>
 <div id="boot"><div class="spinner"></div></div>
-<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true" /><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true" /></a><span style="flex:1"></span><button id="onboarding-btn" class="sec onboarding-nav" onclick="openOnboardingModal()"><span id="onboarding-nav-dot" class="onboarding-nav-dot pending" aria-hidden="true"></span><span class="onboarding-nav-label" data-i18n="onboarding.nav"></span></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
+<header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true" /><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true" /></a><span style="flex:1"></span><button id="junction-nav" class="sec">Contexts</button><button id="onboarding-btn" class="sec onboarding-nav" onclick="openOnboardingModal()"><span id="onboarding-nav-dot" class="onboarding-nav-dot pending" aria-hidden="true"></span><span class="onboarding-nav-label" data-i18n="onboarding.nav"></span></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
@@ -40,6 +41,7 @@
       <button id="term-attach" class="attach-btn" type="button" data-i18n="term.attach" data-i18n-title="term.attachCopy"></button>
       <code id="term-claude" class="term-claude" style="display:none"></code>
       <span style="flex:1"></span>
+      <button id="term-share-context" class="sec" type="button" title="发布 Context">↑ Context</button>
       <button id="term-ref" class="term-ref" type="button" data-i18n-title="runtimeRef.open" aria-label="Add reference" hidden>
         <span class="term-ref-plus" aria-hidden="true">＋</span><span class="term-ref-label" data-i18n="runtimeRef.short"></span><span id="term-ref-count" class="term-ref-count" hidden></span>
       </button>
