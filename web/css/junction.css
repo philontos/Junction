@@ -5,7 +5,7 @@
 .jx-head h2 { margin: 6px 0 0; font-size: 24px; }
 .jx-eyebrow { color: var(--accent-text); font: 600 10px/1.5 ui-monospace, monospace; letter-spacing: .12em; }
 .jx-spacer { flex: 1; }
-.jx-status { padding: 0 24px 15px; border-bottom: 1px solid var(--border); color: var(--muted); font: 11px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
+.jx-status { padding: 0 24px 15px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .jx-body { display: flex; flex: 1; min-height: 0; }
 .jx-sidebar { width: 300px; flex-shrink: 0; padding: 16px; overflow-y: auto; border-right: 1px solid var(--border); }
 .jx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
@@ -14,20 +14,19 @@
 #jx-detail h3 { margin: 24px 0 12px; font-size: 15px; }
 .jx-note { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 10px 0 18px; overflow-wrap: anywhere; }
 .jx-card { display: block; width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 9px; padding: 14px; margin-bottom: 9px; background: var(--surface-2); color: var(--text); }
-.jx-card:hover, .jx-card:focus { border-color: var(--accent); background: var(--surface-3); }
+.jx-card:hover, .jx-card:focus, .jx-card.active { border-color: var(--accent); background: var(--surface-3); }
 .jx-card strong { font-size: 13px; font-weight: 600; display: block; line-height: 1.5; overflow-wrap: anywhere; }
 .jx-meta { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .jx-ids { display: block; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; line-height: 1.8; }
 .jx-warning { color: var(--accent-text-hi); background: #d9775714; padding: 12px 16px; border: 1px solid #d9775744; border-radius: 8px; font-size: 12px; line-height: 1.7; margin: 10px 0; overflow-wrap: anywhere; }
 #jx-error { flex-shrink: 0; margin: 12px 24px; }
-.jx-message, .jx-grants { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 10px 0; }
+.jx-message { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 10px 0; }
 .jx-shell summary { cursor: pointer; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .jx-shell pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.7 ui-monospace, monospace; max-height: 380px; overflow-y: auto; }
 .jx-shell select, .jx-shell input:not([type=checkbox]), .jx-shell textarea { box-sizing: border-box; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; font: inherit; min-width: 0; max-width: 100%; }
 .jx-shell input:not([type=checkbox]), .jx-shell textarea, .jx-field select { width: 100%; }
 .jx-field { display: grid; gap: 7px; font-size: 12px; color: var(--muted); margin: 14px 0; }
-.jx-check { display: flex; gap: 9px; align-items: flex-start; font-size: 12px; line-height: 1.6; margin: 14px 0; }
-.jx-form { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding-bottom: 22px; }
+.jx-form { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 #term-share-context { white-space: nowrap; font-size: 11px; padding: 5px 8px; }
 @media(max-width: 700px) {
   #junction-modal { padding: 0; }
@@ -39,7 +38,7 @@
   #term-share-context { max-width: 62px; overflow: hidden; } #junction-nav { font-size: 11px; padding: 6px 8px; }
 }
 .jx-head > div:first-child { flex-shrink: 0; }
-#jx-account { width: 210px; flex: 0 0 auto; }
 .jx-head h2, #jx-detail h2 { text-transform: none; letter-spacing: normal; }
-.jx-check input[type=checkbox] { width: 16px; height: 16px; min-height: 0; flex: 0 0 16px; margin: 3px 0 0; padding: 0; }
-@media(max-width: 700px) { #jx-account { width: 128px; } }
+.jx-section { margin: 18px 0; }
+.jx-section > summary { color: var(--muted); padding: 6px 0; }
+#jx-extra { padding-top: 10px; }

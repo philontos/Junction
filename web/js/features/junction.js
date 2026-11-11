@@ -3,8 +3,8 @@ import { state } from "../core/state.js";
 import { toast } from "../core/feedback.js";
 
 const L = (zh, en) => I18N.lang === "zh" ? zh : en;
-let hooks, account = localStorage.getItem("junction.account") || "", status, selected, listCursor, messageCursor, generation = 0;
-const call = (url, options = {}) => api("/api/junction" + url, { ...options, headers: { ...options.headers, "X-Junction-Account": account } });
+let hooks, status, listCursor, messageCursor, generation = 0;
+const call = (url, options = {}) => api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const base = meta => `/contexts/${meta.id}/revisions/${meta.revision.id}`;
 function el(tag, text, cls) { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
@@ -25,15 +25,12 @@ export async function openJunction(taskId = null) {
   try {
     await refreshStatus();
     await loadList();
-    if (taskId) await previewTask(taskId);
+    if (taskId) await showPublish(taskId);
   } catch (e) { showError(e); $("jx-connection").textContent = L("Junction 不可用", "Junction unavailable"); }
 }
 async function refreshStatus() {
-  try { status = await call("/status"); }
-  catch(e) { if (account && e.status === 400) { account = ""; status = await call("/status"); } else throw e; }
-  account = status.account;
-  const picker = $("jx-account"); picker.replaceChildren(...status.accounts.map(a => new Option(a.label, a.id))); picker.value = account;
-  $("jx-connection").textContent = `${status.url} · ${status.user_id} · ${L("本机联调账号", "Local test account")}`;
+  status = await call("/status");
+  $("jx-connection").textContent = L("分享前情，在自己的设备上继续工作。", "Share context and continue on your own device.");
 }
 async function loadList(append = false) {
   const epoch = generation;
@@ -44,11 +41,11 @@ async function loadList(append = false) {
     const r = item.revision;
     const card = button("", () => openDetail(item.id, r.id), "jx-card");
     card.dataset.contextId = item.id;
-    card.append(el("strong", item.title), el("span", `${r.provider} · v${r.number} · ${item.owner_id}`, "jx-meta"),
-      el("span", `${r.message_count} ${L("条记录", "messages")} · ${new Date(r.created_at).toLocaleString()} · ${r.status}`, "jx-meta"));
+    card.append(el("strong", item.title), el("span", `${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}`, "jx-meta"),
+      el("span", new Date(r.created_at).toLocaleString(), "jx-meta"));
     list.append(card);
   }
-  if (!list.children.length) list.append(note(L("暂无可见的 Context。发布任务或导入 JSONL 后，会显示在这里。", "No visible contexts. Publish a task or import JSONL to get started.")));
+  if (!list.children.length) list.append(note(L("还没有共享的 Context。分享一个任务，从这里开始接续。", "No shared contexts yet. Share a task to get started.")));
   listCursor = page.next_cursor;
   $("jx-more").hidden = !listCursor;
 }
@@ -56,22 +53,23 @@ async function openDetail(cid, rid) {
   const epoch = ++generation;
   const meta = await call(`/contexts/${cid}/revisions/${rid}`);
   if (epoch !== generation) return;
-  selected = meta;
   const r = meta.revision, w = r.normalized.extensions?.["switchyard.workspace/1"];
   const d = detailRoot();
-  d.append(el("div", `CONTEXT / v${r.number}`, "jx-eyebrow"), el("h2", meta.title),
-    note(`${r.provider} · ${r.status} · ${r.turn_count} ${L("轮", "turns")} / ${r.message_count} ${L("条记录", "messages")}`));
-  const ids = el("code", `${cid}\n${rid}`, "jx-ids"); d.append(ids);
-  if (r.status !== "ready") d.append(el("p", L("这份记录有解析诊断，部分内容或关联无法确认。请检查下方诊断；原始 JSONL 仍保存在 Junction。", "This record has parsing diagnostics: some content or relationships could not be confirmed. Review the diagnostics below. Junction retains the original JSONL."), "jx-warning"));
-  if (w) {
-    d.append(note(`${w.repo_name} · ${w.branch} · ${w.commit.slice(0, 12)}`));
-    if (w.dirty) d.append(el("p", L("来源有未提交修改：Context 保存了对话，未保存这些代码改动。可回原任务继续，或先同步代码。", "The source has uncommitted changes. These changes are not included in the context; return to the source or synchronize code first."), "jx-warning"));
-  } else d.append(note(L("此记录没有工作区信息，接续时需自行选择仓库和分支。", "No workspace metadata. Choose the repository and branch when continuing.")));
-  d.append(note(L("历史路径、附件、工具和权限不会自动迁移。当前版本是记录快照，不是原 Agent 运行状态。", "Paths, attachments, tools and permissions are not migrated. This is recorded history, not a running agent state.")));
+  for (const card of $("jx-list").querySelectorAll(".jx-card")) card.classList.toggle("active", card.dataset.contextId === cid);
+  d.append(el("h2", meta.title), note(`${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`));
+  d.append(el("div", undefined, "jx-continuation"));
+  showContinue(meta);
+  const history = el("details", undefined, "jx-section");
+  history.append(el("summary", `${L("查看历史记录", "View history")} · ${r.message_count}`));
+  const msgs = el("div"); msgs.id = "jx-messages"; history.append(msgs);
+  const more = button(L("继续读取", "Load more"), () => loadMessages(meta, true)); more.id = "jx-message-more"; history.append(more);
+  d.append(history);
+  const details = el("details", undefined, "jx-section");
+  details.append(el("summary", L("详细信息与导出", "Details and export")), el("code", `${cid} / ${rid}`, "jx-ids"));
+  if (w) details.append(note(`${L("代码版本", "Commit")}: ${w.commit}`));
+  details.append(note(L("保留原始记录和标准化历史。工具、附件和权限由当前设备提供。", "Original and normalized records are retained. Tools, attachments and permissions come from the current device.")));
   const actions = el("div", undefined, "jx-actions");
-  const continueButton = button(L("在本机接续", "Continue locally"), () => showContinue(meta), "");
-  continueButton.disabled = r.status === "failed";
-  actions.append(continueButton, button(L("下载标准 Context", "Export context"), async () => {
+  actions.append(button(L("下载 Context", "Export context"), async () => {
     const data = await call(base(meta) + "/export");
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
     const a = el("a"); a.href = url; a.download = `context-${rid}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -84,42 +82,21 @@ async function openDetail(cid, rid) {
         await hooks.loadTasks();
         if (!hooks.allTasks().some(t => t.id === w.source.task_id)) throw new Error(L("原任务已移除，仍可通过快照接续。", "The source task was removed; continue from this snapshot instead."));
         closeJunction(); hooks.connect(w.source.task_id);
-      } else { await hooks.loadFleet(); if (!state.fleet[host.id]?.tasks?.some(t => t.id === w.source.task_id)) throw new Error(L("原设备离线或原任务不可用，仍可拉取这份 Context。", "Source device or task unavailable. This context remains readable.")); closeJunction(); hooks.connectNode(host.id, w.source.task_id); }
+      } else {
+        await hooks.loadFleet();
+        if (!state.fleet[host.id]?.tasks?.some(t => t.id === w.source.task_id)) throw new Error(L("原设备离线或原任务不可用，仍可拉取这份 Context。", "Source device or task unavailable. This context remains readable."));
+        closeJunction(); hooks.connectNode(host.id, w.source.task_id);
+      }
     }));
   }
-  d.append(actions, el("div", undefined, "jx-continuation"));
-  if (meta.access.owner) await renderGrants(meta, d, epoch);
-  if (epoch !== generation) return;
-  const diagnostics = await call(base(meta) + "/diagnostics?limit=100");
-  if (epoch !== generation) return;
-  if (diagnostics.items.length) {
-    const details = el("details"); details.append(el("summary", `${L("解析诊断", "Diagnostics")} (${r.diagnostic_count})`), el("pre", JSON.stringify(diagnostics.items, null, 2)));
-    d.append(details);
+  details.append(actions); d.append(details);
+  if (r.diagnostic_count) {
+    const diagnostics = await call(base(meta) + "/diagnostics?limit=100");
+    if (epoch !== generation) return;
+    const info = el("details"); info.append(el("summary", `${L("解析说明", "Parsing notes")} (${r.diagnostic_count})`), el("pre", JSON.stringify(diagnostics.items, null, 2)));
+    details.append(info);
   }
-  d.append(el("h3", L("历史记录", "History")));
-  const msgs = el("div"); msgs.id = "jx-messages"; d.append(msgs);
-  const more = button(L("继续读取", "Load more"), () => loadMessages(meta, true)); more.id = "jx-message-more"; d.append(more);
   await loadMessages(meta);
-}
-async function renderGrants(meta, parent, epoch) {
-  const data = await call(base(meta) + "/grants");
-  if (epoch !== generation) return;
-  const section = el("details", undefined, "jx-grants"); section.open = true;
-  section.append(el("summary", L("共享权限 · 仅此版本", "Sharing · this revision only")));
-  const rows = el("div");
-  for (const g of data.items || data.grants || data || []) {
-    const row = el("div", undefined, "jx-actions");
-    row.append(el("span", `${g.user_id}${g.include_raw ? " + JSONL" : ""}`), button(L("撤销", "Revoke"), async () => { await send(base(meta) + `/grants/${encodeURIComponent(g.user_id)}`, {}, "DELETE"); await openDetail(meta.id, meta.revision.id); })); rows.append(row);
-  }
-  section.append(rows);
-  const user = textInput("", L("接收方用户 ID，例如 reviewer", "Recipient user ID, e.g. reviewer")); user.setAttribute("aria-label", L("接收方用户 ID", "Recipient user ID"));
-  const raw = el("input"); raw.type = "checkbox";
-  const rawLabel = el("label", undefined, "jx-check"); rawLabel.append(raw, el("span", L("同时允许读取原始 JSONL", "Also allow raw JSONL access")));
-  const share = button(L("授权共享", "Share"), async () => {
-    if (!user.value.trim()) throw new Error(L("请填写接收方用户 ID。", "Enter a recipient user ID."));
-    await send(base(meta) + `/grants/${encodeURIComponent(user.value.trim())}`, { include_raw: raw.checked }, "PUT");
-    await openDetail(meta.id, meta.revision.id); toast(L("此版本已共享", "Revision shared"), "success");
-  }); section.append(user, rawLabel, share); parent.append(section);
 }
 async function loadMessages(meta, more = false) {
   const epoch = generation;
@@ -146,66 +123,77 @@ async function loadMessages(meta, more = false) {
   messageCursor = page.next_cursor; $("jx-message-more").hidden = !messageCursor;
 }
 function showContinue(meta) {
-  clearError();
   const target = $("jx-detail").querySelector(".jx-continuation"); target.replaceChildren();
+  if (meta.revision.status === "failed") { target.append(note(L("记录解析失败，暂时无法接续。请查看详细信息。", "This record could not be parsed. Review the details before continuing."))); return; }
   const repos = state.repos.filter(r => r.status === "ready" && state.hostsById[r.host_id]?.kind === "local");
   if (!repos.length) { target.append(note(L("请先在 Switchyard 的本机入口添加一个仓库。", "Add a repository on this machine first."))); return; }
   const w = meta.revision.normalized.extensions?.["switchyard.workspace/1"];
-  const repo = select(repos.map(r => [String(r.id), r.name]), "Repository");
-  const match = repos.find(r => r.name === w?.repo_name); if (match) repo.value = String(match.id);
+  const matches = repos.filter(r => r.name === w?.repo_name || r.git_url === w?.repo_url);
+  const match = matches.length === 1 ? matches[0] : null;
+  const repo = select([["", L("选择本机仓库", "Choose a local repository")], ...repos.map(r => [String(r.id), r.name])], "Repository");
+  if (match) repo.value = String(match.id);
   const agent = select([["claude", "Claude Code"], ["codex", "Codex"]], "Agent"); agent.value = meta.revision.provider;
   const title = textInput(`${L("接续", "Continue")}: ${meta.title}`); title.maxLength = 200;
-  const branch = textInput(repos.find(r => r.id === Number(repo.value))?.default_branch || "main");
+  const branch = textInput(match?.default_branch || "main");
+  repo.onchange = () => { branch.value = repos.find(r => r.id === Number(repo.value))?.default_branch || "main"; };
   const prompt = el("textarea"); prompt.rows = 3; prompt.maxLength = 8000; prompt.placeholder = L("补充本次要做的事（可选）", "Additional instructions (optional)");
   const model = textInput("", L("默认模型", "Default model")); model.maxLength = 100;
   const form = el("div", undefined, "jx-form");
-  form.append(el("h3", L("创建独立 worktree 与新会话", "Create an independent worktree and session")), field(L("本机仓库", "Local repository"), repo), field("Agent", agent), field(L("任务标题", "Task title"), title));
+  if (!match) form.append(field(L("本机仓库", "Local repository"), repo));
+  form.append(field(L("使用哪个 Agent 继续", "Continue with"), agent));
+  const options = el("details", undefined, "jx-section"); options.append(el("summary", L("更多设置", "More options")));
+  if (match) options.append(field(L("本机仓库", "Local repository"), repo));
+  options.append(field(L("任务标题", "Task title"), title), field(L("模型", "Model"), model), field(L("补充要求", "Instructions"), prompt));
   if (!w) form.append(field(L("起始分支", "Base branch"), branch));
-  else form.append(note(`${L("固定代码提交", "Pinned commit")}: ${w.commit}`));
-  form.append(field(L("模型（可选）", "Model (optional)"), model), field(L("本次要求", "Instructions"), prompt));
-  const acknowledge = el("input"); acknowledge.type = "checkbox";
-  const needsAck = w?.dirty || !w || meta.revision.status !== "ready";
-  if (needsAck) {
-    const label = el("label", undefined, "jx-check"); label.append(acknowledge, el("span", L("我已了解：未提交代码和外部环境不会自动恢复，将检查当前仓库后继续。", "I understand that uncommitted code and external environment are not restored automatically."))); form.append(label);
-  }
-  form.append(button(L("拉取 Context 并启动 Agent", "Pull context and start agent"), async () => {
-    if (needsAck && !acknowledge.checked) throw new Error(L("请先确认工作环境差异。", "Please acknowledge the environment differences."));
+  form.append(options);
+  if (w?.dirty) form.append(el("p", L("将从已提交代码继续。来源的未提交修改未包含在 Context 中。", "Continue from committed code. Uncommitted source changes are not included."), "jx-warning"));
+  if (meta.revision.status !== "ready") form.append(note(L("部分历史内容或关联无法确认，Agent 会先检查记录与当前代码。", "Some history or relationships could not be confirmed. The agent will check the records and current code first.")));
+  form.append(button(L("继续工作", "Continue working"), async () => {
+    if (!repo.value) throw new Error(L("请选择本机仓库。", "Choose a local repository."));
     const result = await send("/continue", { context_id: meta.id, revision_id: meta.revision.id, repo_id: Number(repo.value), agent: agent.value,
-      title: title.value, base_branch: branch.value, prompt: prompt.value, agent_model: model.value, acknowledge: acknowledge.checked });
+      title: title.value, base_branch: branch.value, prompt: prompt.value, agent_model: model.value, acknowledge: true });
     await hooks.loadTasks(); closeJunction(); hooks.connect(result.id); toast(L("已创建接续任务", "Continuation task created"), "success");
-  }, "")); target.append(form); target.scrollIntoView({ block: "nearest", behavior: "smooth" });
-}
-function showPublish() {
-  ++generation; selected = null;
-  const d = detailRoot();
-  d.append(el("h2", L("发布任务 Context", "Publish task context")), note(L("选择本机任务，预览后把当前 JSONL 快照存入 Junction。之后可授权给指定用户。", "Choose a local task to archive its JSONL snapshot, then share it with specific users.")));
-  const tasks = hooks.allTasks().filter(t => t.kind !== "local" && ["claude", "codex"].includes(t.agent));
-  if (!tasks.length) { d.append(note(L("本机尚无 Agent 任务。你也可以导入已有 JSONL。", "No agent tasks yet. You can import an existing JSONL instead."))); return; }
-  const picker = select(tasks.map(t => [String(t.id), `#${t.id} ${t.title} · ${t.agent}`]), "Task");
-  d.append(field(L("任务", "Task"), picker), button(L("预览发布内容", "Preview snapshot"), () => previewTask(Number(picker.value))));
-}
-async function previewTask(taskId) {
-  const epoch = ++generation;
-  const preview = await call(`/tasks/${taskId}/preview`);
-  if (epoch !== generation) return;
-  const d = detailRoot();
-  d.append(el("h2", preview.title), note(`${preview.provider} · ${(preview.bytes / 1024).toFixed(1)} KiB · ${preview.source_name}`),
-    note(`${preview.workspace.repo_name} · ${preview.workspace.branch} · ${preview.workspace.commit.slice(0, 12)}`),
-    note(L("将归档该会话的原始 JSONL 和标准化历史，可能包括提示词、工具输入与输出。发布后默认仅你可见，再单独授权接收方。", "Archives the original JSONL and normalized history, including recorded prompts and tool inputs/outputs. It stays private until you grant access.")));
-  if (preview.workspace.dirty) d.append(el("p", L("存在未提交代码改动。这些代码不会随 Context 上传。", "Uncommitted code changes will not be uploaded with this context."), "jx-warning"));
-  d.append(button(L("存入 Junction", "Save to Junction"), async () => {
-    const result = await send("/publish", { task_id: taskId });
-    await loadList(); await openDetail(result.context_id, result.id);
-    toast(L("已保存，可在下方授权共享", "Saved. You can now grant access below."), "success");
   }, ""));
+  form.append(note(L("会在本机新建任务，读取这份前情后继续。", "A new task will read this context and continue on this machine.")));
+  target.append(form);
+}
+async function showPublish(taskId = null) {
+  const epoch = ++generation;
+  const d = detailRoot();
+  const tasks = hooks.allTasks().filter(t => t.kind !== "local" && ["claude", "codex"].includes(t.agent));
+  d.append(el("h2", L("分享任务", "Share a task")), note(L("分享后，接入同一 Junction 的用户就能读取前情、继续工作。", "Anyone connected to this Junction can read the shared context and continue working.")));
+  if (!tasks.length) { d.append(note(L("本机尚无 Agent 任务。也可以从“更多”导入已有 JSONL。", "No agent tasks yet. Import an existing JSONL from More."))); return; }
+  const picker = select(tasks.map(t => [String(t.id), `#${t.id} ${t.title}`]), "Task");
+  if (taskId && tasks.some(t => t.id === taskId)) picker.value = String(taskId);
+  const info = el("div");
+  const share = button(L("分享", "Share"), async () => {
+    const result = await send("/publish", { task_id: Number(picker.value) });
+    await loadList(); await openDetail(result.context_id, result.id);
+    toast(L("已分享，可以从共享列表继续工作", "Shared. Ready to continue from the shared list."), "success");
+  }, "");
+  let previewSequence = 0;
+  const update = async () => {
+    const sequence = ++previewSequence;
+    share.disabled = true; clearError(); info.replaceChildren();
+    try {
+      const preview = await call(`/tasks/${picker.value}/preview`);
+      if (epoch !== generation || sequence !== previewSequence) return;
+      info.append(note(`${preview.provider === "claude" ? "Claude Code" : "Codex"} · ${preview.workspace.repo_name} / ${preview.workspace.branch}`));
+      if (preview.workspace.dirty) info.append(note(L("包含对话与工具记录，未提交的代码改动不会上传。", "Includes conversation and tool history. Uncommitted code is not uploaded.")));
+      share.disabled = false;
+    } catch (e) { if (epoch === generation && sequence === previewSequence) showError(e); }
+  };
+  picker.onchange = update;
+  d.append(field(L("任务", "Task"), picker), info, share);
+  await update();
 }
 function showImport() {
-  ++generation; selected = null; const d = detailRoot();
+  ++generation; const d = detailRoot();
   const file = el("input"); file.type = "file"; file.accept = ".jsonl,.ndjson";
   const provider = select([["claude", "Claude Code"], ["codex", "Codex"]], "Provider");
   const title = textInput("", L("Context 标题", "Context title")); title.maxLength = 200;
-  d.append(el("h2", L("导入已有 JSONL", "Import existing JSONL")), note(L("原文件只读。完整文件上传至 Junction，重复导入会复用已有快照。", "The original stays unchanged. Junction stores the complete file and deduplicates repeated imports.")), field("Agent", provider), field(L("标题", "Title"), title), field("JSONL", file));
-  d.append(button(L("上传并归档", "Upload and archive"), async () => {
+  d.append(el("h2", L("导入已有 JSONL", "Import existing JSONL")), note(L("上传后进入共享列表，接入同一 Junction 的用户可读取并接续。原文件保持不变。", "Uploads appear in the shared list for Junction users to read and continue. The original stays unchanged.")), field("Agent", provider), field(L("标题", "Title"), title), field("JSONL", file));
+  d.append(button(L("导入并分享", "Import and share"), async () => {
     const f = file.files[0]; if (!f) throw new Error(L("请选择 JSONL 文件。", "Choose a JSONL file."));
     if (f.size > 32 * 1024 * 1024) throw new Error("JSONL > 32 MiB");
     const q = new URLSearchParams({ provider: provider.value, name: f.name, title: title.value || f.name });
@@ -216,19 +204,24 @@ function showImport() {
 export function initJunction(callbacks) {
   hooks = callbacks;
   const modal = el("div"); modal.id = "junction-modal"; modal.hidden = true;
-  modal.innerHTML = `<section class="jx-shell" role="dialog" aria-modal="true" aria-labelledby="jx-heading"><div class="jx-head"><div><div class="jx-eyebrow">SWITCHYARD × JUNCTION</div><h2 id="jx-heading">Contexts</h2></div><span class="jx-spacer"></span><select id="jx-account" aria-label="Junction account"></select><button class="sec" id="jx-close" aria-label="Close">×</button></div><div id="jx-connection" class="jx-status"></div><p id="jx-error" class="jx-warning" role="alert" hidden></p><div class="jx-body"><aside class="jx-sidebar"><div id="jx-tools" class="jx-actions"></div><div id="jx-list"></div><button id="jx-more" class="sec" hidden></button></aside><main id="jx-detail"></main></div></section>`;
+  modal.innerHTML = `<section class="jx-shell" role="dialog" aria-modal="true" aria-labelledby="jx-heading">
+    <div class="jx-head"><div><div class="jx-eyebrow">JUNCTION</div><h2 id="jx-heading"></h2></div><span class="jx-spacer"></span><button class="sec" id="jx-close" aria-label="Close">×</button></div>
+    <div id="jx-connection" class="jx-status"></div><p id="jx-error" class="jx-warning" role="alert" hidden></p>
+    <div class="jx-body"><aside class="jx-sidebar"><div id="jx-tools" class="jx-actions"></div><div id="jx-list"></div><button id="jx-more" class="sec" hidden></button><details class="jx-section"><summary id="jx-extra-label"></summary><div id="jx-extra"></div></details></aside><main id="jx-detail"></main></div>
+  </section>`;
   document.body.append(modal);
+  $("jx-heading").textContent = L("共享 Context", "Shared contexts");
   $("jx-close").onclick = closeJunction;
   modal.onclick = e => { if (e.target === modal) closeJunction(); };
-  $("jx-account").onchange = async e => {
-    generation++; account = e.target.value; localStorage.setItem("junction.account", account); selected = null;
-    detailRoot().append(note(L("选择一份 Context 查看或接续。此账号选择器用于本机联调，不是独立用户登录。", "Select a context. This account selector is for local testing, not separate user login.")));
-    try { await refreshStatus(); await loadList(); } catch(e) { showError(e); }
-  };
-  $("jx-tools").append(button(L("发布任务", "Publish task"), showPublish), button(L("导入 JSONL", "Import JSONL"), showImport), button("↻", () => loadList()));
+  $("jx-tools").append(button(L("分享任务", "Share a task"), () => showPublish(), ""), button(L("刷新", "Refresh"), () => loadList()));
+  $("jx-extra-label").textContent = L("更多", "More");
+  $("jx-extra").append(button(L("导入 JSONL", "Import JSONL"), showImport));
   $("jx-more").textContent = L("加载更多", "Load more"); $("jx-more").onclick = () => loadList(true).catch(showError);
-  detailRoot().append(note(L("Context 在这里保存和共享，工作继续在各自设备上进行。选择记录查看详情，或发布一个任务。", "Store and share contexts here; continue work on your own devices. Select a context or publish a task.")));
+  detailRoot().append(note(L("选择一份共享 Context，继续之前的工作。", "Choose a shared context to continue working.")));
+  $("junction-nav").textContent = L("共享 Context", "Shared contexts");
   $("junction-nav").onclick = () => openJunction();
+  $("term-share-context").textContent = L("分享", "Share");
+  $("term-share-context").title = L("分享当前任务", "Share this task");
   $("term-share-context").onclick = () => {
     const id = state.selectedTaskId;
     if (Number.isInteger(id)) openJunction(id);

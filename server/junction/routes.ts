@@ -74,7 +74,7 @@ export function registerJunctionRoutes(app: Express) {
       accounts: client.config.accounts.map(({ id, label }) => ({ id, label })), user_id: me.user_id });
   }));
   app.get("/api/junction/contexts", wrap(async (req, res) => {
-    const q = new URLSearchParams({ limit: "20" });
+    const q = new URLSearchParams({ limit: "20", shared_only: "true" });
     if (typeof req.query.cursor === "string") q.set("cursor", req.query.cursor);
     res.json(await clientFor(req).request(`/v1/contexts?${q}`));
   }));
@@ -119,7 +119,7 @@ export function registerJunctionRoutes(app: Express) {
   app.post("/api/junction/publish", wrap(async (req, res) => {
     const client = clientFor(req);
     const src = await taskSource(req.body?.task_id);
-    const q = new URLSearchParams({ provider: src.task.agent, source_name: path.basename(src.file),
+    const q = new URLSearchParams({ provider: src.task.agent, source_name: path.basename(src.file), shared: "true",
       title: src.task.title.slice(0, 200), extensions: JSON.stringify({ [WORKSPACE_EXTENSION]: src.workspace }) });
     if (req.body.context_id) {
       const id = str(req.body.context_id, 36);
@@ -132,7 +132,7 @@ export function registerJunctionRoutes(app: Express) {
   app.post("/api/junction/import", express.raw({ type: "application/x-ndjson", limit: "32mb" }), wrap(async (req, res) => {
     if (!Buffer.isBuffer(req.body)) throw new JunctionError(415, "请选择 JSONL 文件。");
     if (!["claude", "codex"].includes(String(req.query.provider))) throw new JunctionError(400, "请选择 Claude 或 Codex。");
-    const q = new URLSearchParams({ provider: String(req.query.provider), source_name: str(req.query.name, 255) || "upload.jsonl", title: str(req.query.title, 200) || "导入的 Context" });
+    const q = new URLSearchParams({ provider: String(req.query.provider), shared: "true", source_name: str(req.query.name, 255) || "upload.jsonl", title: str(req.query.title, 200) || "导入的 Context" });
     const result = await clientFor(req).request(`/v1/imports?${q}`, { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: new Uint8Array(req.body).buffer });
     res.status(result.reused ? 200 : 201).json(result);
   }));
