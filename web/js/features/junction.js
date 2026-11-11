@@ -201,7 +201,7 @@ async function shareTask(taskId) {
     renderShare(job);
   } finally {
     activeShare = null; $("term-share-context").disabled = false;
-    shareDismissTimer = setTimeout(() => { $("jx-share-feedback").hidden = true; }, job.error ? 10000 : 5000);
+    shareDismissTimer = setTimeout(() => { $("jx-share-feedback").hidden = true; }, job.error ? 10000 : 1500);
   }
 }
 function showPublish() {
