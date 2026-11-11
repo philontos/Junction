@@ -4,7 +4,7 @@ import { toast } from "../core/feedback.js";
 import { readShareStream } from "./junction-stream.js";
 
 const L = (zh, en) => I18N.lang === "zh" ? zh : en;
-let hooks, status, listCursor, messageCursor, generation = 0, activeShare = null;
+let hooks, status, listCursor, messageCursor, generation = 0, activeShare = null, shareDismissTimer;
 const call = (url, options = {}) => api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const base = meta => `/contexts/${meta.id}/revisions/${meta.revision.id}`;
@@ -27,7 +27,6 @@ export async function openJunction(taskId = null) {
   try {
     await refreshStatus();
     await loadList();
-    if (activeShare) { activeShare.viewGeneration = generation; renderShare(activeShare); }
   } catch (e) { showError(e); $("jx-connection").textContent = L("Junction 不可用", "Junction unavailable"); }
 }
 async function refreshStatus() {
@@ -165,56 +164,44 @@ function showContinue(meta) {
   target.append(form);
 }
 function renderShare(job) {
-  const d = detailRoot();
-  const unreadable = job.done && job.result.status === "failed";
-  d.append(el("h2", unreadable ? L("已保存，待解析", "Archived; parsing incomplete") : job.done ? L("已共享", "Shared") : job.error ? L("共享未完成", "Sharing incomplete") : L("正在共享…", "Sharing…")));
-  const current = el("p", unreadable ? L("原始记录已保存，但暂未识别出可接续的对话，已保留缺失说明。", "The original was saved, but no readable conversation was found. Diagnostics were retained.") : job.done ? L("前情已保存到 Junction，其他人可以读取并继续工作。", "Context saved to Junction and ready for others to continue.") : job.error || job.events.at(-1)?.message || L("准备读取当前任务…", "Preparing the current task…"), "jx-note");
-  current.setAttribute("role", "status"); d.append(current);
-  if (!job.done && !job.error) { const spinner = el("div", undefined, "jx-loading"); spinner.setAttribute("aria-label", "Sharing"); d.append(spinner); }
-  const logs = el("details", undefined, "jx-section"); logs.open = !job.done;
-  logs.append(el("summary", L("处理日志", "Progress log")));
-  const entries = el("ol", undefined, "jx-progress-log"); entries.setAttribute("role", "log");
-  for (const event of job.events) entries.append(el("li", `${new Date(event.time).toLocaleTimeString()}  ${event.message}`));
-  logs.append(entries); d.append(logs);
-  if (job.done) {
-    const overview = job.result.normalized.extensions?.["junction.overview/1"];
-    if (overview) {
-      d.append(el("h3", overview.title));
-      const description = el("details", undefined, "jx-section");
-      description.append(el("summary", L("自动整理的描述", "Generated description")), el("p", overview.description, "jx-note jx-description"));
-      d.append(description);
-    }
-    d.append(button(L("查看共享 Context", "View shared context"), async () => { await refreshStatus(); await openDetail(job.result.context_id, job.result.id); }));
-  } else if (job.error) d.append(button(L("重试", "Retry"), () => shareTask(job.taskId)));
+  const feedback = $("jx-share-feedback");
+  feedback.hidden = false;
+  feedback.dataset.state = job.error ? "error" : job.done ? "success" : "pending";
+  $("jx-share-label").textContent = job.error ? L("共享失败", "Sharing failed") : job.done ? L("共享成功", "Shared successfully") : L("共享中…", "Sharing…");
+  $("jx-share-progress").value = job.done ? 3 : job.progress;
+  $("jx-share-error").textContent = job.error || "";
+  $("jx-share-error").hidden = !job.error;
 }
 async function shareTask(taskId) {
-  $("junction-modal").hidden = false;
-  if (activeShare) { activeShare.viewGeneration = ++generation; renderShare(activeShare); return; }
-  const epoch = ++generation;
-  const job = { taskId, viewGeneration: epoch, events: [], done: false, error: null, result: null };
+  closeJunction();
+  if (activeShare) return;
+  clearTimeout(shareDismissTimer);
+  const job = { progress: 0, done: false, error: null };
   activeShare = job;
   $("term-share-context").disabled = true;
-  $("jx-connection").textContent = L("自动整理并共享当前记录。", "Automatically organizing and sharing this context.");
   renderShare(job);
   try {
     const response = await fetch("/api/junction/publish?stream=1", {
       method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang },
       body: JSON.stringify({ task_id: taskId }), signal: AbortSignal.timeout(180000),
     });
-    job.result = await readShareStream(response, event => {
-      job.events.push(event);
-      if (generation === job.viewGeneration) renderShare(job);
+    const result = await readShareStream(response, event => {
+      // Overall milestones: snapshot captured, records stored, receipt confirmed.
+      // Do not simulate upload percentages or finish before the completion receipt.
+      const progress = { snapshot: 1, stored: 2 }[event.stage] || 0;
+      job.progress = Math.max(job.progress, progress);
+      renderShare(job);
     });
+    if (result.status === "failed") throw new Error(L("原始记录已保存，但未解析出可接续的对话。", "The original was saved, but no readable conversation was found."));
     job.done = true;
-    if (generation === job.viewGeneration) renderShare(job);
-    toast(L("Context 已共享", "Context shared"), "success");
-    loadList().catch(() => {});
+    renderShare(job);
+    if (junctionIsOpen()) loadList().catch(() => {});
   } catch (e) {
     job.error = e.message || L("共享结果未确认，可以重试。", "Sharing was not confirmed. You can retry.");
-    if (generation === job.viewGeneration) renderShare(job);
-    else toast(job.error, "error");
+    renderShare(job);
   } finally {
     activeShare = null; $("term-share-context").disabled = false;
+    shareDismissTimer = setTimeout(() => { $("jx-share-feedback").hidden = true; }, job.error ? 10000 : 5000);
   }
 }
 function showPublish() {
@@ -247,6 +234,10 @@ export function initJunction(callbacks) {
     <div class="jx-body"><aside class="jx-sidebar"><div id="jx-tools" class="jx-actions"></div><div id="jx-list"></div><button id="jx-more" class="sec" hidden></button><details class="jx-section"><summary id="jx-extra-label"></summary><div id="jx-extra"></div></details></aside><main id="jx-detail"></main></div>
   </section>`;
   document.body.append(modal);
+  const feedback = el("div"); feedback.id = "jx-share-feedback"; feedback.hidden = true;
+  feedback.setAttribute("role", "status"); feedback.setAttribute("aria-live", "polite"); feedback.setAttribute("aria-atomic", "true");
+  feedback.innerHTML = `<span id="jx-share-label"></span><progress id="jx-share-progress" max="3" value="0" aria-labelledby="jx-share-label"></progress><p id="jx-share-error" hidden></p>`;
+  document.body.append(feedback);
   $("jx-heading").textContent = L("共享 Context", "Shared contexts");
   $("jx-close").onclick = closeJunction;
   modal.onclick = e => { if (e.target === modal) closeJunction(); };
