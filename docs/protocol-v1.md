@@ -29,7 +29,7 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 附件保留路径/URL 和可用性。服务不读取日志中的本机路径、不下载 URL、不复制环境。内嵌图片本版保存在原件，标准化记录标记 `raw_only`；接收者需要原件授权才能取得这些字节。未识别的 provider 字段仍在原件中，不声称无损转换成统一结构。
 
-`extensions` 支持可选的、带版本命名空间的对象，例如 `switchyard.workspace/1`；默认空对象，不接受环境执行指令。扩展不得改变核心字段的含义。仓库、分支、worktree 和权限控制由外部集成处理。
+`extensions` 支持可选的、带版本命名空间的对象，例如 `switchyard.workspace/1`；默认空对象，不接受环境执行指令。`junction.overview/1` 由服务生成，导入方不能自行提供该命名空间。扩展不得改变核心字段的含义。仓库、分支、worktree 和权限控制由外部集成处理。
 
 ## 导入与持久性
 
@@ -86,7 +86,7 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 当前写入器仅写 `junction.context/1`；解析器升级允许同一原件生成新 Revision，不修改旧解释。破坏性核心结构变更使用新 schema_version；数据库迁移显式增加 user_version，未知版本拒绝启动。HTTP 兼容演进在 `/v1` 内增加能力，破坏性变更另开版本。
 
-数据库版本 2 在版本 1 上增加 publications 表；事务迁移不自动公开任何旧记录，原始文件和现有授权保持不变。升级前制作完整备份。
+数据库版本 2 增加 publications 表；版本 3 增加 revision_overviews 表，保存自动整理的阅读说明。事务迁移不自动公开旧记录，不改写原件或原有标准化消息。旧版本重新导入时可补齐阅读说明，保留原版本 ID 与校验值。升级前制作完整备份。
 
 后续按实际联调需要增加分组授权、派生关系及 Git 扩展，复用现有 Context / Revision / Grant 边界。云端部署再配置 TLS、反向代理上传限制、凭证分发和备份；当前实现不承诺公网生产运行所需的完整治理能力。
 
@@ -97,3 +97,15 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 The original JSONL bytes and checksum are unchanged. Re-importing the same raw snapshot with identical extensions is idempotent. Supplying different extensions for that already archived snapshot returns `409 extensions_conflict`; metadata is never silently overwritten. Omitting the parameter preserves the existing metadata on a duplicate import.
 
 The CLI accepts `junction import ... --extensions-file metadata.json`. This allows a workspace adapter to carry repository identity, commit, dirty state and lineage while the Context schema stays independent of any worktree manager.
+
+## 自动阅读说明
+
+每次新导入自动保存一份 `junction.overview/1`，读取与导出时放入标准化记录的 `extensions`，接续 Agent 可以通过同一份 Context 查询它。它是独立保存的派生说明，不代替完整历史。
+
+- `generator`：当前为 `extractive/1`，不额外调用模型。
+- `title` / `title_source`：优先使用调用方已有任务标题，否则摘录首条用户文本；无可用文本时给出 Agent 名称占位标题。
+- `description` / `evidence`：摘录首条用户、最近用户和最近助手文本，保留消息 ID、原始行号、截断标记。每条摘录最多 360 字符；完整内容仍保存在 messages 中。
+- `missing`：没有记录的会话 ID、工作目录、用户/助手文本和消息时间等，不推测补全。
+- `diagnostic_counts` / `resource_availability`：解析问题和附件可用性计数，详细数据仍在 diagnostics 与 messages 中。
+
+阅读说明不把“最近助手声称完成”当成已核验事实。当前代码状态、目标与下一步仍由接续 Agent 结合原文和实际环境判断。

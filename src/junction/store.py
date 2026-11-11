@@ -15,13 +15,14 @@ from pathlib import Path
 
 from .errors import Problem, not_found
 from .models import PARSER_VERSION, NormalizedContext
+from .overview import OVERVIEW_EXTENSION, build_overview
 from .parsers import normalize
 from .parsers.common import json_text
 
 MAX_IMPORT_BYTES = 32 * 1024 * 1024
 MAX_INLINE_CHARS = 4096
 MAX_CHUNK_CHARS = 16384
-DB_VERSION = 2
+DB_VERSION = 3
 
 DDL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -64,6 +65,9 @@ CREATE TABLE IF NOT EXISTS grants (
 );
 CREATE TABLE IF NOT EXISTS publications (
  revision_id TEXT PRIMARY KEY REFERENCES revisions(id), created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS revision_overviews (
+ revision_id TEXT PRIMARY KEY REFERENCES revisions(id), data_json TEXT NOT NULL
 );
 """
 
@@ -122,7 +126,7 @@ class Store:
         db = sqlite3.connect(self.db_path, timeout=15, isolation_level=None)
         try:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, DB_VERSION):
+            if version not in (0, 1, 2, DB_VERSION):
                 raise RuntimeError(f"Unsupported database version {version}; refusing to modify it.")
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA foreign_keys=ON")
@@ -235,6 +239,8 @@ class Store:
                 encoded = json.dumps(extensions, ensure_ascii=True, allow_nan=False)
                 if not isinstance(extensions, dict) or len(encoded) > 8192:
                     raise ValueError
+                if OVERVIEW_EXTENSION in extensions:
+                    raise ValueError
             except (TypeError, ValueError, RecursionError):
                 raise Problem(400, "invalid_extensions", "Extensions must be a JSON object of at most 8192 characters.") from None
         # Check ownership before spending work on normalization. Repeat inside the write transaction.
@@ -261,13 +267,15 @@ class Store:
                     raise Problem(409, "extensions_conflict", "This snapshot already exists with different immutable extensions.")
                 if shared:
                     db.execute("INSERT OR IGNORE INTO publications VALUES (?,?)", (old["id"], now()))
-                return {**self._revision(old), "reused": True}
+                old_title = db.execute("SELECT title FROM contexts WHERE id=?", (old["context_id"],)).fetchone()[0]
+                self._save_overview(db, old["id"], parsed, old_title)
+                return {**self._revision(db, old), "reused": True}
             created_at = now()
             if context_id is None:
                 context_id = str(uuid.uuid4())
                 db.execute(
                     "INSERT INTO contexts VALUES (?,?,?,?)",
-                    (context_id, user, title or source_name, created_at),
+                    (context_id, user, title or build_overview(parsed)["title"], created_at),
                 )
             number = db.execute(
                 "SELECT coalesce(max(number),0)+1 FROM revisions WHERE context_id=?", (context_id,)
@@ -319,7 +327,8 @@ class Store:
             row = db.execute("SELECT * FROM revisions WHERE id=?", (rid,)).fetchone()
             if shared:
                 db.execute("INSERT INTO publications VALUES (?,?)", (rid, created_at))
-            return {**self._revision(row), "reused": False}
+            self._save_overview(db, rid, parsed, title)
+            return {**self._revision(db, row), "reused": False}
 
     @staticmethod
     def _owner(db, user, context_id):
@@ -345,7 +354,19 @@ class Store:
         return row
 
     @staticmethod
-    def _revision(row):
+    def _save_overview(db, revision_id, parsed, title):
+        db.execute("INSERT OR IGNORE INTO revision_overviews VALUES (?,?)",
+                   (revision_id, json_text(build_overview(parsed, title))))
+
+    @staticmethod
+    def _header(db, row):
+        value = json.loads(row["header_json"])
+        overview = db.execute("SELECT data_json FROM revision_overviews WHERE revision_id=?", (row["id"],)).fetchone()
+        if overview:
+            value.setdefault("extensions", {})[OVERVIEW_EXTENSION] = json.loads(overview[0])
+        return value
+
+    def _revision(self, db, row):
         fields = (
             "id",
             "context_id",
@@ -361,7 +382,7 @@ class Store:
             "turn_count",
             "diagnostic_count",
         )
-        return {**{k: row[k] for k in fields}, "normalized": json.loads(row["header_json"])}
+        return {**{k: row[k] for k in fields}, "normalized": self._header(db, row)}
 
     def list_contexts(self, user, *, limit=20, cursor=None, shared_only=False):
         scope = f"contexts:{user}:shared" if shared_only else f"contexts:{user}"
@@ -383,7 +404,7 @@ class Store:
                     "title": c["title"],
                     "owner_id": c["owner_id"],
                     "created_at": c["created_at"],
-                    "revision": self._revision(self._visible(db, user, c["id"], shared_only=shared_only)),
+                    "revision": self._revision(db, self._visible(db, user, c["id"], shared_only=shared_only)),
                 }
                 for c in rows[:limit]
             ]
@@ -398,7 +419,7 @@ class Store:
             ctx = db.execute("SELECT * FROM contexts WHERE id=?", (context_id,)).fetchone()
             return {
                 **dict(ctx),
-                "revision": self._revision(revision),
+                "revision": self._revision(db, revision),
                 "access": {
                     "owner": ctx["owner_id"] == user,
                     "raw": ctx["owner_id"] == user or bool(revision["include_raw"]),
@@ -420,8 +441,9 @@ class Store:
                 ORDER BY r.number DESC LIMIT ?""",
                 (user, context_id, position, user, limit + 1),
             ).fetchall()
+            items = [self._revision(db, r) for r in rows[:limit]]
         return {
-            "items": [self._revision(r) for r in rows[:limit]],
+            "items": items,
             "next_cursor": encode_cursor(scope, rows[limit - 1]["number"]) if len(rows) > limit else None,
         }
 
@@ -559,7 +581,7 @@ class Store:
         # CLI assembles pages; this internal method is also used for integrity checks.
         with self.connection() as db:
             row = self._visible(db, user, context_id, revision_id)
-            value = json.loads(row["header_json"])
+            value = self._header(db, row)
             value["session"]["turns"] = [
                 json.loads(r[0])
                 for r in db.execute(

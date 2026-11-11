@@ -312,18 +312,18 @@ def test_workspace_extensions_are_immutable_and_survive_export(service, claude_b
     client, store, auth = service
     metadata = {"switchyard.workspace/1": {"commit": "a" * 40, "dirty": True}}
     result, path = upload(client, auth["alice"], claude_bytes, extensions=json.dumps(metadata))
-    assert result["normalized"]["extensions"] == metadata
+    assert result["normalized"]["extensions"]["switchyard.workspace/1"] == metadata["switchyard.workspace/1"]
     assert client.get(path + "/raw", headers=auth["alice"]).content == claude_bytes
     same, _ = upload(client, auth["alice"], claude_bytes, extensions=json.dumps(metadata))
     assert same["id"] == result["id"] and same["reused"]
     # Omitted extensions preserve the already recorded metadata.
     omitted, _ = upload(client, auth["alice"], claude_bytes)
-    assert omitted["normalized"]["extensions"] == metadata
+    assert omitted["normalized"]["extensions"] == result["normalized"]["extensions"]
     conflict = client.post("/v1/imports", params={"provider": "claude", "extensions": "{}"},
                            content=claude_bytes, headers={**auth["alice"], "Content-Type": "application/x-ndjson"})
     assert conflict.status_code == 409
     client.put(path + "/grants/bob", json={}, headers=auth["alice"])
-    assert store.export("bob", result["context_id"], result["id"])["extensions"] == metadata
+    assert store.export("bob", result["context_id"], result["id"])["extensions"] == result["normalized"]["extensions"]
     assert store.check()["ok"]
 
 
