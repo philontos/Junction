@@ -29,7 +29,7 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 附件保留路径/URL 和可用性。服务不读取日志中的本机路径、不下载 URL、不复制环境。内嵌图片本版保存在原件，标准化记录标记 `raw_only`；接收者需要原件授权才能取得这些字节。未识别的 provider 字段仍在原件中，不声称无损转换成统一结构。
 
-`extensions` 预留命名空间对象，例如未来的 `io.junction.git`；本版始终为空，不接受环境执行指令。扩展不得改变核心字段的含义。仓库、分支、worktree 和权限控制由外部集成处理。
+`extensions` 支持可选的、带版本命名空间的对象，例如 `switchyard.workspace/1`；默认空对象，不接受环境执行指令。扩展不得改变核心字段的含义。仓库、分支、worktree 和权限控制由外部集成处理。
 
 ## 导入与持久性
 
@@ -45,9 +45,11 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 用户由服务所在机器的管理员通过 CLI 创建；随机 bearer token 仅明文写入指定私有文件，数据库仅保存摘要。token 轮换使旧 token 无效。v0.1 的用户是隔离主体，尚无组织、分组、管理员 Web API 或公开匿名分享。
 
-分享的最小单位是 **固定 Revision**，授予指定用户只读访问。原件读取由 `include_raw` 单独控制，默认关闭。只有所有者可以追加版本、分享或撤销。接收者保存后续工作时创建自己的 Context，本版不自动记录派生关系。
+分享的最小单位是 **固定 Revision**。所有者可以将其加入共享列表，使同一服务的所有已认证用户可读取标准化历史，包括后续新增用户。只有所有者可以追加版本、分享或取消分享；原件读取仍由所有者身份或显式的 `include_raw` 授权决定。发布状态存于独立的 `publications` 表，不改写快照内容。
 
-列表、详情、分页、内容分块和原件下载都在服务端检查权限。接收方只能看到授权版本中的最新一个；不会显示未分享的新版本内容或计数。不存在与无权限统一 404，无效 token 返回 401。撤销阻止后续读取，已经下载的副本无法远程收回；已经开始的读取可能按其事务快照完成。
+`POST /v1/imports?shared=true` 在同一事务内完成导入与分享。默认 `shared=false` 保持私有导入兼容；重复导入可分享已有快照，不会复制记录，传 false 不会撤销已有分享。新版本不会自动继承分享。既有的按用户 `grants` 接口保留，取消公共分享不影响独立授权。
+
+列表、详情、分页、内容分块和原件下载都在服务端检查权限。`GET /v1/contexts?shared_only=true` 仅返回每个 Context 最新已分享版本，即使所有者存在更新的私有版本，也不会混入共享列表。默认列表仍包含私有及显式授权的记录。不存在与无权限统一 404，无效 token 返回 401。取消分享阻止后续公共读取，已经下载的副本无法远程收回；已经开始的读取可能按其事务快照完成。
 
 标准化记录也可能包含代码、命令输出及敏感文本。原件单独授权不等于标准化内容已脱敏；上传与分享前由用户选择合适资料。
 
@@ -57,8 +59,8 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 | 接口 | 作用 |
 |---|---|
-| `POST /v1/imports?provider=claude` | JSONL 原始请求体；可选 context_id、source_name、title |
-| `GET /v1/contexts` | 当前用户可见的 Context |
+| `POST /v1/imports?provider=claude` | JSONL 原始请求体；可选 context_id、source_name、title、extensions、shared |
+| `GET /v1/contexts` | 可见记录；shared_only=true 仅列共享记录 |
 | `GET /v1/contexts/{c}` | 当前用户可见的最新版本及权限 |
 | `GET /v1/contexts/{c}/revisions` | 可见版本列表 |
 | `GET /v1/contexts/{c}/revisions/{r}` | 固定版本信息 |
@@ -67,6 +69,7 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 | `GET …/{r}/messages/{m}/content` | 完整内容的 JSON 文本分块 |
 | `GET …/{r}/diagnostics` | 解析诊断 |
 | `GET …/{r}/raw` | 原始 JSONL，独立授权、校验 SHA-256 |
+| `PUT / DELETE …/{r}/publication` | 分享到公共列表或取消分享，所有者操作 |
 | `GET …/{r}/grants` | 所有者查看分享 |
 | `PUT / DELETE …/{r}/grants/{user}` | 分享或撤销 |
 | `GET /v1/me` | 当前身份 |
@@ -82,6 +85,8 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 ## 版本演进
 
 当前写入器仅写 `junction.context/1`；解析器升级允许同一原件生成新 Revision，不修改旧解释。破坏性核心结构变更使用新 schema_version；数据库迁移显式增加 user_version，未知版本拒绝启动。HTTP 兼容演进在 `/v1` 内增加能力，破坏性变更另开版本。
+
+数据库版本 2 在版本 1 上增加 publications 表；事务迁移不自动公开任何旧记录，原始文件和现有授权保持不变。升级前制作完整备份。
 
 后续按实际联调需要增加分组授权、派生关系及 Git 扩展，复用现有 Context / Revision / Grant 边界。云端部署再配置 TLS、反向代理上传限制、凭证分发和备份；当前实现不承诺公网生产运行所需的完整治理能力。
 

@@ -28,9 +28,9 @@ source .venv/bin/activate
 export JUNCTION_URL=http://127.0.0.1:8767
 export JUNCTION_TOKEN_FILE="$PWD/.local/local.token"
 junction whoami
-junction import tests/fixtures/claude-handoff.jsonl --provider claude
-junction import tests/fixtures/codex-handoff.jsonl --provider codex
-junction list
+junction import tests/fixtures/claude-handoff.jsonl --provider claude --shared
+junction import tests/fixtures/codex-handoff.jsonl --provider codex --shared
+junction list --shared
 ```
 
 服务健康检查：[http://127.0.0.1:8767/healthz](http://127.0.0.1:8767/healthz)。API 文档：[http://127.0.0.1:8767/docs](http://127.0.0.1:8767/docs)。完整调用示例见[本地联调](docs/local-handoff.md)。
@@ -44,15 +44,17 @@ junction get CONTEXT
 junction get CONTEXT --revision REVISION --view conversation --turns 3
 junction get CONTEXT --revision REVISION --view trace
 junction get CONTEXT --revision REVISION --view diagnostics
-junction share CONTEXT --revision REVISION --user reviewer
+junction publish CONTEXT --revision REVISION
 
 # 接收方身份
 export JUNCTION_TOKEN_FILE="$PWD/.local/reviewer.token"
-junction list
+junction list --shared
 junction export CONTEXT --revision REVISION --output .local/received-context.json
 ```
 
-分享默认只包含标准化历史；若还需原件，所有者显式加 `--include-raw`。撤销用 `junction revoke CONTEXT --revision REVISION --user reviewer`，已下载的副本不会被收回。所有者可通过 `import … --context CONTEXT` 追加新快照，新版本须另行分享。
+使用 `import --shared` 或 `publish`，将固定版本放入共享列表。所有接入同一 Junction 的用户都可读取，无须选择接收人。服务仍要求身份凭证；不提供匿名读取。
+
+共享只开放标准化历史，原始 JSONL 保留作底稿。取消共享用 `junction unpublish CONTEXT --revision REVISION`，已下载的副本不受影响。不带 `--shared` 的导入仍为私有；新版本不会自动继承分享。旧的 `share --user` / `revoke --user` 定向授权接口保留兼容，分组等交互后续再细化。
 
 原件不是脱敏备份，标准化历史也可能包含敏感文本。上传前选好要共享的资料。本仓库测试数据全部为合成内容。
 
@@ -91,4 +93,4 @@ junction serve --data-dir .local/backup-001 --port 8768
 - [原生结构研究](docs/research/context-sharing/native-storage.md)
 - [行业调研](docs/research/context-sharing/README.md)与[来源版本](docs/research/context-sharing/sources.md)
 
-研究目录中的 architecture / protocol-contract 是历史候选，当前实现以 `docs/protocol-v1.md` 为准。分组治理、公开分享、派生关系、Git 扩展与 Switchyard 接入留待这一层联调完成后推进。云端部署使用相同服务和数据结构，部署配置另行完成。
+研究目录中的 architecture / protocol-contract 是历史候选，当前实现以 `docs/protocol-v1.md` 为准。已支持共享列表与可选工作区扩展，Switchyard 负责 Web 入口、仓库、worktree 和 Agent 接续。分组治理和匿名公开分享后续再细化。云端部署使用相同服务和数据结构，部署配置另行完成。

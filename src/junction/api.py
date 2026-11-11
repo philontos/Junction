@@ -96,6 +96,7 @@ def create_app(data_dir: str | Path) -> FastAPI:
         title: str | None = Query(None, max_length=200),
         source_name: str = Query("upload.jsonl", max_length=1024),
         extensions: str | None = Query(None, max_length=8192),
+        shared: bool = False,
         user: str = Depends(current_user),
     ):
         """Upload a byte-for-byte JSONL snapshot. No server-side path or URL imports."""
@@ -133,14 +134,16 @@ def create_app(data_dir: str | Path) -> FastAPI:
                 context_id=context_id,
                 title=title,
                 extensions=metadata,
+                shared=shared,
             )
         return JSONResponse(result, status_code=200 if result["reused"] else 201)
 
     @app.get("/v1/contexts", tags=["contexts"])
     def contexts(
-        limit: int = Query(20, ge=1, le=100), cursor: str | None = None, user: str = Depends(current_user)
+        limit: int = Query(20, ge=1, le=100), cursor: str | None = None,
+        shared_only: bool = False, user: str = Depends(current_user)
     ):
-        return app.state.store.list_contexts(user, limit=limit, cursor=cursor)
+        return app.state.store.list_contexts(user, limit=limit, cursor=cursor, shared_only=shared_only)
 
     @app.get("/v1/contexts/{context_id}", tags=["contexts"])
     def context(context_id: str, user: str = Depends(current_user)):
@@ -234,6 +237,15 @@ def create_app(data_dir: str | Path) -> FastAPI:
                 "Content-Disposition": f'attachment; filename="{revision_id}.jsonl"',
             },
         )
+
+    @app.put(revision_path + "/publication", tags=["sharing"])
+    def publish(context_id: str, revision_id: str, user: str = Depends(current_user)):
+        return app.state.store.set_publication(user, context_id, revision_id)
+
+    @app.delete(revision_path + "/publication", status_code=204, tags=["sharing"])
+    def unpublish(context_id: str, revision_id: str, user: str = Depends(current_user)):
+        app.state.store.set_publication(user, context_id, revision_id, shared=False)
+        return Response(status_code=204)
 
     @app.get(revision_path + "/grants", tags=["sharing"])
     def grants(context_id: str, revision_id: str, user: str = Depends(current_user)):

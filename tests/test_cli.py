@@ -116,6 +116,15 @@ def test_two_users_complete_handoff_via_real_http_and_cli(tmp_path, claude_bytes
             assert (tmp_path / filename).read_bytes() == data
             cli(tmp_path, *owner, "revoke", cid, "--revision", rid, "--user", recipient_id)
             assert cli(tmp_path, *recipient, "get", cid, ok=False)["error"]["status"] == 404
+            shared = cli(tmp_path, *owner, "import", filename, "--provider", provider, "--shared")
+            assert shared["id"] == rid and shared["reused"]
+            assert cli(tmp_path, *recipient, "list", "--shared")["items"][0]["revision"]["id"] == rid
+            assert cli(tmp_path, *recipient, "get", cid)["access"]["shared"]
+            cli(tmp_path, *owner, "unpublish", cid, "--revision", rid)
+            assert cli(tmp_path, *recipient, "get", cid, ok=False)["error"]["status"] == 404
+            cli(tmp_path, *owner, "publish", cid, "--revision", rid)
+            assert cli(tmp_path, *recipient, "get", cid)["access"]["shared"]
+            cli(tmp_path, *owner, "unpublish", cid, "--revision", rid)
         assert cli(tmp_path, "check", "--data-dir", "data")["ok"]
         assert cli(tmp_path, "backup", "backup", "--data-dir", "data")["ok"]
     with running_server(tmp_path, port):

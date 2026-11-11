@@ -21,7 +21,7 @@ from .parsers.common import json_text
 MAX_IMPORT_BYTES = 32 * 1024 * 1024
 MAX_INLINE_CHARS = 4096
 MAX_CHUNK_CHARS = 16384
-DB_VERSION = 1
+DB_VERSION = 2
 
 DDL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS grants (
  revision_id TEXT NOT NULL REFERENCES revisions(id), user_id TEXT NOT NULL REFERENCES users(id),
  include_raw INTEGER NOT NULL CHECK(include_raw IN (0,1)), created_at TEXT NOT NULL,
  PRIMARY KEY(revision_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS publications (
+ revision_id TEXT PRIMARY KEY REFERENCES revisions(id), created_at TEXT NOT NULL
 );
 """
 
@@ -119,7 +122,7 @@ class Store:
         db = sqlite3.connect(self.db_path, timeout=15, isolation_level=None)
         try:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, DB_VERSION):
+            if version not in (0, 1, DB_VERSION):
                 raise RuntimeError(f"Unsupported database version {version}; refusing to modify it.")
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA foreign_keys=ON")
@@ -214,6 +217,7 @@ class Store:
         context_id: str | None = None,
         title: str | None = None,
         extensions: dict | None = None,
+        shared: bool = False,
     ) -> dict:
         if provider not in {"claude", "codex"}:
             raise Problem(400, "invalid_provider", "Provider must be claude or codex.")
@@ -255,6 +259,8 @@ class Store:
             if old:
                 if extensions is not None and json.loads(old["header_json"]).get("extensions", {}) != extensions:
                     raise Problem(409, "extensions_conflict", "This snapshot already exists with different immutable extensions.")
+                if shared:
+                    db.execute("INSERT OR IGNORE INTO publications VALUES (?,?)", (old["id"], now()))
                 return {**self._revision(old), "reused": True}
             created_at = now()
             if context_id is None:
@@ -311,6 +317,8 @@ class Store:
                 [(rid, n, json_text(d.model_dump())) for n, d in enumerate(parsed.diagnostics, 1)],
             )
             row = db.execute("SELECT * FROM revisions WHERE id=?", (rid,)).fetchone()
+            if shared:
+                db.execute("INSERT INTO publications VALUES (?,?)", (rid, created_at))
             return {**self._revision(row), "reused": False}
 
     @staticmethod
@@ -321,14 +329,16 @@ class Store:
         return row
 
     @staticmethod
-    def _visible(db, user, context_id, revision_id=None, *, raw=False):
+    def _visible(db, user, context_id, revision_id=None, *, raw=False, shared_only=False):
         row = db.execute(
-            """SELECT r.*,c.owner_id,g.include_raw FROM revisions r
+            """SELECT r.*,c.owner_id,g.include_raw,p.revision_id IS NOT NULL AS shared FROM revisions r
             JOIN contexts c ON c.id=r.context_id
             LEFT JOIN grants g ON g.revision_id=r.id AND g.user_id=?
-            WHERE r.context_id=? AND (c.owner_id=? OR g.user_id IS NOT NULL)
+            LEFT JOIN publications p ON p.revision_id=r.id
+            WHERE r.context_id=? AND (c.owner_id=? OR g.user_id IS NOT NULL OR p.revision_id IS NOT NULL)
+            AND (?=0 OR p.revision_id IS NOT NULL)
             AND (? IS NULL OR r.id=?) ORDER BY r.number DESC LIMIT 1""",
-            (user, context_id, user, revision_id, revision_id),
+            (user, context_id, user, shared_only, revision_id, revision_id),
         ).fetchone()
         if row is None or (raw and row["owner_id"] != user and not row["include_raw"]):
             raise not_found()
@@ -353,15 +363,19 @@ class Store:
         )
         return {**{k: row[k] for k in fields}, "normalized": json.loads(row["header_json"])}
 
-    def list_contexts(self, user, *, limit=20, cursor=None):
-        scope = f"contexts:{user}"
+    def list_contexts(self, user, *, limit=20, cursor=None, shared_only=False):
+        scope = f"contexts:{user}:shared" if shared_only else f"contexts:{user}"
         position = decode_cursor(cursor, scope, 2**63 - 1)
+        published = """EXISTS (SELECT 1 FROM revisions r JOIN publications p ON p.revision_id=r.id
+                       WHERE r.context_id=c.id)"""
+        visibility = published if shared_only else f"""(c.owner_id=? OR {published} OR EXISTS
+            (SELECT 1 FROM revisions r JOIN grants g ON g.revision_id=r.id
+             WHERE r.context_id=c.id AND g.user_id=?))"""
+        args = (position, limit + 1) if shared_only else (position, user, user, limit + 1)
         with self.connection() as db:
             rows = db.execute(
-                """SELECT c.rowid AS position,c.* FROM contexts c WHERE c.rowid<? AND
-                (c.owner_id=? OR EXISTS (SELECT 1 FROM revisions r JOIN grants g ON g.revision_id=r.id
-                 WHERE r.context_id=c.id AND g.user_id=?)) ORDER BY c.rowid DESC LIMIT ?""",
-                (position, user, user, limit + 1),
+                f"""SELECT c.rowid AS position,c.* FROM contexts c WHERE c.rowid<? AND
+                {visibility} ORDER BY c.rowid DESC LIMIT ?""", args,
             ).fetchall()
             items = [
                 {
@@ -369,7 +383,7 @@ class Store:
                     "title": c["title"],
                     "owner_id": c["owner_id"],
                     "created_at": c["created_at"],
-                    "revision": self._revision(self._visible(db, user, c["id"])),
+                    "revision": self._revision(self._visible(db, user, c["id"], shared_only=shared_only)),
                 }
                 for c in rows[:limit]
             ]
@@ -388,6 +402,7 @@ class Store:
                 "access": {
                     "owner": ctx["owner_id"] == user,
                     "raw": ctx["owner_id"] == user or bool(revision["include_raw"]),
+                    "shared": bool(revision["shared"]),
                 },
             }
 
@@ -399,7 +414,9 @@ class Store:
             rows = db.execute(
                 """SELECT r.* FROM revisions r JOIN contexts c ON c.id=r.context_id
                 LEFT JOIN grants g ON g.revision_id=r.id AND g.user_id=?
-                WHERE r.context_id=? AND r.number<? AND (c.owner_id=? OR g.user_id IS NOT NULL)
+                LEFT JOIN publications p ON p.revision_id=r.id
+                WHERE r.context_id=? AND r.number<?
+                AND (c.owner_id=? OR g.user_id IS NOT NULL OR p.revision_id IS NOT NULL)
                 ORDER BY r.number DESC LIMIT ?""",
                 (user, context_id, position, user, limit + 1),
             ).fetchall()
@@ -496,6 +513,17 @@ class Store:
         with self.connection() as db:
             row = self._visible(db, user, context_id, revision_id, raw=True)
             return self.verified_raw(row["source_sha256"]), row["source_sha256"]
+
+    def set_publication(self, user, context_id, revision_id, *, shared=True):
+        """Publish a fixed normalized snapshot to all authenticated users of this instance."""
+        with self.connection(write=True) as db:
+            self._owner(db, user, context_id)
+            self._visible(db, user, context_id, revision_id)
+            if shared:
+                db.execute("INSERT OR IGNORE INTO publications VALUES (?,?)", (revision_id, now()))
+            else:
+                db.execute("DELETE FROM publications WHERE revision_id=?", (revision_id,))
+        return {"revision_id": revision_id, "shared": shared}
 
     def set_grant(self, user, context_id, revision_id, recipient, include_raw=False):
         with self.connection(write=True) as db:

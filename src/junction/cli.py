@@ -150,13 +150,15 @@ def parser():
     imp.add_argument("--context", help="Append to an owned context; otherwise create or deduplicate")
     imp.add_argument("--title")
     imp.add_argument("--extensions-file", help="JSON object with immutable namespaced metadata (max 8192 characters)")
+    imp.add_argument("--shared", action="store_true", help="Share this snapshot with all Junction users")
     listing = sub.add_parser("list")
     listing.add_argument("--cursor")
     listing.add_argument("--limit", type=int, default=20)
-    for name in ("get", "revisions", "export", "raw", "share", "revoke", "grants", "content"):
+    listing.add_argument("--shared", action="store_true", help="List only shared snapshots")
+    for name in ("get", "revisions", "export", "raw", "publish", "unpublish", "share", "revoke", "grants", "content"):
         cmd = sub.add_parser(name)
         cmd.add_argument("context")
-        cmd.add_argument("--revision", required=name in {"share", "revoke", "grants", "content"})
+        cmd.add_argument("--revision", required=name in {"publish", "unpublish", "share", "revoke", "grants", "content"})
         if name == "get":
             cmd.add_argument(
                 "--view",
@@ -261,12 +263,15 @@ def run(args):
                     "context_id": args.context,
                     "title": args.title,
                     "extensions": Path(args.extensions_file).read_text() if args.extensions_file else None,
+                    "shared": args.shared,
                 },
             )
         )
         return
     if args.command == "list":
-        print_json(client.request("/v1/contexts", params={"limit": args.limit, "cursor": args.cursor}))
+        print_json(client.request("/v1/contexts", params={
+            "limit": args.limit, "cursor": args.cursor, "shared_only": args.shared,
+        }))
         return
     meta, base = client.resolve(args.context, args.revision)
     if args.command == "get":
@@ -293,6 +298,9 @@ def run(args):
                 params={"limit": args.limit, "cursor": args.cursor},
             )
         )
+    elif args.command in {"publish", "unpublish"}:
+        result = client.request(base + "/publication", method="PUT" if args.command == "publish" else "DELETE")
+        print_json(result or {"revision_id": meta["revision"]["id"], "shared": False})
     elif args.command in {"share", "revoke"}:
         path = base + "/grants/" + urllib.parse.quote(args.user, safe="")
         result = client.request(
