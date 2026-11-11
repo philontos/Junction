@@ -5,6 +5,7 @@ import { readShareStream } from "./junction-stream.js";
 
 const L = (zh, en) => I18N.lang === "zh" ? zh : en;
 let hooks, status, listCursor, messageCursor, generation = 0, activeShare = null, shareDismissTimer;
+let selectedContext = null, preferredContext = null;
 const call = (url, options = {}) => api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const base = meta => `/contexts/${meta.id}/revisions/${meta.revision.id}`;
@@ -21,19 +22,21 @@ export function closeJunction() { $("junction-modal").hidden = true; generation+
 export function junctionIsOpen() { return !$("junction-modal").hidden; }
 export async function openJunction(taskId = null) {
   if (taskId) return shareTask(taskId);
+  const epoch = ++generation;
   $("junction-modal").hidden = false;
-  clearError();
+  detailRoot().append(note(L("正在读取共享 Context…", "Loading shared contexts…")));
   $("jx-connection").textContent = L("连接 Junction…", "Connecting to Junction…");
   try {
     await refreshStatus();
-    await loadList();
+    if (epoch !== generation) return;
+    await loadList(false, true);
   } catch (e) { showError(e); $("jx-connection").textContent = L("Junction 不可用", "Junction unavailable"); }
 }
 async function refreshStatus() {
   status = await call("/status");
   $("jx-connection").textContent = L("分享前情，在自己的设备上继续工作。", "Share context and continue on your own device.");
 }
-async function loadList(append = false) {
+async function loadList(append = false, choose = false) {
   const epoch = generation;
   const page = await call("/contexts" + (append && listCursor ? `?cursor=${encodeURIComponent(listCursor)}` : ""));
   if (epoch !== generation) return;
@@ -42,6 +45,7 @@ async function loadList(append = false) {
     const r = item.revision;
     const card = button("", () => openDetail(item.id, r.id), "jx-card");
     card.dataset.contextId = item.id;
+    card.classList.toggle("active", selectedContext?.cid === item.id);
     card.append(el("strong", item.title), el("span", `${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}`, "jx-meta"),
       el("span", new Date(r.created_at).toLocaleString(), "jx-meta"));
     list.append(card);
@@ -49,14 +53,26 @@ async function loadList(append = false) {
   if (!list.children.length) list.append(note(L("还没有共享的 Context。分享一个任务，从这里开始接续。", "No shared contexts yet. Share a task to get started.")));
   listCursor = page.next_cursor;
   $("jx-more").hidden = !listCursor;
+  if (choose) {
+    const item = page.items.find(item => item.id === selectedContext?.cid) || page.items[0];
+    const target = preferredContext || (item && { cid: item.id, rid: item.revision.id });
+    if (target) await openDetail(target.cid, target.rid);
+    else {
+      selectedContext = null;
+      detailRoot().append(note(L("还没有共享的 Context。在任务终端点击「共享」即可添加。", "No shared contexts yet. Click Share in a task terminal to add one.")));
+    }
+  }
 }
 async function openDetail(cid, rid) {
   const epoch = ++generation;
+  selectedContext = { cid, rid };
+  preferredContext = null;
+  detailRoot().append(note(L("正在读取 Context…", "Loading context…")));
+  for (const card of $("jx-list").querySelectorAll(".jx-card")) card.classList.toggle("active", card.dataset.contextId === cid);
   const meta = await call(`/contexts/${cid}/revisions/${rid}`);
   if (epoch !== generation) return;
   const r = meta.revision, w = r.normalized.extensions?.["switchyard.workspace/1"];
   const d = detailRoot();
-  for (const card of $("jx-list").querySelectorAll(".jx-card")) card.classList.toggle("active", card.dataset.contextId === cid);
   d.append(el("h2", meta.title), note(`${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`));
   d.append(el("div", undefined, "jx-continuation"));
   showContinue(meta);
@@ -193,6 +209,7 @@ async function shareTask(taskId) {
       renderShare(job);
     });
     if (result.status === "failed") throw new Error(L("原始记录已保存，但未解析出可接续的对话。", "The original was saved, but no readable conversation was found."));
+    preferredContext = { cid: result.context_id, rid: result.id };
     job.done = true;
     renderShare(job);
     if (junctionIsOpen()) loadList().catch(() => {});
@@ -241,7 +258,7 @@ export function initJunction(callbacks) {
   $("jx-heading").textContent = L("共享 Context", "Shared contexts");
   $("jx-close").onclick = closeJunction;
   modal.onclick = e => { if (e.target === modal) closeJunction(); };
-  $("jx-tools").append(button(L("分享任务", "Share a task"), () => showPublish(), ""), button(L("刷新", "Refresh"), () => loadList()));
+  $("jx-tools").append(button(L("分享任务", "Share a task"), () => showPublish(), ""), button(L("刷新", "Refresh"), () => loadList(false, true)));
   $("jx-extra-label").textContent = L("更多", "More");
   $("jx-extra").append(button(L("导入 JSONL", "Import JSONL"), showImport));
   $("jx-more").textContent = L("加载更多", "Load more"); $("jx-more").onclick = () => loadList(true).catch(showError);
