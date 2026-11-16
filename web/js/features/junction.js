@@ -18,19 +18,21 @@ function field(label, input) { const f = el("label", undefined, "jx-field"); f.a
 function textInput(value = "", placeholder = "") { const input = el("input"); input.value = value; input.placeholder = placeholder; return input; }
 function note(text) { return el("p", text, "jx-note"); }
 function showLibrary() {
+  closeVersionLists();
   clearError();
   $("jx-library").hidden = false; $("jx-detail-page").hidden = true;
   $("jx-back").hidden = true; $("jx-tools").hidden = false;
   $("jx-extra-menu").open = false;
 }
 function detailRoot() {
+  closeVersionLists();
   clearError();
   $("jx-library").hidden = true; $("jx-detail-page").hidden = false;
   $("jx-back").hidden = false; $("jx-tools").hidden = true;
   $("jx-extra-menu").open = false;
   const d = $("jx-detail"); d.replaceChildren(); return d;
 }
-export function closeJunction() { $("junction-modal").hidden = true; generation++; }
+export function closeJunction() { closeVersionLists(); $("junction-modal").hidden = true; generation++; }
 export function junctionIsOpen() { return !$("junction-modal").hidden; }
 export async function openJunction(taskId = null) {
   if (taskId) return shareTask(taskId);
@@ -52,6 +54,7 @@ async function loadList(append = false) {
   if (!$("jx-library").hidden) clearError();
   list.setAttribute("aria-busy", "true"); $("jx-more").disabled = true;
   if (!append) {
+    closeVersionLists();
     listCursor = null; $("jx-more").hidden = true;
     list.replaceChildren(el("p", L("读取中…", "Loading…"), "jx-empty"));
   }
@@ -84,15 +87,41 @@ async function loadList(append = false) {
     if (request === listRequest) { list.setAttribute("aria-busy", "false"); $("jx-more").disabled = false; }
   }
 }
+function closeVersionLists(except = null) {
+  for (const details of $("jx-list").querySelectorAll(".jx-versions[open]")) {
+    if (details !== except) details.open = false;
+  }
+}
+function positionVersionList(details) {
+  if (!details.open || !details.isConnected) return;
+  // Keep the panel out of the grid flow and within the visible library bounds.
+  const panel = details.querySelector(".jx-version-panel");
+  const anchor = details.querySelector("summary").getBoundingClientRect();
+  const bounds = $("jx-library").getBoundingClientRect();
+  const gap = 6, inset = 8;
+  const left = Math.max(inset, bounds.left + inset), right = Math.min(innerWidth - inset, bounds.right - inset);
+  const top = Math.max(inset, bounds.top + inset), bottom = Math.min(innerHeight - inset, bounds.bottom - inset);
+  const below = bottom - anchor.bottom - gap, above = anchor.top - top - gap;
+  const upwards = below < 224 && above > below;
+  const width = Math.min(340, right - left);
+  panel.style.width = `${width}px`;
+  panel.style.maxHeight = `${Math.max(0, Math.min(224, upwards ? above : below))}px`;
+  panel.style.left = `${Math.max(left, Math.min(anchor.left, right - width))}px`;
+  panel.style.top = `${upwards ? anchor.top - gap - panel.offsetHeight : anchor.bottom + gap}px`;
+  panel.style.visibility = "visible";
+}
 function versionList(item) {
   const details = el("details", undefined, "jx-versions");
   details.append(el("summary", L("版本记录", "Versions")));
-  const rows = el("div"), controls = el("div"); details.append(rows, controls);
+  const panel = el("div", undefined, "jx-version-panel"), rows = el("div"), controls = el("div");
+  panel.setAttribute("aria-label", `${item.title} · ${L("版本记录", "Versions")}`);
+  panel.append(rows, controls); details.append(panel);
   let loaded = false, loading = false, cursor = null;
   const load = async (more = false) => {
     if (loading) return;
     loading = true;
     controls.replaceChildren(note(L("读取中…", "Loading…")));
+    positionVersionList(details);
     try {
       const q = more && cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
       const page = await call(`/contexts/${item.id}/revisions${q}`);
@@ -106,12 +135,19 @@ function versionList(item) {
         rows.append(b);
       }
       loaded = true; cursor = page.next_cursor; controls.replaceChildren();
+      if (!rows.children.length) controls.append(note(L("暂无版本记录", "No versions yet")));
       if (cursor) controls.append(button(L("更多版本", "More versions"), () => load(true)));
     } catch (e) {
       if (details.isConnected) controls.replaceChildren(note(e.message), button(L("重试", "Retry"), () => load(more)));
-    } finally { loading = false; }
+    } finally { loading = false; positionVersionList(details); }
   };
-  details.ontoggle = () => { if (details.open && !loaded) load(); };
+  details.ontoggle = () => {
+    if (!details.open) { panel.style.visibility = "hidden"; return; }
+    closeVersionLists(details);
+    if (!loaded) load();
+    positionVersionList(details);
+  };
+  details.onfocusout = e => { if (e.relatedTarget && !details.contains(e.relatedTarget)) details.open = false; };
   return details;
 }
 async function openDetail(cid, rid) {
@@ -308,13 +344,26 @@ export function initJunction(callbacks) {
   document.body.append(feedback);
   $("jx-heading").textContent = L("共享 Context", "Shared contexts");
   $("jx-close").onclick = closeJunction;
-  modal.onclick = e => { if (e.target === modal) closeJunction(); };
+  modal.onclick = e => {
+    // A retry/pagination click can replace its own button before bubbling here.
+    closeVersionLists(e.composedPath().find(node => node instanceof Element && node.matches(".jx-versions")));
+    if (e.target === modal) closeJunction();
+  };
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    const details = $("jx-list").querySelector(".jx-versions[open]");
+    if (!details) return;
+    e.preventDefault(); e.stopPropagation();
+    details.open = false; details.querySelector("summary").focus({ preventScroll: true });
+  }, true);
+  $("jx-library").addEventListener("scroll", () => closeVersionLists());
+  window.addEventListener("resize", () => closeVersionLists());
   $("jx-back").textContent = L("← 返回列表", "← All contexts");
   $("jx-back").onclick = () => {
     ++generation; showLibrary(); $("jx-detail").replaceChildren();
     const card = [...$("jx-list").querySelectorAll(".jx-card")].find(b => b.dataset.contextId === selectedContext?.cid);
     const version = [...$("jx-list").querySelectorAll(".jx-version")].find(b => b.dataset.revisionId === selectedContext?.rid);
-    (version?.closest("details").open ? version : card || $("jx-refresh")).focus();
+    (version?.closest("details").querySelector("summary") || card || $("jx-refresh")).focus({ preventScroll: true });
   };
   $("jx-refresh").textContent = L("刷新", "Refresh");
   $("jx-refresh").onclick = async () => {

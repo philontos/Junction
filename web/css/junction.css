@@ -28,9 +28,13 @@
 .jx-card-open { font-size: 12px; color: var(--accent-text); white-space: nowrap; }
 .jx-versions { padding: 9px 20px; border-top: 1px solid var(--border); }
 .jx-versions > summary { color: var(--muted); }
-.jx-version { display: block; width: 100%; text-align: left; background: none; color: var(--text); border: 0; border-radius: 5px; padding: 8px; margin: 5px 0; font-size: 12px; }
+.jx-versions[open] > summary { color: var(--accent-text); }
+.jx-version-panel { position: fixed; z-index: 3; visibility: hidden; box-sizing: border-box; max-height: 224px; padding: 6px; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px #0005; }
+.jx-version { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 38px; text-align: left; background: none; color: var(--text); border: 0; border-radius: 5px; padding: 9px 10px; margin: 0; font-size: 12px; }
+.jx-version > span { white-space: nowrap; }
 .jx-version:hover, .jx-version:focus-visible { background: var(--surface-3); color: var(--accent-text); }
-.jx-versions .jx-note { margin: 8px 0; }
+.jx-version-panel .jx-note { margin: 8px 10px; }
+.jx-version-panel > div:last-child > button { margin: 4px 0 0; width: 100%; }
 .jx-meta { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .jx-ids { display: block; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; line-height: 1.8; }
 .jx-warning { color: var(--accent-text-hi); background: #d9775714; padding: 12px 16px; border: 1px solid #d9775744; border-radius: 8px; font-size: 12px; line-height: 1.7; margin: 10px 0; overflow-wrap: anywhere; }
