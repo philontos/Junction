@@ -74,7 +74,7 @@ async function loadList(append = false) {
       const footer = el("span", undefined, "jx-card-footer");
       footer.append(el("span", new Date(r.created_at).toLocaleString(), "jx-meta"), el("span", L("打开 →", "Open →"), "jx-card-open"));
       card.append(footer); group.append(card);
-      if (r.number > 1) group.append(versionList(item));
+      group.append(versionList(item));
       list.append(group);
     }
     if (!list.children.length) list.append(el("p", L("还没有共享的 Context", "No shared contexts yet"), "jx-empty"));
