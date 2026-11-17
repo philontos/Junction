@@ -84,6 +84,17 @@ export class JunctionClient {
         normalized.session.messages.push(msg);
       }
     }
+    if (normalized.record_index != null) {
+      normalized.records = [];
+      for await (const items of this.pages(base, "records")) {
+        chars += JSON.stringify(items).length;
+        if (chars > 96 * 1024 * 1024) throw new JunctionError(413, "Context 过大，无法导入当前工作区。");
+        normalized.records.push(...items);
+      }
+      if (normalized.records.length !== normalized.record_index.indexed_records) {
+        throw new JunctionError(502, "Context 原生记录索引下载不完整。");
+      }
+    }
     if (normalized.session.messages.length !== meta.revision.message_count || normalized.session.turns.length !== meta.revision.turn_count) {
       throw new JunctionError(502, "Context 下载不完整。");
     }

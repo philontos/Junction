@@ -50,6 +50,30 @@ test("bad account and resource references fail before accessing credentials", ()
     assert.throws(() => readConfig(file), /凭据/);
   } finally { fs.rmSync(dir, { recursive: true }); }
 });
+test("snapshot retains the native record index and rejects an incomplete download", async () => {
+  const { dir, config } = fixture();
+  let expected = 2;
+  const calls: string[] = [];
+  const fetcher: typeof fetch = async input => {
+    const url = new URL(String(input)); calls.push(url.pathname);
+    let value: any;
+    if (url.pathname.endsWith(rid)) value = { id: cid, revision: { id: rid, message_count: 0, turn_count: 0,
+      normalized: { schema_version: "junction.context/1", session: {}, record_index: { indexed_records: expected, complete: true } } } };
+    else if (url.pathname.endsWith("/records")) value = url.searchParams.has("cursor")
+      ? { items: [{ id: "r2", status: "unmapped" }], next_cursor: null }
+      : { items: [{ id: "r1", status: "invalid" }], next_cursor: "next" };
+    else value = { items: [], next_cursor: null };
+    return new Response(JSON.stringify(value));
+  };
+  try {
+    const client = new JunctionClient(config, "owner", fetcher);
+    const snapshot = await client.snapshot(cid, rid);
+    assert.deepEqual(snapshot.normalized.records.map((r: any) => r.id), ["r1", "r2"]);
+    assert.ok(calls.every(p => !p.endsWith("/raw") && !p.endsWith("/content")));
+    expected = 3;
+    await assert.rejects(client.snapshot(cid, rid), /索引下载不完整/);
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});
 test("grant revocation during export aborts instead of producing a partial context", async () => {
   const { dir, config } = fixture();
   const fetcher: typeof fetch = async () => new Response(JSON.stringify({ error: { detail: "Not found" } }), { status: 404 });
@@ -60,13 +84,18 @@ test("handoff preserves provenance and full history, with a working paginated of
   const { dir } = fixture();
   const workspace = { repo_url: "git@github.com:org/repo.git", branch: "feature", commit: "a".repeat(40), dirty: true };
   const overview = { title: "Recorded task", description: "An excerpt with evidence", missing: [{ field: "cwd" }] };
-  const normalized = { schema_version: "junction.context/1", extensions: { [WORKSPACE_EXTENSION]: workspace, "junction.overview/1": overview }, diagnostics: [],
+  const normalized = { schema_version: "junction.context/1", extensions: { [WORKSPACE_EXTENSION]: workspace, "junction.overview/1": overview }, diagnostics: [], records: [{ id: "r1", status: "projected", message_ids: ["m1"] }],
     session: { turns: [{ id: "t1" }], messages: [{ id: "m1", role: "user", content: [{ kind: "text", text: "x".repeat(4000) }] }] } };
   try {
     writeHandoff(dir, { meta: { id: cid, revision: { id: rid, source_sha256: "sha" } }, normalized }, "http://localhost:8767");
     const reader = path.join(dir, ".tdsp/context/read.mjs");
     const info = JSON.parse(execFileSync(process.execPath, [reader, "info"], { encoding: "utf8" }));
     assert.deepEqual(info.extensions["junction.overview/1"], overview);
+    assert.equal(info.records, undefined);
+    const records = JSON.parse(execFileSync(process.execPath, [reader, "records", "0", "1"], { encoding: "utf8" }));
+    assert.deepEqual(records.items, normalized.records);
+    const record = JSON.parse(execFileSync(process.execPath, [reader, "record", "r1"], { encoding: "utf8" }));
+    assert.deepEqual(record, normalized.records[0]);
     const page = JSON.parse(execFileSync(process.execPath, [reader, "messages", "0", "1"], { encoding: "utf8" }));
     assert.equal(page.next_offset, null); assert.equal(page.items[0].content, undefined);
     const full = JSON.parse(execFileSync(process.execPath, [reader, "message", "m1"], { encoding: "utf8" }));

@@ -28,14 +28,15 @@ const READER = `import fs from 'node:fs';
 const data = JSON.parse(fs.readFileSync(new URL('./normalized.json', import.meta.url), 'utf8'));
 const [command = 'info', arg = '0', size = '10'] = process.argv.slice(2);
 let result;
-if (command === 'info') result = {...data, session: {...data.session, messages: undefined, turns: undefined}, message_count:data.session.messages.length, turn_count:data.session.turns.length};
+if (command === 'info') result = {...data, records:undefined, session: {...data.session, messages: undefined, turns: undefined}, message_count:data.session.messages.length, turn_count:data.session.turns.length};
 else if (command === 'message') result = data.session.messages.find(m => m.id === arg) ?? null;
-else if (command === 'messages' || command === 'turns') {
+else if (command === 'record') result = (data.records || []).find(r => r.id === arg) ?? null;
+else if (command === 'messages' || command === 'turns' || command === 'records') {
   const offset = Number(arg), limit = Number(size);
   if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error('Use offset >= 0 and limit 1..50');
-  const items = data.session[command];
-  result = {items:items.slice(offset, offset + limit).map(m => command === 'turns' ? m : {...m, content:undefined, preview:JSON.stringify(m.content).slice(0,1500)}), next_offset:offset + limit < items.length ? offset + limit : null};
-} else throw new Error('Usage: node read.mjs info | messages [offset] [limit] | turns [offset] [limit] | message ID');
+  const items = command === 'records' ? (data.records || []) : data.session[command];
+  result = {items:items.slice(offset, offset + limit).map(m => command !== 'messages' ? m : {...m, content:undefined, preview:JSON.stringify(m.content).slice(0,1500)}), next_offset:offset + limit < items.length ? offset + limit : null};
+} else throw new Error('Usage: node read.mjs info | messages/turns/records [offset] [limit] | message/record ID');
 console.log(JSON.stringify(result, null, 2));
 `;
 const SKILL = `---
