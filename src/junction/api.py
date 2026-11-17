@@ -15,6 +15,7 @@ from . import __version__
 from .errors import Problem
 from .models import Model, Provider, context_schema
 from .parsers.common import strict_json
+from .parsers.registry import get_adapter, providers
 from .store import MAX_CHUNK_CHARS, MAX_IMPORT_BYTES, Store
 
 log = logging.getLogger("junction")
@@ -88,6 +89,10 @@ def create_app(data_dir: str | Path) -> FastAPI:
     def me(user: str = Depends(current_user)):
         return {"user_id": user}
 
+    @app.get("/v1/providers", tags=["service"])
+    def installed_providers():
+        return {"items": providers()}
+
     @app.post("/v1/imports", tags=["contexts"])
     async def import_context(
         request: Request,
@@ -101,6 +106,10 @@ def create_app(data_dir: str | Path) -> FastAPI:
         user: str = Depends(current_user),
     ):
         """Upload a byte-for-byte JSONL snapshot. No server-side path or URL imports."""
+        try:
+            get_adapter(provider)
+        except ValueError:
+            raise Problem(422, "invalid_provider", "No installed adapter for this provider.") from None
         try:
             metadata = strict_json(extensions) if extensions is not None else None
         except (ValueError, RecursionError):
@@ -214,6 +223,24 @@ def create_app(data_dir: str | Path) -> FastAPI:
         return app.state.store.read_page(
             user, context_id, revision_id, "diagnostics", limit=limit, cursor=cursor
         )
+
+    @app.get(revision_path + "/records", tags=["read"])
+    def records(
+        context_id: str, revision_id: str,
+        limit: int = Query(20, ge=1, le=100), cursor: str | None = None,
+        user: str = Depends(current_user),
+    ):
+        """Native record index only; original field values require raw access."""
+        return app.state.store.read_page(user, context_id, revision_id, "records", limit=limit, cursor=cursor)
+
+    @app.get(revision_path + "/records/{record_id}/content", tags=["read"])
+    def native_content(
+        context_id: str, revision_id: str, record_id: str,
+        offset: int = Query(0, ge=0), limit: int = Query(MAX_CHUNK_CHARS, ge=1, le=MAX_CHUNK_CHARS),
+        user: str = Depends(current_user),
+    ):
+        """Concatenate decoded base64 chunks for the exact original line. Requires raw permission."""
+        return app.state.store.record_chunk(user, context_id, revision_id, record_id, offset=offset, limit=limit)
 
     @app.get(revision_path + "/messages/{message_id}/content", tags=["read"])
     def content(

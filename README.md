@@ -1,6 +1,6 @@
 # Junction
 
-保存、查询和共享 Agent 的历史上下文。v0.1 提供可在本机运行的 HTTP 服务、CLI，以及 Claude Code / Codex 通用的交接 skill。
+保存、查询和共享 Agent 的历史上下文。v0.2 提供可在本机运行的 HTTP 服务、CLI，以及 Claude Code / Codex 通用的交接 skill。
 
 导入已有 JSONL，同时保存原始字节、标准化记录和自动整理的标题、描述、缺失标记；选择一个固定版本分享，接收方读取历史后，在自己的工作环境继续任务。Junction 不运行 Agent，也不管理仓库、worktree 或当前执行权限。
 
@@ -44,6 +44,7 @@ junction get CONTEXT
 junction get CONTEXT --revision REVISION --view conversation --turns 3
 junction get CONTEXT --revision REVISION --view trace
 junction get CONTEXT --revision REVISION --view diagnostics
+junction get CONTEXT --revision REVISION --view records
 junction publish CONTEXT --revision REVISION
 
 # 接收方身份
@@ -68,6 +69,12 @@ junction export CONTEXT --revision REVISION --output .local/received-context.jso
 
 数据目录包含 `junction.sqlite3` 和 `raw/`；SQLite 保存用户、Context、版本、标准化记录与分享关系，`raw/` 保存按 SHA-256 寻址的不可变原件。
 
+v0.2 增加原生记录索引：保留每行的字节位置、长度、SHA-256 及其与消息的关系，未知记录和坏行也可回查。模型、用量、结束原因、生命周期等已识别信息进入标准化标记；工具参数同时保留解析值和原字符串。未解释字段、内嵌附件与不透明内容留在原件，不声称统一格式覆盖所有原生语义。
+
+`junction providers` 列出服务实际安装的适配器；目前为 `claude` / `codex`。具有原件权限时，可用 `junction record CONTEXT --revision REVISION --record r1` 分块读取原始行（base64，按字节偏移）。普通共享的 `records` 只包含索引，不自动开放原件。
+
+旧版本不自动重算或重新分享。同一来源再次导入时，新解析器生成新版本并复用原件。升级前备份数据；v0.1 CLI 的严格读取器不支持新增字段，请与服务一起升级。当前 CLI 会保留同一协议主版本的新增字段；未知主版本明确拒绝。
+
 同一工作来源可用 `junction import ... --source-key tool:task:123 --shared` 持续共享到同一个 Context。内容与工作信息未变时复用原版本；变化后生成新版本，旧版本保持不变。只有元数据改变时，各版本共用同一份 JSONL 原件。相同来源键在不同用户之间独立；不按标题或仓库合并任务。
 
 ```sh
@@ -91,6 +98,7 @@ junction serve --data-dir .local/backup-001 --port 8768
 - [功能清单](docs/product/context-collaboration.md)
 - [本地联调与接入说明](docs/local-handoff.md)
 - [v1 协议与存储边界](docs/protocol-v1.md)
+- [适配器契约与 Kimi / Pi 接入边界](docs/adapter-contract.md)
 - [标准化 JSON Schema](schemas/context-v1.schema.json)
 - [原生结构研究](docs/research/context-sharing/native-storage.md)
 - [行业调研](docs/research/context-sharing/README.md)与[来源版本](docs/research/context-sharing/sources.md)

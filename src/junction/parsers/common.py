@@ -1,10 +1,21 @@
 import hashlib
+import io
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from junction.models import Block, Diagnostic, Message, NormalizedContext, Session, SourceLocation, Turn
+from junction.models import (
+    Block,
+    Diagnostic,
+    Message,
+    NativeRecord,
+    NormalizedContext,
+    RecordIndex,
+    Session,
+    SourceLocation,
+    Turn,
+)
 
 MAX_RECORDS = 100_000
 
@@ -20,6 +31,12 @@ def string(value: Any) -> str | None:
 def identifier(value: Any) -> str | None:
     text = string(value)
     return text if text and len(text) <= 1024 else None
+
+
+def metadata_block(value: dict, keys: tuple[str, ...], *, line: int) -> list[Block]:
+    """Keep provider fields verbatim, in chunkable content, without inventing common units."""
+    fields = {key: value[key] for key in keys if key in value}
+    return [Block(kind="marker", name="message_metadata", output={"line": line, "fields": fields})] if fields else []
 
 
 def strict_json(text: str) -> Any:
@@ -66,6 +83,7 @@ class Candidate:
     is_sidechain: bool = False
     duplicate_lines: list[int] = field(default_factory=list)
     channel: str = "primary"
+    native_role: str | None = None
 
 
 @dataclass
@@ -77,6 +95,8 @@ class ParseState:
     cwd: str | None = None
     recognized: int = 0
     records: int = 0
+    native_records: list[NativeRecord] = field(default_factory=list)
+    record_values: dict[int, dict] = field(default_factory=dict)
 
     def note(self, code: str, line: int | None, detail: str, severity: str = "warning"):
         self.diagnostics.append(Diagnostic(code=code, line=line, detail=detail, severity=severity))
@@ -84,7 +104,10 @@ class ParseState:
 
 def read_records(raw: bytes, state: ParseState) -> list[tuple[int, dict]]:
     records = []
-    for line_no, data in enumerate(raw.splitlines(), 1):
+    offset = 0
+    for line_no, data in enumerate(io.BytesIO(raw), 1):
+        start = offset
+        offset += len(data)
         if not data.strip():
             continue
         state.records += 1
@@ -94,12 +117,21 @@ def read_records(raw: bytes, state: ParseState) -> list[tuple[int, dict]]:
                     "record_limit", line_no, "Remaining records are archived but not interpreted.", "error"
                 )
             continue
+        native = NativeRecord(
+            id=f"r{line_no}", sequence=len(state.native_records) + 1, line=line_no,
+            byte_offset=start, byte_length=len(data), sha256=hashlib.sha256(data).hexdigest(),
+            status="invalid",
+        )
+        state.native_records.append(native)
         try:
             text = data.decode("utf-8-sig" if line_no == 1 else "utf-8")
             obj = strict_json(text)
             if not isinstance(obj, dict):
                 raise ValueError("JSONL records must be objects")
             records.append((line_no, obj))
+            state.record_values[line_no] = obj
+            native.status = "unmapped"
+            native.native_type = identifier(obj.get("type")) or identifier(obj.get("role"))
         except (ValueError, UnicodeError, RecursionError):
             state.note(
                 "invalid_record", line_no, "Invalid JSON object or UTF-8; original bytes retained.", "error"
@@ -114,6 +146,12 @@ def build_messages(state: ParseState) -> tuple[list[Message], list[Turn]]:
     kept = []
     for item in sorted(state.candidates, key=lambda c: c.line):
         # Equal text alone is never a duplicate. Preserve split blocks sharing a native message id.
+        identity_blocks = []
+        for block in item.content:
+            value = block.model_dump()
+            if block.kind == "marker" and block.name == "message_metadata":
+                value["output"] = {"fields": block.output["fields"]}
+            identity_blocks.append(value)
         key = (
             item.session_id,
             item.native_id,
@@ -122,7 +160,9 @@ def build_messages(state: ParseState) -> tuple[list[Message], list[Turn]]:
             item.role,
             item.is_meta,
             item.is_sidechain,
-            json_text([b.model_dump() for b in item.content]),
+            json_text(identity_blocks),
+            # Equal visible text does not prove that usage, signatures or future fields agree.
+            json_text(state.record_values.get(item.line)),
         )
         if item.native_id and key in seen:
             seen[key].duplicate_lines.extend([item.line, *item.duplicate_lines])
@@ -188,6 +228,8 @@ def build_messages(state: ParseState) -> tuple[list[Message], list[Turn]]:
                     native_logical_parent_id=item.logical_parent_id,
                     native_turn_id=item.turn_id,
                     native_session_id=item.session_id,
+                    native_role=item.native_role,
+                    record_ids=[f"r{line}" for line in sorted(set([item.line, *item.duplicate_lines]))],
                     record_type=item.record_type,
                 ),
             )
@@ -229,16 +271,22 @@ def build_messages(state: ParseState) -> tuple[list[Message], list[Turn]]:
 
 
 def normalize(raw: bytes, provider: str) -> NormalizedContext:
-    from .claude import parse_claude
-    from .codex import parse_codex
+    from .registry import get_adapter
 
+    adapter = get_adapter(provider)
     state = ParseState()
     records = read_records(raw, state)
-    (parse_claude if provider == "claude" else parse_codex)(records, state)
+    adapter.parse(records, state)
     if state.cwd and len(state.cwd) > 4096:
         state.cwd = None
         state.note("invalid_cwd", None, "Oversized working directory retained only in original.")
     messages, turns = build_messages(state)
+    indexed = {r.id: r for r in state.native_records}
+    for message in messages:
+        for rid in message.source.record_ids:
+            record = indexed[rid]
+            record.status = "projected"
+            record.message_ids.append(message.id)
     readable = any(
         m.role in {"user", "assistant", "tool"}
         and any(b.kind not in {"unknown", "marker"} for b in m.content)
@@ -253,11 +301,14 @@ def normalize(raw: bytes, provider: str) -> NormalizedContext:
     )
     return NormalizedContext(
         provider=provider,
+        parser_version=adapter.parser_version,
         status=status,
         source_sha256=hashlib.sha256(raw).hexdigest(),
         source_bytes=len(raw),
         record_count=state.records,
         recognized_record_count=state.recognized,
+        record_index=RecordIndex(indexed_records=len(indexed), complete=len(indexed) == state.records),
+        records=state.native_records,
         session=Session(
             native_id=state.native_id,
             source_version=state.version,

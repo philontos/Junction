@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import io
 import json
 import os
 import re
@@ -14,15 +15,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .errors import Problem, not_found
-from .models import PARSER_VERSION, NormalizedContext
+from .models import NativeRecord, NormalizedContext
 from .overview import OVERVIEW_EXTENSION, build_overview
 from .parsers import normalize
 from .parsers.common import json_text
+from .parsers.registry import get_adapter
 
 MAX_IMPORT_BYTES = 32 * 1024 * 1024
 MAX_INLINE_CHARS = 4096
 MAX_CHUNK_CHARS = 16384
-DB_VERSION = 4
+DB_VERSION = 5
 
 DDL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -57,6 +59,10 @@ CREATE INDEX IF NOT EXISTS messages_turn ON messages(revision_id,turn_id,sequenc
 CREATE TABLE IF NOT EXISTS diagnostics (
  revision_id TEXT NOT NULL REFERENCES revisions(id), sequence INTEGER NOT NULL,
  data_json TEXT NOT NULL, PRIMARY KEY(revision_id,sequence)
+);
+CREATE TABLE IF NOT EXISTS records (
+ revision_id TEXT NOT NULL REFERENCES revisions(id), sequence INTEGER NOT NULL,
+ id TEXT NOT NULL, data_json TEXT NOT NULL, PRIMARY KEY(revision_id,sequence), UNIQUE(revision_id,id)
 );
 CREATE TABLE IF NOT EXISTS grants (
  revision_id TEXT NOT NULL REFERENCES revisions(id), user_id TEXT NOT NULL REFERENCES users(id),
@@ -181,13 +187,13 @@ class Store:
         db = sqlite3.connect(self.db_path, timeout=15, isolation_level=None)
         try:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, DB_VERSION):
+            if version not in (0, 1, 2, 3, 4, DB_VERSION):
                 raise RuntimeError(f"Unsupported database version {version}; refusing to modify it.")
             db.execute("PRAGMA journal_mode=WAL")
             # SQLite table rebuilds require FK enforcement off before BEGIN. Validate before commit.
             db.execute("PRAGMA foreign_keys=OFF")
             db.executescript("BEGIN IMMEDIATE;\n" + DDL)
-            if version < DB_VERSION:
+            if version < 4:
                 migrate_revisions(db)
                 for statement in DDL.split(";"):
                     if statement.strip():
@@ -293,8 +299,10 @@ class Store:
         extensions: dict | None = None,
         shared: bool = False,
     ) -> dict:
-        if provider not in {"claude", "codex"}:
-            raise Problem(400, "invalid_provider", "Provider must be claude or codex.")
+        try:
+            get_adapter(provider)
+        except ValueError:
+            raise Problem(400, "invalid_provider", "No installed adapter for this provider.") from None
         if not raw.strip():
             raise Problem(400, "empty_input", "The JSONL input is empty.")
         if len(raw) > MAX_IMPORT_BYTES:
@@ -323,8 +331,8 @@ class Store:
                 self._owner(db, user, context_id)
         parsed = normalize(raw, provider)
         parsed.extensions = extensions or {}
-        header = parsed.model_dump(exclude={"session": {"messages", "turns"}, "diagnostics": True})
-        fingerprint = snapshot_digest(provider, parsed.source_sha256, PARSER_VERSION, parsed.extensions)
+        header = parsed.model_dump(exclude={"session": {"messages", "turns"}, "diagnostics": True, "records": True})
+        fingerprint = snapshot_digest(provider, parsed.source_sha256, parsed.parser_version, parsed.extensions)
         with self.connection(write=True) as db:
             if context_id:
                 self._owner(db, user, context_id)
@@ -342,7 +350,7 @@ class Store:
                         raise Problem(409, "source_conflict", "Context already belongs to another source.")
             query = """SELECT r.* FROM revisions r JOIN contexts c ON c.id=r.context_id
                        WHERE c.owner_id=? AND r.provider=? AND r.source_sha256=? AND r.parser_version=?"""
-            args = [user, provider, parsed.source_sha256, PARSER_VERSION]
+            args = [user, provider, parsed.source_sha256, parsed.parser_version]
             if extensions is not None:
                 query += " AND r.snapshot_sha256=?"
                 args.append(fingerprint)
@@ -388,7 +396,7 @@ class Store:
                     parsed.source_sha256,
                     len(raw),
                     source_name,
-                    PARSER_VERSION,
+                    parsed.parser_version,
                     parsed.status,
                     created_at,
                     json_text(header),
@@ -421,6 +429,10 @@ class Store:
             db.executemany(
                 "INSERT INTO diagnostics VALUES (?,?,?)",
                 [(rid, n, json_text(d.model_dump())) for n, d in enumerate(parsed.diagnostics, 1)],
+            )
+            db.executemany(
+                "INSERT INTO records VALUES (?,?,?,?)",
+                [(rid, record.sequence, record.id, json_text(record.model_dump())) for record in parsed.records],
             )
             row = db.execute("SELECT * FROM revisions WHERE id=?", (rid,)).fetchone()
             if shared:
@@ -560,7 +572,7 @@ class Store:
         turn_id=None,
         tail_turns=None,
     ):
-        if resource not in {"messages", "turns", "diagnostics"}:
+        if resource not in {"messages", "turns", "diagnostics", "records"}:
             raise not_found()
         scope = digest(json_text([context_id, revision_id, resource, view, turn_id, tail_turns]).encode())
         position = decode_cursor(cursor, scope)
@@ -636,6 +648,32 @@ class Store:
             row = self._visible(db, user, context_id, revision_id, raw=True)
             return self.verified_raw(row["source_sha256"]), row["source_sha256"]
 
+    def record_chunk(self, user, context_id, revision_id, record_id, *, offset=0, limit=MAX_CHUNK_CHARS):
+        """Byte-exact native data, including invalid UTF-8 and line endings. Same ACL as raw."""
+        if offset < 0 or not 1 <= limit <= MAX_CHUNK_CHARS:
+            raise Problem(400, "invalid_range", "Invalid byte range.")
+        with self.connection() as db:
+            revision = self._visible(db, user, context_id, revision_id, raw=True)
+            row = db.execute("SELECT data_json FROM records WHERE revision_id=? AND id=?",
+                             (revision_id, record_id)).fetchone()
+            if row is None:
+                raise not_found()
+            try:
+                record = NativeRecord.model_validate_json(row[0])
+            except ValueError:
+                raise Problem(503, "record_corrupt", "Native record index failed validation.") from None
+            raw = self.verified_raw(revision["source_sha256"])
+            data = raw[record.byte_offset:record.byte_offset + record.byte_length]
+            if len(data) != record.byte_length or digest(data) != record.sha256:
+                raise Problem(503, "record_corrupt", "Native record index failed integrity verification.")
+            if offset > len(data):
+                raise Problem(400, "invalid_offset", "Offset exceeds record length.")
+            end = min(offset + limit, len(data))
+            return {"revision_id": revision_id, "record_id": record_id, "source_sha256": revision["source_sha256"],
+                    "sha256": record.sha256, "encoding": "base64", "offset_unit": "byte", "offset": offset,
+                    "total_bytes": len(data), "data": base64.b64encode(data[offset:end]).decode("ascii"),
+                    "next_offset": end if end < len(data) else None}
+
     def set_publication(self, user, context_id, revision_id, *, shared=True):
         """Publish a fixed normalized snapshot to all authenticated users of this instance."""
         with self.connection(write=True) as db:
@@ -701,7 +739,10 @@ class Store:
                     "SELECT data_json FROM diagnostics WHERE revision_id=? ORDER BY sequence", (revision_id,)
                 )
             ]
-            return NormalizedContext.model_validate(value).model_dump()
+            if value.get("record_index") is not None:
+                value["records"] = [json.loads(r[0]) for r in db.execute(
+                    "SELECT data_json FROM records WHERE revision_id=? ORDER BY sequence", (revision_id,))]
+            return NormalizedContext.model_validate(value).model_dump(exclude_unset=True)
 
     def check(self) -> dict:
         with self.connection() as db:
@@ -733,6 +774,37 @@ class Store:
                     or len(value["diagnostics"]) != rev["diagnostic_count"]
                 ):
                     raise ValueError("Catalog and normalized snapshot disagree")
+                if value.get("record_index") is not None:
+                    records = value["records"]
+                    raw = self.verified_raw(rev["source_sha256"])
+                    if len(records) != value["record_index"]["indexed_records"]:
+                        raise ValueError("Native record count disagrees")
+                    if value["record_index"]["complete"] != (len(records) == value["record_count"]):
+                        raise ValueError("Native record coverage disagrees")
+                    links = {}
+                    for message in value["session"]["messages"]:
+                        for record_id in message["source"].get("record_ids", []):
+                            links.setdefault(record_id, []).append(message["id"])
+                    offset, count = 0, 0
+                    for line, data in enumerate(io.BytesIO(raw), 1):
+                        start = offset
+                        offset += len(data)
+                        if not data.strip():
+                            continue
+                        count += 1
+                        if count > len(records):
+                            continue
+                        record = records[count - 1]
+                        if (record["byte_offset"] != start or record["byte_length"] != len(data)
+                                or record["sequence"] != count or record["line"] != line
+                                or record["id"] != f"r{line}" or digest(data) != record["sha256"]
+                                or record["message_ids"] != links.pop(record["id"], [])
+                                or (record["status"] == "projected") != bool(record["message_ids"])):
+                            raise ValueError("Native record index disagrees with original or messages")
+                    if count != value["record_count"] or len(records) > count:
+                        raise ValueError("Native record count disagrees with original")
+                    if links:
+                        raise ValueError("Message references a missing native record")
             except (Problem, ValueError):
                 errors.append({"revision_id": rev["id"], "code": "normalized_invalid"})
         return {

@@ -120,7 +120,11 @@ class Client:
             messages.append(message)
         value["session"]["messages"] = messages
         value["diagnostics"] = list(self.all_items(base + "/diagnostics"))
-        return NormalizedContext.model_validate(value).model_dump()
+        if value.get("record_index") is not None:
+            value["records"] = list(self.all_items(base + "/records"))
+            if len(value["records"]) != value["record_index"]["indexed_records"]:
+                raise ValueError("Native record index download is incomplete.")
+        return NormalizedContext.model_validate(value).model_dump(exclude_unset=True)
 
 
 def parser():
@@ -144,9 +148,10 @@ def parser():
     backup.add_argument("destination")
     backup.add_argument("--data-dir", default=".local/data")
     sub.add_parser("whoami")
+    sub.add_parser("providers", help="List adapters installed on the server")
     imp = sub.add_parser("import", help="Import an existing JSONL file as an immutable snapshot")
     imp.add_argument("file")
-    imp.add_argument("--provider", choices=["claude", "codex"], required=True)
+    imp.add_argument("--provider", required=True, help="Adapter ID; see junction providers")
     imp.add_argument("--context", help="Append to an owned context; otherwise create or deduplicate")
     imp.add_argument("--source-key", help="Stable source identity, scoped to this user; repeated shares become versions")
     imp.add_argument("--title")
@@ -156,14 +161,14 @@ def parser():
     listing.add_argument("--cursor")
     listing.add_argument("--limit", type=int, default=20)
     listing.add_argument("--shared", action="store_true", help="List only shared snapshots")
-    for name in ("get", "revisions", "export", "raw", "publish", "unpublish", "share", "revoke", "grants", "content"):
+    for name in ("get", "revisions", "export", "raw", "publish", "unpublish", "share", "revoke", "grants", "content", "record"):
         cmd = sub.add_parser(name)
         cmd.add_argument("context")
-        cmd.add_argument("--revision", required=name in {"publish", "unpublish", "share", "revoke", "grants", "content"})
+        cmd.add_argument("--revision", required=name in {"publish", "unpublish", "share", "revoke", "grants", "content", "record"})
         if name == "get":
             cmd.add_argument(
                 "--view",
-                choices=["session", "turns", "conversation", "trace", "diagnostics"],
+                choices=["session", "turns", "conversation", "trace", "diagnostics", "records"],
                 default="session",
             )
             cmd.add_argument("--turns", type=int, help="Read the last N recorded turns")
@@ -179,6 +184,9 @@ def parser():
             cmd.add_argument("--include-raw", action="store_true")
         if name == "content":
             cmd.add_argument("--message", required=True)
+        if name == "record":
+            cmd.add_argument("--record", required=True, help="Native record ID; output is base64 byte chunks")
+        if name in {"content", "record"}:
             cmd.add_argument("--offset", type=int, default=0)
             cmd.add_argument("--limit", type=int, default=16384)
     return root
@@ -244,6 +252,9 @@ def run(args):
         print_json(Store(args.data_dir).backup(args.destination))
         return
     client = Client(args.url, args.token_file)
+    if args.command == "providers":
+        print_json(client.request("/v1/providers"))
+        return
     if args.command == "whoami":
         print_json(client.request("/v1/me"))
         return
@@ -313,10 +324,11 @@ def run(args):
         print_json(result or {"revoked": True, "revision_id": meta["revision"]["id"], "user_id": args.user})
     elif args.command == "grants":
         print_json(client.request(base + "/grants"))
-    elif args.command == "content":
+    elif args.command in {"content", "record"}:
+        resource, item = ("records", args.record) if args.command == "record" else ("messages", args.message)
         print_json(
             client.request(
-                base + "/messages/" + urllib.parse.quote(args.message, safe="") + "/content",
+                base + "/" + resource + "/" + urllib.parse.quote(item, safe="") + "/content",
                 params={"offset": args.offset, "limit": args.limit},
             )
         )

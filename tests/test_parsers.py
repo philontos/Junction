@@ -28,8 +28,8 @@ def test_supported_handoff(provider, fixture, request):
     assert result.session.effective_history == "not_reconstructed"
     jsonschema.Draft202012Validator(context_schema()).validate(result.model_dump())
     if provider == "codex":
-        assert result.session.messages[2].source.lines == [4, 5]
-        assert result.session.messages[-1].source.lines == [8, 9]
+        assert next(m for m in result.session.messages if m.role == "user").source.lines == [4, 5]
+        assert next(m for m in result.session.messages if m.role == "assistant" and m.content[0].kind == "text").source.lines == [8, 9]
 
 
 def test_claude_split_messages_and_duplicate_envelopes():

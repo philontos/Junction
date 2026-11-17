@@ -3,7 +3,7 @@ from collections import defaultdict
 from junction.models import Block
 
 from .blocks import content_blocks
-from .common import Candidate, ParseState, identifier, json_text, strict_json, string
+from .common import Candidate, ParseState, identifier, json_text, metadata_block, strict_json, string
 
 LIFECYCLE = {
     "task_started",
@@ -24,6 +24,7 @@ def response_content(payload: dict, state: ParseState, line: int) -> tuple[str, 
         return string(payload.get("role")) or "unknown", content_blocks(payload.get("content"), state, line)
     if kind in {"function_call", "custom_tool_call"}:
         arguments = payload.get("arguments") if kind == "function_call" else payload.get("input")
+        arguments_text = arguments if isinstance(arguments, str) else None
         if isinstance(arguments, str) and kind == "function_call":
             try:
                 arguments = strict_json(arguments)
@@ -37,6 +38,7 @@ def response_content(payload: dict, state: ParseState, line: int) -> tuple[str, 
                 name=identifier(payload.get("name")),
                 call_id=identifier(payload.get("call_id")),
                 arguments=arguments,
+                arguments_text=arguments_text,
                 native_type=kind,
             )
         ]
@@ -108,6 +110,7 @@ def parse_codex(records: list[tuple[int, dict]], state: ParseState):
                 state.note("unknown_response_item", line, "Unrecognized response item retained in original.")
                 continue
             role, content = parsed
+            content += metadata_block(payload, ("model", "usage", "status", "channel", "phase", "end_turn"), line=line)
             if payload_type == "compaction":
                 state.note(
                     "compaction_present", line, "Compaction retained; effective history is not reconstructed."
@@ -124,12 +127,10 @@ def parse_codex(records: list[tuple[int, dict]], state: ParseState):
         elif kind == "event_msg":
             if payload_type == "task_started":
                 current_turn = identifier(payload.get("turn_id")) or current_turn
-                state.recognized += 1
-                continue
+                turn_id = current_turn
             if payload_type in LIFECYCLE:
-                state.recognized += 1
-                continue
-            if payload_type == "thread_rolled_back":
+                content = [Block(kind="marker", name=payload_type, output=payload)]
+            elif payload_type == "thread_rolled_back":
                 content = [Block(kind="marker", name="rollback", output=payload)]
                 state.note(
                     "rollback_present",
@@ -139,6 +140,7 @@ def parse_codex(records: list[tuple[int, dict]], state: ParseState):
             elif payload_type in {"user_message", "agent_message"}:
                 role = "user" if payload_type == "user_message" else "assistant"
                 content = content_blocks(payload.get("message"), state, line)
+                content += metadata_block(payload, ("phase", "channel"), line=line)
                 events.append(
                     Candidate(
                         line,
@@ -161,6 +163,7 @@ def parse_codex(records: list[tuple[int, dict]], state: ParseState):
                     content = content_blocks(
                         item.get("content") if "content" in item else item.get("text"), state, line
                     )
+                    content += metadata_block(item, ("phase", "channel", "model", "usage", "status"), line=line)
                     events.append(
                         Candidate(
                             line,
@@ -216,6 +219,7 @@ def parse_codex(records: list[tuple[int, dict]], state: ParseState):
                     turn_id=turn_id,
                     session_id=current_session,
                     is_meta=role == "system",
+                    native_role=identifier(payload.get("role")),
                 )
             )
     # Deduplicate only matching representations within an explicitly identified turn.
@@ -229,15 +233,18 @@ def parse_codex(records: list[tuple[int, dict]], state: ParseState):
         if not event.content:
             state.note("empty_event_message", event.line, "Event message contains no readable content.")
             continue
-        match = (
-            next((c for c in primaries[_display_key(event)] if c.line not in consumed), None)
-            if event.turn_id
-            else None
-        )
+        possible = [c for c in primaries[_display_key(event)] if c.line not in consumed
+                    and not (c.native_id and event.native_id and c.native_id != event.native_id)
+                    and _metadata_agrees(c, event)] if event.turn_id else []
+        match = possible[0] if len(possible) == 1 else None
         if match:
             match.duplicate_lines.append(event.line)
+            match.content.extend(b for b in event.content if b.kind == "marker" and b.name == "message_metadata")
             consumed.add(match.line)
         else:
+            if len(possible) > 1:
+                state.note("ambiguous_display_record", event.line,
+                           "Multiple primary records match this display event; all representations retained.")
             if not event.turn_id and any(c.role == event.role for c in state.candidates):
                 state.note(
                     "event_identity_unresolved",
@@ -253,6 +260,15 @@ def _display_key(candidate: Candidate):
     # Native content block names differ between response_item and item_completed.
     visible = [
         (b.kind, b.text) if b.kind == "text" else (b.kind, json_text(b.model_dump()))
-        for b in candidate.content
+        for b in candidate.content if not (b.kind == "marker" and b.name == "message_metadata")
     ]
     return candidate.session_id, candidate.turn_id, candidate.role, json_text(visible)
+
+
+def _metadata_agrees(left: Candidate, right: Candidate) -> bool:
+    def fields(candidate):
+        return {key: value for b in candidate.content
+                if b.kind == "marker" and b.name == "message_metadata"
+                for key, value in b.output["fields"].items()}
+    a, b = fields(left), fields(right)
+    return all(a[key] == b[key] for key in a.keys() & b.keys())

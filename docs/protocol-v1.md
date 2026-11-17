@@ -1,6 +1,6 @@
 # Junction v1：存储与交换契约
 
-状态：随 v0.1.0 实现，面向单节点、本地联调。研究目录中的候选协议不构成本版本的实现承诺。
+状态：随 v0.2.0 实现，兼容已有 v1 存档，面向单节点、本地联调。研究目录中的候选协议不构成本版本的实现承诺。
 
 ## 数据边界
 
@@ -23,9 +23,23 @@ Claude / Codex JSONL → 解析器 → 不可变 Revision → 分页 HTTP / CLI 
 
 内容块包括文本、可见 reasoning、工具调用、工具结果、附件引用、事件标记和未知内容标记。工具参数、结果保持 JSON 值；无法解释的参数字符串仍保留字符串。工具关联仅依赖原生 session / call ID，缺失与歧义明确标记。
 
+v0.2 起，工具参数原本是字符串时另存 `arguments_text`，避免 JSON 数值和转义形式在解析后无法回查。`marker(name=message_metadata)` 保存日志实际出现的模型、usage、结束原因、channel / phase 等字段，`output.line` 指向原始行，`output.fields` 保留原字段名和值，不统一推测各厂商的 token 口径。它放在可分页、可分块的 content 中，不塞入无限增长的消息头。Claude 已识别的辅助记录与 Codex 生命周期记录也作为 meta 标记保留。
+
 消息记录原始行号（从 1 开始）、原生 envelope/message/parent/turn/session ID；原始文件名在 Revision 上。Junction 的消息与轮次 ID 只在该 Revision 内唯一。时间戳是日志提供的字符串，不用它重排历史；顺序按原文件记录。无原生轮次时，按非 meta 用户输入推导，并标记 `inferred`。
 
-Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内容与关联信息的重复记录合并来源行号。Codex 展示事件仅在显式同一 turn 且内容吻合时与主记录配对；缺乏关联依据时保留并提示，不按全局相同文本去重。
+Claude 同一 API message ID 的分块不能直接合并；只有原生 ID、内容、关联信息和原生记录字段一致时，才合并重复记录的来源行号。Codex 展示事件仅在显式同一 session / turn、内容吻合、已有 ID 与元信息不冲突且候选唯一时与主记录配对；多个候选保留并提示，不按全局相同文本去重。`source.native_role` 保留来源角色，避免 Claude 的 user 工具结果转成 tool 后失去原角色。
+
+### 原生记录索引
+
+标准化导出新增可选的 `record_index` 和 `records[]`，与 `session.messages` 分开：原生事件不必都是对话消息。消息用 `source.record_ids` 引用记录；一条消息可关联多个展示记录，每条记录也保存反向 `message_ids`。原生 ID 和 parent ID 仍保留在 source 中；这些索引不替代原生父子关系。
+
+- `id=r<物理行号>`、`sequence`、`line`：ID 在 Revision 内有效，行号从 1 开始。
+- `byte_offset` / `byte_length` / `sha256`：相对于完整原件的字节区间及校验值，包含该行原有 BOM、CRLF / LF；末行可以没有换行。空白行不建记录，但仍在原件中。
+- `native_type`：来源 type 或 role 的标识；不以它推断可执行行为。
+- `status=projected/unmapped/invalid`：是否关联标准化消息、未映射、或无法按严格 JSON 对象读取。`projected` 仅表示建立了阅读投影，**不表示每个原生字段都已标准化**。
+- `record_index.complete`：是否索引了所有非空记录；超过 100,000 条时为 false，未索引尾部仍完整留在原件。旧版本没有该字段不等于记录已丢失。
+
+索引可按普通 Context 权限查询；原字段和字节通过原件权限读取。`GET …/records/{id}/content` 返回 base64 字节块，`offset_unit=byte`，按 `next_offset` 拼接解码后的字节即可得到原行，包括未知字段、重复 JSON 键或无效 UTF-8。该接口与 `/raw` 使用同一权限和校验规则，不能绕过独立原件授权。`records` 不是原件副本，不可独立还原完整 JSONL。
 
 附件保留路径/URL 和可用性。服务不读取日志中的本机路径、不下载 URL、不复制环境。内嵌图片本版保存在原件，标准化记录标记 `raw_only`；接收者需要原件授权才能取得这些字节。未识别的 provider 字段仍在原件中，不声称无损转换成统一结构。
 
@@ -40,6 +54,7 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 - 不指定 `source_key` 或 `context_id` 时，完全相同的上传仍可返回原 Revision，否则创建 Context。**不会仅靠原生 session ID、标题或仓库自动归并**。各版本保存完整快照；不合并两份日志、不增量 tail。已有 Context 的标题不会被追加导入改写。相同旧快照再次分享不会生成新版本或提升它的序号。
 - 原件以 SHA-256 独立寻址。多个版本甚至不同 Context 可以引用同一个不可变文件，读取权限仍按版本判断；实际 JSONL 字节改变才保存新原件。不会把持续增长的活动日志当成多个旧版本共用的可变文件。
 - 原件先通过临时文件、文件 fsync、原子 rename 和目录 fsync 落盘，再在单个 SQLite 事务中提交 Revision、Turn、Message、Diagnostic。原件落盘后数据库提交失败，最多留下未引用归档；本版不自动清理它。
+- 原生记录索引与上述标准化记录在同一事务落库。`junction check` 同时验证实际字节区间、物理行号、逐行校验值、覆盖计数及消息双向引用。
 - SQLite 使用 WAL、外键、FULL 同步及写事务串行化；读取授权和对应数据在同一读事务内完成。数据目录应在本机文件系统上，服务单进程运行。
 - 原件读取重新校验 SHA-256。`junction check` 检查 SQLite、外键、原件校验值与标准化结构/计数。`junction backup` 用 SQLite backup API 取得一致快照，复制其引用的不可变原件，再验证，最后写 `BACKUP_COMPLETE.json`。只有带完成标记的备份可用于恢复。
 
@@ -62,6 +77,7 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 | 接口 | 作用 |
 |---|---|
 | `POST /v1/imports?provider=claude` | JSONL 原始请求体；可选 context_id、source_key、source_name、title、extensions、shared |
+| `GET /v1/providers` | 已安装适配器、原生格式与解析版本，不含用户数据 |
 | `GET /v1/contexts` | 可见记录；shared_only=true 仅列共享记录 |
 | `GET /v1/contexts/{c}` | 当前用户可见的最新版本及权限 |
 | `GET /v1/contexts/{c}/revisions` | 可见版本列表；`shared_only=true` 仅含已共享版本，包含分页游标隔离 |
@@ -70,6 +86,8 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 | `GET …/{r}/messages` | conversation / trace；可按 turn_id、tail_turns 过滤 |
 | `GET …/{r}/messages/{m}/content` | 完整内容的 JSON 文本分块 |
 | `GET …/{r}/diagnostics` | 解析诊断 |
+| `GET …/{r}/records` | 分页原生记录索引，不返回原字段值 |
+| `GET …/{r}/records/{id}/content` | 原始行的 base64 字节块，独立原件授权 |
 | `GET …/{r}/raw` | 原始 JSONL，独立授权、校验 SHA-256 |
 | `PUT / DELETE …/{r}/publication` | 分享到公共列表或取消分享，所有者操作 |
 | `GET …/{r}/grants` | 所有者查看分享 |
@@ -88,9 +106,15 @@ Claude 同一 API message ID 的分块不能直接合并；相同原生 ID、内
 
 当前写入器仅写 `junction.context/1`；解析器升级允许同一原件生成新 Revision，不修改旧解释。破坏性核心结构变更使用新 schema_version；数据库迁移显式增加 user_version，未知版本拒绝启动。HTTP 兼容演进在 `/v1` 内增加能力，破坏性变更另开版本。
 
+v0.2 的存档读取器保留同一主版本的未知新增字段，不静默删除；未知协议主版本仍拒绝。API 写请求继续严格校验。新增字段不得改变现有含义，Agent 专有语义优先通过原生记录和命名空间扩展表达。旧 v0.1 CLI 使用封闭字段校验，读取新投影前需升级；当前 CLI 和 Switchyard 同时支持有 / 无记录索引的快照。
+
+`provider` 是开放格式标识（如 claude / codex），不等于模型厂商；实际导入能力由注册的适配器决定。未安装适配器明确拒绝，不能默认按 Codex 解析。`parser_version` 组合投影版本和对应适配器版本，两者任一改变都会产生新解释身份，避免升级一个适配器时误复用旧结果。详见[适配器契约](adapter-contract.md)。
+
 数据库版本 2 增加 publications 表；版本 3 增加 revision_overviews 表，保存自动整理的阅读说明。事务迁移不自动公开旧记录，不改写原件或原有标准化消息。旧版本重新导入时可补齐阅读说明，保留原版本 ID 与校验值。升级前制作完整备份。
 
 数据库版本 4 增加版本指纹和来源绑定，调整版本唯一约束以允许不同工作信息引用同一原件。迁移保留全部 Context / Revision ID、序号、权限与原文，校验外键后提交。旧 Switchyard 记录有唯一、明确的节点和任务来源时自动绑定；多个历史 Context 声称同一来源时不猜测合并。新的标准导入能力只依赖通用 `source_key`，旧扩展识别仅用于迁移兼容。
+
+数据库版本 5 只新增 records 索引表。迁移不重新解释旧 JSONL、不补写旧消息、不改变分享；旧快照导出也不凭空补入新字段。以后重新导入同一 source_key / context_id 时，新解释生成新 Revision，原件继续按 SHA-256 复用。
 
 后续按实际联调需要增加分组授权、派生关系及 Git 扩展，复用现有 Context / Revision / Grant 边界。云端部署再配置 TLS、反向代理上传限制、凭证分发和备份；当前实现不承诺公网生产运行所需的完整治理能力。
 

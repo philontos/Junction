@@ -1,26 +1,32 @@
 """The portable read contract. Provider records remain in the original archive."""
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 SCHEMA_VERSION = "junction.context/1"
-PARSER_VERSION = "0.1.0"
-Provider = Literal["claude", "codex"]
+PARSER_VERSION = "0.2.0"
+# A storage identifier, not a list of installed adapters or a model vendor name.
+Provider = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]{0,63}$")]
 
 
 class Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Diagnostic(Model):
+class PortableModel(Model):
+    # Readers retain additive fields from newer writers. API write requests remain strict.
+    model_config = ConfigDict(extra="allow")
+
+
+class Diagnostic(PortableModel):
     code: str
     severity: Literal["info", "warning", "error"] = "warning"
     line: int | None = None
     detail: str
 
 
-class SourceLocation(Model):
+class SourceLocation(PortableModel):
     lines: list[int]
     native_id: str | None = None
     native_message_id: str | None = None
@@ -28,22 +34,45 @@ class SourceLocation(Model):
     native_logical_parent_id: str | None = None
     native_turn_id: str | None = None
     native_session_id: str | None = None
+    native_role: str | None = None
+    record_ids: list[str] = Field(default_factory=list)
     record_type: str
 
 
-class Resource(Model):
+class NativeRecord(PortableModel):
+    """Index into the immutable original; never a reconstructed JSON serialization."""
+
+    id: str = Field(pattern=r"^r[1-9][0-9]*$")
+    sequence: int = Field(ge=1)
+    line: int = Field(ge=1)
+    byte_offset: int = Field(ge=0)
+    byte_length: int = Field(gt=0)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    native_type: str | None = None
+    status: Literal["projected", "unmapped", "invalid"]
+    message_ids: list[str] = Field(default_factory=list)
+
+
+class RecordIndex(PortableModel):
+    format: Literal["jsonl-bytes/1"] = "jsonl-bytes/1"
+    indexed_records: int = Field(ge=0)
+    complete: bool
+
+
+class Resource(PortableModel):
     kind: Literal["path", "url", "embedded", "unknown"]
     reference: str | None = None
     media_type: str | None = None
     availability: Literal["external_unverified", "raw_only", "unknown"]
 
 
-class Block(Model):
+class Block(PortableModel):
     kind: Literal["text", "reasoning", "tool_call", "tool_result", "attachment", "marker", "unknown"]
     text: str | None = None
     name: str | None = None
     call_id: str | None = None
     arguments: Any = None
+    arguments_text: str | None = None
     output: Any = None
     is_error: bool | None = None
     resource: Resource | None = None
@@ -52,7 +81,7 @@ class Block(Model):
     related_messages: list[str] = Field(default_factory=list)
 
 
-class Message(Model):
+class Message(PortableModel):
     id: str
     sequence: int
     turn_id: str
@@ -64,7 +93,7 @@ class Message(Model):
     is_sidechain: bool = False
 
 
-class Turn(Model):
+class Turn(PortableModel):
     id: str
     sequence: int
     boundary: Literal["native", "inferred", "preamble"]
@@ -74,7 +103,7 @@ class Turn(Model):
     preview: str
 
 
-class Session(Model):
+class Session(PortableModel):
     native_id: str | None = None
     source_version: str | None = None
     cwd: str | None = None
@@ -84,7 +113,7 @@ class Session(Model):
     messages: list[Message]
 
 
-class NormalizedContext(Model):
+class NormalizedContext(PortableModel):
     schema_version: Literal["junction.context/1"] = SCHEMA_VERSION
     provider: Provider
     parser_version: str = PARSER_VERSION
@@ -93,6 +122,8 @@ class NormalizedContext(Model):
     source_bytes: int
     record_count: int
     recognized_record_count: int
+    record_index: RecordIndex | None = None
+    records: list[NativeRecord] = Field(default_factory=list)
     session: Session
     diagnostics: list[Diagnostic]
     extensions: dict[str, Any] = Field(default_factory=dict)

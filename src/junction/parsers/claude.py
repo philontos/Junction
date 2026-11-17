@@ -3,7 +3,7 @@ from collections import defaultdict
 from junction.models import Block
 
 from .blocks import content_blocks
-from .common import Candidate, ParseState, identifier, string
+from .common import Candidate, ParseState, identifier, metadata_block, string
 
 METADATA = {
     "progress",
@@ -35,13 +35,14 @@ def parse_claude(records: list[tuple[int, dict]], state: ParseState):
         state.cwd = state.cwd or string(raw.get("cwd"))
         native_id = identifier(raw.get("uuid"))
         parent_id = identifier(raw.get("parentUuid"))
-        if kind in METADATA:
-            state.recognized += 1
-            continue
         message = raw.get("message")
+        native_role = identifier(message.get("role")) if isinstance(message, dict) else None
         is_meta = raw.get("isMeta") is True
         sidechain = raw.get("isSidechain") is True
-        if kind == "system" and raw.get("subtype") == "compact_boundary":
+        if kind in METADATA:
+            role, is_meta = "system", True
+            content = [Block(kind="marker", name=kind, output=raw, native_type=kind)]
+        elif kind == "system" and raw.get("subtype") == "compact_boundary":
             content = [
                 Block(
                     kind="marker",
@@ -62,6 +63,8 @@ def parse_claude(records: list[tuple[int, dict]], state: ParseState):
             native_id = native_id or identifier(message.get("id"))
             if content and all(b.kind == "tool_result" for b in content):
                 role = "tool"
+            content += metadata_block(message, ("model", "usage", "stop_reason", "stop_sequence"), line=line)
+            content += metadata_block(raw, ("requestId", "agentId", "permissionMode"), line=line)
         elif kind == "attachment":
             role = "system"
             content = [Block(kind="marker", name="attachment_record", output=raw.get("attachment"))]
@@ -113,6 +116,7 @@ def parse_claude(records: list[tuple[int, dict]], state: ParseState):
                 session_id=session_id or state.native_id,
                 is_meta=is_meta,
                 is_sidechain=sidechain,
+                native_role=native_role,
             )
         )
     if any(len(children) > 1 for children in user_children.values()):
