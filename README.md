@@ -100,6 +100,7 @@ junction serve --data-dir .local/backup-001 --port 8768
 - [v1 协议与存储边界](docs/protocol-v1.md)
 - [适配器契约与 Kimi / Pi 接入边界](docs/adapter-contract.md)
 - [标准化 JSON Schema](schemas/context-v1.schema.json)
+- [可选环境清单 Schema](schemas/environment-v1.schema.json)：记录来源设备观察；接收端检查与权限独立。
 - [原生结构研究](docs/research/context-sharing/native-storage.md)
 - [行业调研](docs/research/context-sharing/README.md)与[来源版本](docs/research/context-sharing/sources.md)
 

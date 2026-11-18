@@ -14,6 +14,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .environment import validate_environment
 from .errors import Problem, not_found
 from .models import NativeRecord, NormalizedContext
 from .overview import OVERVIEW_EXTENSION, OVERVIEW_GENERATOR, build_overview
@@ -325,6 +326,7 @@ class Store:
                     raise ValueError
             except (TypeError, ValueError, RecursionError):
                 raise Problem(400, "invalid_extensions", "Extensions must be a JSON object of at most 8192 characters.") from None
+            validate_environment(extensions)
         # Check ownership before spending work on normalization. Repeat inside the write transaction.
         if context_id:
             with self.connection() as db:

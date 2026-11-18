@@ -12,6 +12,7 @@ from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
 from . import __version__
+from .environment import environment_schema
 from .errors import Problem
 from .models import Model, Provider, context_schema
 from .parsers.common import strict_json
@@ -92,6 +93,10 @@ def create_app(data_dir: str | Path) -> FastAPI:
     @app.get("/v1/providers", tags=["service"])
     def installed_providers():
         return {"items": providers()}
+
+    @app.get("/v1/schema/environment", tags=["service"])
+    def environment_contract():
+        return environment_schema()
 
     @app.post("/v1/imports", tags=["contexts"])
     async def import_context(

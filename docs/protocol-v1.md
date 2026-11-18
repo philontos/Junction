@@ -72,7 +72,7 @@ Claude 同一 API message ID 的分块不能直接合并；只有原生 ID、内
 
 ## 接口
 
-所有数据接口要求 `Authorization: Bearer ...`；`/healthz`、`/v1/schema`、`/docs`、`/openapi.json` 不含用户数据。实时定义以服务的 OpenAPI 为准。响应不缓存；CLI 拒绝携带 token 跟随 HTTP 重定向。
+所有数据接口要求 `Authorization: Bearer ...`；`/healthz`、`/v1/schema`、`/v1/schema/environment`、`/docs`、`/openapi.json` 不含用户数据。实时定义以服务的 OpenAPI 为准。响应不缓存；CLI 拒绝携带 token 跟随 HTTP 重定向。
 
 | 接口 | 作用 |
 |---|---|
@@ -140,3 +140,16 @@ The CLI accepts `junction import ... --source-key tool:task:123 --extensions-fil
 阅读说明不把“最近助手声称完成”当成已核验事实。当前代码状态、目标与下一步仍由接续 Agent 结合原文和实际环境判断。
 
 旧数据可运行 `junction refresh-overviews --data-dir .local/data` 补齐标题和摘要。该命令仅更新派生说明，不改写原始 JSONL、标准化消息、Context 身份或版本校验值；重复执行跳过当前生成器版本。升级前可用 `junction backup` 保留旧说明。
+
+## Optional environment manifest
+
+`extensions["junction.environment/1"]` records observations from the executing device, separately from conversation history. Junction validates its envelope and retains the exact supplied JSON values in the immutable revision. Schema: [environment-v1.schema.json](../schemas/environment-v1.schema.json), also available at `GET /v1/schema/environment`. No database migration is needed.
+
+- `captured_at`, `collector` and `scope` identify observation time, collector version and scope. Historical evidence has its own `observed_at`; absent/unknown historical time must not inherit capture time.
+- Each group has `coverage`: `not_collected`, `partial`, `collected` or `not_applicable`. Omitted groups mean not collected. Group item IDs are unique within the group.
+- Each item separates `observed` (`present`, `missing`, `unknown`, value and source) from optional `requirement` (`required`, `optional`, `unknown`; omitted means unknown). Observed software is not automatically a task requirement.
+- Unknown categories and additive fields survive round trips. Incompatible extensions use another versioned key. Old contexts without the extension remain valid.
+- The extension is descriptive data, not credentials, executable commands, or inherited permission rules. Junction does not probe source devices or attest to the truth of client-supplied observations.
+- Receiving-device checks belong in a separate local report tied to context/revision, receiving directory and check time. They do not mutate the source manifest.
+
+The existing 8192-character extensions budget and raw archive deduplication still apply. A client fixes capture results before retries so a newly generated timestamp does not create duplicate revisions. A changed manifest produces a new revision, which can reference the same original JSONL. Configure a reverse proxy to accept the existing import API's encoded metadata query (16 KiB request-line/header capacity is recommended), as well as the 32 MiB body limit.

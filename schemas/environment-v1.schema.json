@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Collector": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "Collector",
+      "type": "object"
+    },
+    "EnvironmentGroup": {
+      "additionalProperties": true,
+      "properties": {
+        "coverage": {
+          "enum": [
+            "not_collected",
+            "partial",
+            "collected",
+            "not_applicable"
+          ],
+          "title": "Coverage",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/EnvironmentItem"
+          },
+          "maxItems": 64,
+          "title": "Items",
+          "type": "array"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "coverage"
+      ],
+      "title": "EnvironmentGroup",
+      "type": "object"
+    },
+    "EnvironmentItem": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "observed": {
+          "$ref": "#/$defs/Observation"
+        },
+        "requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Requirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "observed"
+      ],
+      "title": "EnvironmentItem",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": true,
+      "properties": {
+        "kind": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Kind",
+          "type": "string"
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "format": "date-time",
+          "title": "Observed At"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Observation": {
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "enum": [
+            "present",
+            "missing",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "value": {
+          "default": null,
+          "title": "Value"
+        },
+        "source": {
+          "$ref": "#/$defs/Evidence"
+        }
+      },
+      "required": [
+        "status",
+        "source"
+      ],
+      "title": "Observation",
+      "type": "object"
+    },
+    "Requirement": {
+      "additionalProperties": true,
+      "properties": {
+        "level": {
+          "default": "unknown",
+          "enum": [
+            "required",
+            "optional",
+            "unknown"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "constraint": {
+          "default": null,
+          "title": "Constraint"
+        }
+      },
+      "title": "Requirement",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "const": "junction.environment/1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "captured_at": {
+      "format": "date-time",
+      "title": "Captured At",
+      "type": "string"
+    },
+    "collector": {
+      "$ref": "#/$defs/Collector"
+    },
+    "scope": {
+      "additionalProperties": true,
+      "title": "Scope",
+      "type": "object"
+    },
+    "groups": {
+      "maxProperties": 32,
+      "patternProperties": {
+        "^[a-z][a-z0-9_.-]*$": {
+          "$ref": "#/$defs/EnvironmentGroup"
+        }
+      },
+      "propertyNames": {
+        "maxLength": 64,
+        "minLength": 1
+      },
+      "title": "Groups",
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "captured_at",
+    "collector",
+    "groups"
+  ],
+  "title": "Environment",
+  "type": "object"
+}
