@@ -31,6 +31,7 @@ async function refresh() {
     waiting = false; $('setup-status').textContent = '已连接，在设备卡片点击「进入工作台」即可开始';
     $('setup-status').previousElementSibling.className = 'dot online';
     $('command').parentElement.hidden = true;
+    $('setup-help').hidden = true;
   }
   const signature = JSON.stringify(items);
   if (signature === lastDevices) return;
@@ -68,7 +69,7 @@ $('install').onclick = async () => {
     // The pairing code is single-use and expires after ten minutes. It is not
     // a device credential and is never saved in browser storage.
     $('command').textContent = `curl -fsS '${origin}/install.sh' | bash -s -- '${code}'`;
-    $('command').parentElement.hidden = false; $('setup').hidden = false;
+    $('command').parentElement.hidden = false; $('setup-help').hidden = false; $('setup').hidden = false;
     $('setup-status').textContent = '等待本机连接 · 安装码 10 分钟内有效';
     $('setup-status').previousElementSibling.className = 'dot waiting';
   } catch (e) { error(e.message); } finally { $('install').disabled = false; }

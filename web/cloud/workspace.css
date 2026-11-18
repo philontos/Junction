@@ -1,0 +1,8 @@
+#onboarding-btn { display: none !important; }
+.cloud-device-link { text-decoration: none; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.cloud-device-short { display: none; }
+@media (max-width: 640px) {
+  .cloud-device-name { display: none; }
+  .cloud-device-short { display: inline; }
+  .cloud-device-link { flex-shrink: 0; font-size: 11px; }
+}

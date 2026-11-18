@@ -113,8 +113,8 @@ export function createGateway(config: GatewayConfig) {
     const device=store.device(req.params[0],u.id);if(!device)throw new CloudError(404,'设备不存在。');
     const prefix='/nodes/'+device.id;
     let html=fs.readFileSync(path.join(config.root,'web/index.html'),'utf8');
-    html=html.replace('<head>',`<head><meta name="switchyard-base" content="${prefix}">`);
-    html=html.replace('<span style="flex:1"></span>',`<span style="flex:1"></span><a href="/" class="sec" style="text-decoration:none">${escape(device.name)} · 切换设备</a>`);
+    html=html.replace('<head>',`<head><meta name="switchyard-base" content="${prefix}"><link rel="stylesheet" href="/cloud/workspace.css">`);
+    html=html.replace('<span style="flex:1"></span>',`<span style="flex:1"></span><a href="/" class="sec cloud-device-link" title="${escape(device.name)} · 切换设备"><span class="cloud-device-name">${escape(device.name)} · 切换设备</span><span class="cloud-device-short">设备</span></a>`);
     res.type('html').send(html);
   });
   app.get('/', (_req,res) => res.sendFile(path.join(config.root,'web/cloud/index.html')));

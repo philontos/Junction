@@ -350,7 +350,7 @@ async function mobileCheckin() {
 export async function initOnboarding() {
   // Cloud nodes already have an authenticated outbound connection. The VPN
   // onboarding is for direct/private access and is not a cloud prerequisite.
-  if (nodeBase()) { $("onboarding-btn").hidden = true; return; }
+  if (nodeBase()) { $("onboarding-btn").style.display = "none"; return; }
   const params = new URLSearchParams(location.search);
   phoneArrival = params.get("onboarding") === "mobile" && isMobileBrowser();
   // Read the live state first. Besides rendering the wizard, this safely

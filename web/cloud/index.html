@@ -25,7 +25,7 @@
       <div id="devices" class="devices"></div>
       <section id="setup" class="setup" hidden>
         <div class="setup-heading"><h2>连接这台电脑</h2><button id="close-setup" class="text" aria-label="关闭安装面板">关闭</button></div>
-        <p>在本机终端执行下面的命令。首次安装需要 Node.js 22+、Git 和 tmux。</p>
+        <p id="setup-help">在本机终端执行下面的命令。首次安装需要 Node.js 22+、Git 和 tmux。</p>
         <div class="command"><code id="command"></code><button id="copy">复制命令</button></div>
         <div class="setup-status"><span class="dot waiting"></span><span id="setup-status">等待本机连接 · 安装码 10 分钟内有效</span></div>
         <p class="note">安装后在后台运行。任务、代码和 Agent 凭据留在本机；共享的 Context 存到 Junction。</p>
