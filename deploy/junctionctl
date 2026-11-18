@@ -1,0 +1,26 @@
+#!/bin/sh
+# Operates only this Compose project; never changes host firewall or unrelated containers.
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+env_file=${JUNCTION_ENV_FILE:-/etc/junction/compose.env}
+compose() { docker compose --env-file "$env_file" -f "$script_dir/compose.yaml" "$@"; }
+command=${1:-help}
+if [ "$#" -gt 0 ]; then shift; fi
+case "$command" in
+  build) compose build --pull junction ;;
+  up) compose up -d --wait --wait-timeout 90 ;;
+  status) compose ps ;;
+  logs) compose logs --tail 100 "$@" ;;
+  check) compose run --rm --no-deps admin check --data-dir /data ;;
+  backup)
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    compose run --rm --no-deps admin backup "/backups/backup-$stamp-$$" --data-dir /data
+    ;;
+  admin) compose run --rm --no-deps admin "$@" --data-dir /data ;;
+  stop) compose stop ;;
+  *)
+    echo "Usage: junctionctl {build|up|status|logs|check|backup|admin COMMAND...|stop}"
+    echo "JUNCTION_ENV_FILE defaults to /etc/junction/compose.env"
+    [ "$command" = help ]
+    ;;
+esac

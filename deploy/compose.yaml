@@ -1,0 +1,83 @@
+name: ${JUNCTION_PROJECT_NAME:-junction}
+
+x-app: &app
+  image: ${JUNCTION_IMAGE:?Set JUNCTION_IMAGE to a fixed release tag}
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+
+services:
+  junction:
+    <<: *app
+    build:
+      context: ..
+      args:
+        PYTHON_IMAGE: ${JUNCTION_PYTHON_IMAGE:-python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    mem_limit: ${JUNCTION_MEMORY_LIMIT:-1g}
+    ports:
+      - "${JUNCTION_BIND_ADDRESS:-127.0.0.1}:${JUNCTION_HTTP_PORT:-8767}:8767"
+    volumes:
+      - type: bind
+        source: ${JUNCTION_DATA_DIR:?Set JUNCTION_DATA_DIR}
+        target: /data
+        bind: {create_host_path: false}
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+
+  # Administrative CLI only. No network, no long-running process, no credentials in the API container.
+  admin:
+    <<: *app
+    profiles: [admin]
+    network_mode: none
+    healthcheck: {disable: true}
+    command: [check, --data-dir, /data]
+    volumes:
+      - type: bind
+        source: ${JUNCTION_DATA_DIR}
+        target: /data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${JUNCTION_BACKUP_DIR:?Set JUNCTION_BACKUP_DIR}
+        target: /backups
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${JUNCTION_CREDENTIAL_DIR:?Set JUNCTION_CREDENTIAL_DIR}
+        target: /credentials
+        bind: {create_host_path: false}
+
+  # Enable only when the domain points here and ports 80/443 are available.
+  caddy:
+    image: ${JUNCTION_CADDY_IMAGE:-caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0}
+    profiles: [https]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 256m
+    depends_on:
+      junction: {condition: service_healthy}
+    environment:
+      JUNCTION_DOMAIN: ${JUNCTION_DOMAIN:-}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - type: bind
+        source: ${JUNCTION_PROXY_DIR:?Set JUNCTION_PROXY_DIR}/data
+        target: /data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${JUNCTION_PROXY_DIR}/config
+        target: /config
+        bind: {create_host_path: false}
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}

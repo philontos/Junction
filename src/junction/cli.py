@@ -142,6 +142,19 @@ def parser():
     admin.add_argument("--data-dir", default=".local/data")
     admin.add_argument("--output-token", required=True, help="New private file; never overwritten")
     admin.add_argument("--rotate", action="store_true")
+    device = sub.add_parser("device-add", help="Issue or rotate a credential for one user's device")
+    device.add_argument("user")
+    device.add_argument("device", help="Use the local Switchyard node ID for a Switchyard device")
+    device.add_argument("--label")
+    device.add_argument("--data-dir", default=".local/data")
+    device.add_argument("--output-token", required=True, help="New private file; never overwritten")
+    device.add_argument("--rotate", action="store_true")
+    for command in ("device-list", "device-revoke"):
+        device = sub.add_parser(command, help="List devices or revoke one device credential locally")
+        device.add_argument("user")
+        if command == "device-revoke":
+            device.add_argument("device")
+        device.add_argument("--data-dir", default=".local/data")
     check = sub.add_parser("check", help="Check database, normalized records and raw checksums")
     check.add_argument("--data-dir", default=".local/data")
     backup = sub.add_parser("backup", help="Create and verify a consistent backup in a new directory")
@@ -226,12 +239,15 @@ def run(args):
                 for sock in sockets:
                     sock.close()
         return
-    if args.command == "user-add":
+    if args.command in {"user-add", "device-add"}:
         token = new_token()
         store = Store(args.data_dir)
         save_new(args.output_token, (token + "\n").encode())
         try:
-            store.add_user(args.user, token, rotate=args.rotate)
+            if args.command == "device-add":
+                store.add_device(args.user, args.device, token, label=args.label, rotate=args.rotate)
+            else:
+                store.add_user(args.user, token, rotate=args.rotate)
         except BaseException:
             # This file was created exclusively by this operation, never an existing credential.
             Path(args.output_token).expanduser().unlink()
@@ -241,8 +257,16 @@ def run(args):
                 "user_id": args.user,
                 "token_file": str(Path(args.output_token).expanduser().resolve()),
                 "rotated": args.rotate,
+                **({"device_id": args.device} if args.command == "device-add" else {}),
             }
         )
+        return
+    if args.command == "device-list":
+        print_json({"items": Store(args.data_dir).devices(args.user)})
+        return
+    if args.command == "device-revoke":
+        Store(args.data_dir).revoke_device(args.user, args.device)
+        print_json({"user_id": args.user, "device_id": args.device, "revoked": True})
         return
     if args.command == "check":
         result = Store(args.data_dir).check()

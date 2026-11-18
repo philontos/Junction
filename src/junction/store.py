@@ -25,11 +25,16 @@ from .parsers.registry import get_adapter
 MAX_IMPORT_BYTES = 32 * 1024 * 1024
 MAX_INLINE_CHARS = 4096
 MAX_CHUNK_CHARS = 16384
-DB_VERSION = 5
+DB_VERSION = 6
 
 DDL = """
 CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS device_credentials (
+ user_id TEXT NOT NULL REFERENCES users(id), device_id TEXT NOT NULL, label TEXT NOT NULL,
+ token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ revoked_at TEXT, PRIMARY KEY(user_id, device_id)
 );
 CREATE TABLE IF NOT EXISTS contexts (
  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL,
@@ -188,7 +193,7 @@ class Store:
         db = sqlite3.connect(self.db_path, timeout=15, isolation_level=None)
         try:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, 4, DB_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, DB_VERSION):
                 raise RuntimeError(f"Unsupported database version {version}; refusing to modify it.")
             db.execute("PRAGMA journal_mode=WAL")
             # SQLite table rebuilds require FK enforcement off before BEGIN. Validate before commit.
@@ -243,14 +248,68 @@ class Store:
             else:
                 db.execute("INSERT INTO users VALUES (?,?,?)", (user, digest(token.encode()), now()))
 
-    def authenticate(self, token: str) -> str:
+    def add_device(self, user: str, device: str, token: str, *, label: str | None = None, rotate: bool = False):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", device):
+            raise Problem(400, "invalid_device", "Device id must be 1–64 letters, digits or . _ -.")
+        if label is not None and (len(label) > 100 or any(ord(c) < 32 for c in label)):
+            raise Problem(400, "invalid_label", "Device label must contain at most 100 printable characters.")
+        with self.connection(write=True) as db:
+            if not db.execute("SELECT 1 FROM users WHERE id=?", (user,)).fetchone():
+                raise not_found()
+            exists = db.execute(
+                "SELECT label FROM device_credentials WHERE user_id=? AND device_id=?", (user, device)
+            ).fetchone()
+            if exists and not rotate:
+                raise Problem(409, "device_exists", "Device already exists; use rotation explicitly.")
+            if not exists and rotate:
+                raise not_found()
+            timestamp = now()
+            if exists:
+                db.execute(
+                    "UPDATE device_credentials SET token_hash=?,label=?,updated_at=?,revoked_at=NULL "
+                    "WHERE user_id=? AND device_id=?",
+                    (digest(token.encode()), (exists["label"] if label is None else label) or device, timestamp, user, device),
+                )
+            else:
+                db.execute("INSERT INTO device_credentials VALUES (?,?,?,?,?,?,NULL)",
+                           (user, device, label or device, digest(token.encode()), timestamp, timestamp))
+
+    def devices(self, user: str) -> list[dict]:
+        with self.connection() as db:
+            if not db.execute("SELECT 1 FROM users WHERE id=?", (user,)).fetchone():
+                raise not_found()
+            return [dict(row) for row in db.execute(
+                "SELECT user_id,device_id,label,created_at,updated_at,revoked_at "
+                "FROM device_credentials WHERE user_id=? ORDER BY created_at,device_id", (user,)
+            )]
+
+    def revoke_device(self, user: str, device: str):
+        with self.connection(write=True) as db:
+            result = db.execute(
+                "UPDATE device_credentials SET revoked_at=COALESCE(revoked_at,?) "
+                "WHERE user_id=? AND device_id=?", (now(), user, device),
+            )
+            if not result.rowcount:
+                raise not_found()
+
+    def authenticate_identity(self, token: str) -> dict:
         if not 20 <= len(token) <= 256:
             raise Problem(401, "unauthorized", "A valid bearer token is required.")
         with self.connection() as db:
-            row = db.execute("SELECT id FROM users WHERE token_hash=?", (digest(token.encode()),)).fetchone()
-        if row is None:
-            raise Problem(401, "unauthorized", "A valid bearer token is required.")
-        return row["id"]
+            token_hash = digest(token.encode())
+            row = db.execute("SELECT id FROM users WHERE token_hash=?", (token_hash,)).fetchone()
+            if row is not None:
+                return {"user_id": row["id"]}
+            row = db.execute(
+                "SELECT user_id,device_id FROM device_credentials WHERE token_hash=? AND revoked_at IS NULL",
+                (token_hash,),
+            ).fetchone()
+            if row is not None:
+                return dict(row)
+        raise Problem(401, "unauthorized", "A valid bearer token is required.")
+
+    def authenticate(self, token: str) -> str:
+        return self.authenticate_identity(token)["user_id"]
 
     def raw_path(self, sha: str) -> Path:
         if not re.fullmatch("[0-9a-f]{64}", sha):

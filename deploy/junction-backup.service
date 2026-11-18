@@ -1,0 +1,11 @@
+[Unit]
+Description=Junction verified context backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+UMask=0077
+Environment=JUNCTION_ENV_FILE=/etc/junction/compose.env
+ExecStart=/srv/junction/current/deploy/junctionctl backup
+TimeoutStartSec=1h

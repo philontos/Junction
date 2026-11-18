@@ -27,10 +27,14 @@ class GrantRequest(Model):
     include_raw: bool = Field(default=False, strict=True)
 
 
-def current_user(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> str:
+def current_identity(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> dict:
     if credentials is None:
         raise Problem(401, "unauthorized", "A valid bearer token is required.")
-    return request.app.state.store.authenticate(credentials.credentials)
+    return request.app.state.store.authenticate_identity(credentials.credentials)
+
+
+def current_user(identity: dict = Depends(current_identity)) -> str:
+    return identity["user_id"]
 
 
 def create_app(data_dir: str | Path) -> FastAPI:
@@ -87,8 +91,8 @@ def create_app(data_dir: str | Path) -> FastAPI:
         return context_schema()
 
     @app.get("/v1/me", tags=["service"])
-    def me(user: str = Depends(current_user)):
-        return {"user_id": user}
+    def me(identity: dict = Depends(current_identity)):
+        return identity
 
     @app.get("/v1/providers", tags=["service"])
     def installed_providers():

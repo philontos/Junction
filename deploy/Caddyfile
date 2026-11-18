@@ -1,0 +1,28 @@
+{
+	admin off
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>uri delete
+				request>headers delete
+			}
+		}
+	}
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 2m
+			write 3m
+			idle 1m
+		}
+	}
+}
+
+{$JUNCTION_DOMAIN} {
+	request_body {
+		max_size 32MiB
+	}
+	# Avoid logging query metadata, JSONL, or Authorization headers.
+	reverse_proxy junction:8767
+}

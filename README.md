@@ -1,10 +1,12 @@
 # Junction
 
-保存、查询和共享 Agent 的历史上下文。v0.2 提供可在本机运行的 HTTP 服务、CLI，以及 Claude Code / Codex 通用的交接 skill。
+保存、查询和共享 Agent 的历史上下文。v0.3 提供 HTTP 服务、CLI、设备凭证，以及 Claude Code / Codex 通用的交接 skill。
 
 导入已有 JSONL，同时保存原始字节、标准化记录和自动整理的标题、描述、缺失标记；选择一个固定版本分享，接收方读取历史后，在自己的工作环境继续任务。Junction 不运行 Agent，也不管理仓库、worktree 或当前执行权限。
 
 ## 本地启动
+
+云端服务 + 本机 Agent 的安装、设备接入与备份流程见[部署说明](docs/deployment.md)。同一套服务既能本地运行，也可用 Docker Compose 部署到独立主机。
 
 需要 Python 3.11+，推荐 3.12。本版为单机、单进程服务；默认仅监听本机地址。
 
