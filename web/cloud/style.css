@@ -1,2 +1,67 @@
-:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:#202824;background:#f6f7f4;font-synthesis:none;--green:#235b43;--muted:#748078;--border:#dfe5dd}
-*{box-sizing:border-box}body{margin:0}header{height:88px;max-width:1160px;margin:auto;padding:0 40px;display:flex;align-items:center;justify-content:space-between}.brand{font-size:21px;font-weight:650;letter-spacing:-.6px;text-decoration:none;color:inherit}.brand span{font-size:14px;letter-spacing:0;font-weight:400;color:var(--muted);margin-left:8px}#account{display:flex;gap:20px;align-items:center;font-size:14px}main{max-width:1080px;margin:72px auto;padding:0 40px}h1{font-size:36px;letter-spacing:-1px;font-weight:620;margin:16px 0}h2{font-size:19px;font-weight:600;margin:0}p{line-height:1.7;color:#647168;font-size:15px}.eyebrow{font-size:11px;font-weight:650;letter-spacing:2px;color:var(--green)}.heading{display:flex;justify-content:space-between;gap:24px;align-items:center;margin-bottom:38px}.heading p{margin:0}button,.enter{cursor:pointer;border:1px solid var(--border);border-radius:9px;padding:11px 16px;background:white;color:inherit;font:inherit;font-size:14px;line-height:1.4;transition:background .15s}button:hover{background:#f0f3ed}button:disabled{cursor:wait;opacity:.55}.primary{background:var(--green);border-color:var(--green);color:#fff;white-space:nowrap}.primary:hover{background:#194932}.text{border:0;background:transparent;padding:6px;color:var(--muted)}.devices{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:18px}.device{background:white;border:1px solid var(--border);border-radius:14px;padding:25px;min-height:185px;display:flex;flex-direction:column;gap:22px}.device-title{display:flex;gap:14px;align-items:center}.device-icon{height:40px;width:40px;flex-shrink:0;background:#f0f4ed;border-radius:10px;display:grid;place-items:center;color:var(--green)}.device-name{font-size:17px;font-weight:600;overflow-wrap:anywhere}.status{display:flex;gap:7px;align-items:center;font-size:12px;color:var(--muted);margin-top:6px}.dot{height:7px;width:7px;border-radius:50%;display:inline-block;background:#aab4ad}.dot.online{background:#3a9369}.dot.waiting{background:#d0a443}.device-actions{display:flex;justify-content:space-between;align-items:center;margin-top:auto}.enter{text-decoration:none;color:var(--green);background:#f4f7f1;border:0;font-weight:550}.enter.offline{pointer-events:none;color:#9aa39b}.empty{padding:55px 24px;text-align:center;border:1px dashed #cdd7cc;border-radius:14px;grid-column:1/-1;color:var(--muted)}.empty strong{color:#435248;font-weight:500;display:block;margin-bottom:10px}.empty p{font-size:14px;margin:0}.setup{padding:26px;margin-top:24px;background:#edf2e9;border:1px solid #d5e0cf;border-radius:14px}.setup-heading{display:flex;justify-content:space-between;align-items:center}.command{display:flex;background:#fff;border:1px solid #d5dfcf;border-radius:9px;padding:14px;gap:18px;align-items:center}.command code{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;line-height:1.8;overflow-wrap:anywhere;flex:1}.command button{white-space:nowrap}.setup-status{display:flex;gap:9px;align-items:center;font-size:13px;margin-top:18px}.note{font-size:12px;margin-bottom:0;color:var(--muted)}.footnote{font-size:12px;margin-top:28px;color:#889288}.auth{max-width:410px;margin:30px auto}.auth h1{font-size:32px}.auth p{margin-bottom:30px}label{display:block;font-size:13px;color:#56655b;margin-top:20px}input{display:block;width:100%;font:inherit;font-size:16px;margin-top:9px;border:1px solid var(--border);border-radius:9px;padding:13px;background:#fff;color:inherit}input:focus{outline:2px solid #8eb59c;outline-offset:1px}.auth .primary{width:100%;margin-top:25px}.error{background:#fff0eb;border:1px solid #f0cdc1;padding:14px 18px;border-radius:9px;font-size:14px;color:#934c35}.loading{text-align:center;color:var(--muted)}[hidden]{display:none!important}:focus-visible{outline:2px solid #56856a;outline-offset:3px}@media(max-width:640px){header{height:70px;padding:0 22px}.brand span{display:none}main{margin:42px auto;padding:0 22px}h1{font-size:30px}.heading{display:block}.heading .primary{margin-top:24px}.devices{grid-template-columns:1fr}.command{flex-direction:column;align-items:stretch}.command button{width:100%}.setup{padding:20px}}
+/* Reuse Switchyard's theme, wordmark, typography and controls from app.css.
+   Only the device portal's layout lives here. */
+.cloud-portal { min-height: 100dvh; height: auto; overflow: auto; }
+.cloud-portal [hidden] { display: none !important; }
+.cloud-portal :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.cloud-portal .header-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cloud-portal #account { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cloud-portal #username { color: var(--muted); font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+.cloud-portal main { width: 100%; max-width: 1040px; margin: 32px auto; padding: 0 24px 24px; }
+.cloud-portal h1 { margin: 0; font-size: 20px; line-height: 1.4; font-weight: 600; letter-spacing: 0; }
+.cloud-portal h2 { margin: 0; font-size: 14px; color: var(--text); letter-spacing: 0; text-transform: none; }
+.cloud-portal p { color: var(--muted); }
+.cloud-portal .heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 20px; }
+.cloud-portal .heading p { margin: 5px 0 0; font-size: 12px; }
+.cloud-portal .heading .primary { padding: 7px 12px; white-space: nowrap; }
+.cloud-portal button:disabled { cursor: wait; opacity: .55; }
+.cloud-portal .text { background: transparent; border-color: transparent; color: var(--muted); }
+.cloud-portal .text:hover { background: var(--surface-2); color: var(--text); }
+.cloud-portal .devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.cloud-portal .device { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.cloud-portal .device-title { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.cloud-portal .device-title > div { min-width: 0; }
+.cloud-portal .device-icon { width: 36px; height: 36px; flex: none; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); display: grid; place-items: center; color: var(--muted); }
+.cloud-portal .device-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.cloud-portal .status { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.cloud-portal .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; display: inline-block; background: var(--faint); }
+.cloud-portal .dot.online { background: var(--green); }
+.cloud-portal .dot.waiting { background: var(--amber); }
+.cloud-portal .device-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
+.cloud-portal .enter { padding: 5px 10px; border: 1px solid #d9775744; border-radius: 6px; background: #d9775714; color: var(--accent-text); font-size: 12px; font-weight: 500; text-decoration: none; cursor: pointer; transition: background .12s, border-color .12s; }
+.cloud-portal .enter:hover { background: #d9775724; border-color: #d9775766; }
+.cloud-portal .enter.offline { pointer-events: none; color: var(--faint); background: var(--surface-2); border-color: var(--border); }
+.cloud-portal .device-actions .text { font-size: 11px; padding: 5px 6px; }
+.cloud-portal .empty { padding: 40px 20px; border: 1px dashed var(--border); border-radius: 8px; }
+.cloud-portal .empty strong { display: block; margin-bottom: 6px; color: var(--muted); font-weight: 500; }
+.cloud-portal .empty p { margin: 0; font-size: 12px; color: var(--faint); }
+.cloud-portal .setup { padding: 18px; margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.cloud-portal .setup-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cloud-portal .command { display: flex; align-items: center; gap: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.cloud-portal .command code { flex: 1; min-width: 0; font: 12px/1.7 Menlo, Consolas, monospace; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
+.cloud-portal .command button { flex: none; }
+.cloud-portal .setup-status { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--muted); }
+.cloud-portal .note, .cloud-portal .footnote { font-size: 11px; color: var(--faint); }
+.cloud-portal .note { margin-bottom: 0; }
+.cloud-portal .footnote { margin-top: 16px; }
+.cloud-portal .auth { max-width: 380px; margin: 32px auto; padding: 24px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.cloud-portal .auth p { margin: 8px 0 24px; font-size: 12px; }
+.cloud-portal label { display: block; margin-top: 16px; color: var(--muted); font-size: 12px; }
+.cloud-portal input { display: block; margin: 7px 0 0; padding: 9px 10px; }
+.cloud-portal .auth .primary { width: 100%; margin-top: 24px; padding: 8px 12px; }
+.cloud-portal .error { padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--red) 6%, var(--surface)); color: var(--red-text); }
+.cloud-portal .loading { text-align: center; color: var(--faint); }
+@media (max-width: 760px) {
+  .cloud-portal header { gap: 8px; padding: 10px 12px; }
+  .cloud-portal .header-actions, .cloud-portal #account { gap: 7px; }
+  .cloud-portal #username { max-width: 80px; font-size: 11px; }
+  .cloud-portal main { margin: 24px auto; padding: 0 16px 20px; }
+  .cloud-portal .heading { gap: 12px; }
+  .cloud-portal .heading h1 { font-size: 18px; }
+  .cloud-portal .devices { grid-template-columns: 1fr; }
+  .cloud-portal button, .cloud-portal .enter { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
+  .cloud-portal .device { gap: 20px; }
+  .cloud-portal .command { flex-direction: column; align-items: stretch; gap: 12px; }
+  .cloud-portal .setup { padding: 16px; }
+  .cloud-portal input { font-size: 16px; }
+  .cloud-portal .auth { margin: 12px auto; padding: 20px; }
+}

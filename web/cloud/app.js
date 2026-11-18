@@ -1,4 +1,14 @@
 const $ = id => document.getElementById(id);
+Theme.init();
+function renderThemeToggle() {
+  const toLight = Theme.theme === 'dark';
+  $('theme-toggle').textContent = toLight ? '☀️' : '🌙';
+  $('theme-toggle').title = toLight ? '切换浅色主题' : '切换深色主题';
+  $('theme-toggle').setAttribute('aria-label', $('theme-toggle').title);
+}
+Theme.onChange = renderThemeToggle;
+$('theme-toggle').onclick = () => Theme.toggle();
+renderThemeToggle();
 const setupCode = new URLSearchParams(location.hash.slice(1)).get('setup');
 if (location.hash) history.replaceState(null, '', location.pathname);
 let signedIn = false, knownDevices = new Set(), waiting = false, lastDevices = '';
@@ -45,7 +55,9 @@ async function refresh() {
     const card = document.createElement('article'); card.className = 'device';
     card.innerHTML = `<div class="device-title"><span class="device-icon">${computer}</span><div><div class="device-name"></div><div class="status"><span class="dot ${d.online ? 'online' : ''}"></span>${d.online ? '在线 · 在此设备执行' : '离线 · 等待节点连接'}</div></div></div><div class="device-actions"><a class="enter ${d.online ? '' : 'offline'}">进入工作台 →</a><button class="text">解除绑定</button></div>`;
     card.querySelector('.device-name').textContent = d.name;
-    card.querySelector('a').href = '/workspace/' + encodeURIComponent(d.id) + '/';
+    const enter = card.querySelector('a');
+    if (d.online) enter.href = '/workspace/' + encodeURIComponent(d.id) + '/';
+    else { enter.setAttribute('aria-disabled', 'true'); enter.textContent = '设备离线'; }
     card.querySelector('button').onclick = async () => {
       if (!confirm(`解除「${d.name}」的绑定？云端将不能再控制它，本机任务仍会保留。`)) return;
       try { await api('devices/' + d.id, {}, 'DELETE'); await refresh(); } catch (e) { error(e.message); }
@@ -81,5 +93,5 @@ $('copy').onclick = async () => {
 };
 try { const current = await api('session'); if (setupCode || !current.user_id) auth(); else await workspace(current.user_id); }
 catch (e) { auth(); error(e.message); }
-finally { $('loading').hidden = true; }
+finally { $('cloud-loading').hidden = true; }
 setInterval(() => { if (signedIn && !document.hidden) refresh().catch(e => error(e.message)); }, 5000);
