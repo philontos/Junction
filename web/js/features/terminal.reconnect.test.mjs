@@ -38,6 +38,7 @@ beforeEach(t => {
     document: {
       ...eventTarget(), visibilityState: "visible", body: element(),
       createElement: element,
+      querySelector: () => null,
       getElementById(id) {
         if (!elements.has(id)) elements.set(id, element());
         return elements.get(id);
@@ -105,6 +106,12 @@ function attach(id = 1) {
   openPty(`session=task-${id}`, `Task ${id}`, "", id);
   return sockets.at(-1);
 }
+
+test("cloud workspace pins terminal connections to its device URL", () => {
+  document.querySelector = () => ({ content: "/nodes/owned-device" });
+  const socket = attach();
+  assert.match(socket.url, /^wss:\/\/switchyard\.test\/nodes\/owned-device\/pty\?/);
+});
 
 function visibility(state) {
   document.visibilityState = state;

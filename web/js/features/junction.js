@@ -1,4 +1,4 @@
-import { $, api } from "../core/dom.js";
+import { $, api, nodePath } from "../core/dom.js";
 import { state } from "../core/state.js";
 import { toast } from "../core/feedback.js";
 import { readShareStream } from "./junction-stream.js";
@@ -407,7 +407,7 @@ async function shareTask(taskId) {
   $("term-share-context").disabled = true;
   renderShare(job);
   try {
-    const response = await fetch("/api/junction/publish?stream=1", {
+    const response = await fetch(nodePath("/api/junction/publish?stream=1"), {
       method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang },
       body: JSON.stringify({ task_id: taskId }), signal: AbortSignal.timeout(180000),
     });

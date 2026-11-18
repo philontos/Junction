@@ -7,8 +7,10 @@
 //                (e.g. delRepo reads body.liveCount to offer a force delete).
 
 export const $ = (id) => document.getElementById(id);
+export const nodeBase = () => document.querySelector('meta[name="switchyard-base"]')?.content || "";
+export const nodePath = (url) => /^\/api\/|^\/pty(?:\?|$)/.test(url) ? nodeBase() + url : url;
 
-export const api = (u, opt = {}) => fetch(u, { ...opt, headers: { ...(opt.headers || {}), "X-Lang": I18N.lang } })
+export const api = (u, opt = {}) => fetch(nodePath(u), { ...opt, headers: { ...(opt.headers || {}), "X-Lang": I18N.lang } })
   .then(async r => {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { const e = new Error(j.error || r.status); e.status = r.status; e.body = j; throw e; }

@@ -1,6 +1,6 @@
 // Evidence-backed first-run flow. The server owns every system check; this
 // module only renders the next useful action and never caches readiness.
-import { $, api } from "../core/dom.js";
+import { $, api, nodeBase } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 
 let onboarding = null;
@@ -348,6 +348,9 @@ async function mobileCheckin() {
 }
 
 export async function initOnboarding() {
+  // Cloud nodes already have an authenticated outbound connection. The VPN
+  // onboarding is for direct/private access and is not a cloud prerequisite.
+  if (nodeBase()) { $("onboarding-btn").hidden = true; return; }
   const params = new URLSearchParams(location.search);
   phoneArrival = params.get("onboarding") === "mobile" && isMobileBrowser();
   // Read the live state first. Besides rendering the wizard, this safely

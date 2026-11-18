@@ -1,0 +1,23 @@
+[Unit]
+Description=Switchyard cloud web and node gateway
+After=network-online.target junction.service
+Wants=network-online.target
+[Service]
+User=switchyard-cloud
+Group=switchyard-cloud
+WorkingDirectory=/srv/switchyard-cloud/current
+EnvironmentFile=/etc/switchyard-cloud/gateway.env
+Environment=PATH=/opt/switchyard-node/bin:/usr/bin:/bin
+ExecStart=/opt/switchyard-node/bin/node --import tsx server/cloud/main.ts
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/switchyard-cloud/data
+RestrictSUIDSGID=yes
+LimitNOFILE=8192
+[Install]
+WantedBy=multi-user.target

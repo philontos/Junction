@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Switchyard · 我的设备</title>
+  <link rel="stylesheet" href="/cloud/style.css">
+  <script type="module" src="/cloud/app.js"></script>
+</head>
+<body>
+  <header><a class="brand" href="/">Switchyard<span> / Junction</span></a><div id="account" hidden><span id="username"></span><button id="logout" class="text">退出</button></div></header>
+  <main>
+    <section id="auth" class="auth" hidden>
+      <span class="eyebrow">YOUR AGENTS. YOUR MACHINE.</span>
+      <h1 id="auth-title">回到你的工作台</h1>
+      <p id="auth-description">在网页管理任务，用本机的 Agent 继续工作。</p>
+      <form id="auth-form">
+        <label id="user-label">账号<input id="user" name="username" autocomplete="username" required maxlength="64" placeholder="你的账号"></label>
+        <label>密码<input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256" placeholder="输入密码"></label>
+        <button id="submit" class="primary" type="submit">登录</button>
+      </form>
+    </section>
+    <section id="workspace" hidden>
+      <div class="heading"><div><span class="eyebrow">WORK WHERE YOU ARE</span><h1>我的设备</h1><p>选择一台在线设备，开始任务或接续共享 Context。</p></div><button id="install" class="primary">＋ 安装本机节点</button></div>
+      <div id="devices" class="devices"></div>
+      <section id="setup" class="setup" hidden>
+        <div class="setup-heading"><h2>连接这台电脑</h2><button id="close-setup" class="text" aria-label="关闭安装面板">关闭</button></div>
+        <p>在本机终端执行下面的命令。首次安装需要 Node.js 22+、Git 和 tmux。</p>
+        <div class="command"><code id="command"></code><button id="copy">复制命令</button></div>
+        <div class="setup-status"><span class="dot waiting"></span><span id="setup-status">等待本机连接 · 安装码 10 分钟内有效</span></div>
+        <p class="note">安装后在后台运行。任务、代码和 Agent 凭据留在本机；共享的 Context 存到 Junction。</p>
+      </section>
+      <p class="footnote">本机 Agent 使用本机已有的 CLI、权限和环境。设备离线时，云端不会代替它执行任务。</p>
+    </section>
+    <p id="error" class="error" role="alert" hidden></p>
+    <p id="loading" class="loading">正在连接工作台…</p>
+  </main>
+</body>
+</html>

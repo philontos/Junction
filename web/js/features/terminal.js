@@ -7,7 +7,7 @@
 // from the list — see disposePty/prunePanes, called from tasks.js). The live-pane
 // set is therefore bounded by the set of active tasks; no separate eviction needed.
 // Terminal/FitAddon are the globals from the vendored xterm scripts.
-import { $, api } from "../core/dom.js";
+import { $, api, nodePath } from "../core/dom.js";
 import { toast } from "../core/feedback.js";
 import { createCodexUserMarkerOverlay } from "./codex-terminal-markers.js";
 import { activateCanvasRenderer } from "./terminal-canvas.js";
@@ -460,7 +460,7 @@ function ensureSocket(p) {
   if (p.ws && (p.ws.readyState === 0 || p.ws.readyState === 1)) return;   // CONNECTING/OPEN
   closeSocket(p);
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = p.ws = new WebSocket(`${proto}://${location.host}/pty?${p.query}&lang=${I18N.lang}`);
+  const ws = p.ws = new WebSocket(`${proto}://${location.host}${nodePath(`/pty?${p.query}&lang=${I18N.lang}`)}`);
   p.startup.connecting();
   const isCurrent = () => p.ws === ws && panes.get(p.id) === p;
   let firstOutput = true;
@@ -626,7 +626,7 @@ async function uploadPasteImage(taskId, blob) {
   try {
     const target = pasteImageUrl(taskId);
     if (!target) throw new Error("invalid task id");
-    const res = await fetch(target, {
+    const res = await fetch(nodePath(target), {
       method: "POST",
       headers: { "content-type": blob.type || "image/png", "X-Lang": I18N.lang },
       body: blob,

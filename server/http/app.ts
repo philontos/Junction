@@ -6,9 +6,14 @@ import path from "node:path";
 import { ROOT, WEB_DIR } from "../core/paths.js";
 import { registerRoutes } from "./routes.js";
 import { registerJunctionRoutes } from "../junction/routes.js";
+import { permitsNodeRequest } from "./nodeguard.js";
 
 export function createApp() {
   const app = express();
+  app.use((req, res, next) => {
+    if (!permitsNodeRequest(req)) { res.status(403).json({error:'Open this device through the cloud workspace.'}); return; }
+    next();
+  });
   app.use(express.json());
   // Highlight.js is pinned as an installed dependency and exposed locally only
   // under this narrow path. The browser loads the common bundle lazily, then a

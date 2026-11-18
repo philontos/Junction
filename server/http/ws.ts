@@ -13,6 +13,7 @@ import { cancelCopyMode, ensureSessionOptions, pasteSubmit } from "../session/tm
 import { tr, langFromQuery } from "../core/i18n.js";
 import { getHost, SSH_BIN, MOSH_BIN, TMUX_BIN, SESSION_RE } from "./context.js";
 import { listOwnedTasks } from "../core/ownership.js";
+import { permitsNodeRequest } from "./nodeguard.js";
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -101,6 +102,7 @@ wss.on("connection", async (ws, req) => {
 
 export function attachWs(server: Server) {
 server.on("upgrade", (req, socket, head) => {
+  if (!permitsNodeRequest(req)) { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
   const { pathname } = new URL(req.url || "", "http://localhost");
   if (pathname === "/pty") {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));

@@ -1,0 +1,13 @@
+[Unit]
+Description=Back up Switchyard gateway database and Junction credentials
+[Service]
+Type=oneshot
+User=switchyard-cloud
+Group=switchyard-cloud
+Environment=PATH=/opt/switchyard-node/bin:/usr/bin:/bin
+ExecStart=/bin/bash /srv/switchyard-cloud/current/deploy/cloud/backup.sh
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/switchyard-cloud/data /srv/switchyard-cloud/backups
