@@ -12,6 +12,7 @@ import { toast } from "../core/feedback.js";
 import { createCodexUserMarkerOverlay } from "./codex-terminal-markers.js";
 import { activateCanvasRenderer } from "./terminal-canvas.js";
 import { mountTerminalImeGuard } from "./terminal-ime.js";
+import { mountTerminalStartup } from "./terminal-startup.js";
 
 // taskId -> { id, pane, term, fit, ws, query, agent, title, attach,
 //             codeTarget, referenceTarget, resizeKey }
@@ -366,6 +367,7 @@ function createPane(id, query, agent) {
     needsReconnect: false, retryTimer: null, connectTimer: null,
     retryDelay: RETRY_MIN_MS, disconnectNotified: false,
     imeGuard,
+    startup: mountTerminalStartup(pane, term),
     disposed: false,
     codexMarkers: null,
     userTurnSource: null, userTurnCursor: 0, userTurnMessages: [],
@@ -459,6 +461,7 @@ function ensureSocket(p) {
   closeSocket(p);
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = p.ws = new WebSocket(`${proto}://${location.host}/pty?${p.query}&lang=${I18N.lang}`);
+  p.startup.connecting();
   const isCurrent = () => p.ws === ws && panes.get(p.id) === p;
   let firstOutput = true;
   let openedAt = null;
@@ -471,6 +474,7 @@ function ensureSocket(p) {
     p.disconnectNotified = false;
     if (activeId === p.id) { try { p.fit.fit(); } catch {} }
     sendResize(p);
+    p.startup.connected(p.agent);
   };
   ws.onmessage = (e) => {
     if (!isCurrent() || typeof e.data !== "string" || !e.data) return;
@@ -478,6 +482,7 @@ function ensureSocket(p) {
     firstOutput = false;
     p.term.write(e.data, () => {
       if (!isCurrent()) return;
+      p.startup.inspect();
       if (restoreView && activeId === p.id) {
         p.term.scrollToBottom();
         p.term.refresh(0, p.term.rows - 1);
@@ -491,6 +496,7 @@ function ensureSocket(p) {
     // sustained connection resets backoff, so repeated attach failures slow down.
     if (openedAt !== null && Date.now() - openedAt >= STABLE_CONNECTION_MS) p.retryDelay = RETRY_MIN_MS;
     closeSocket(p);
+    p.startup.hide();
     if (!p.disconnectNotified) {
       p.term.write(`\r\n\x1b[90m${I18N.t("term.disconnected")}\x1b[0m\r\n`);
       p.disconnectNotified = true;
@@ -783,7 +789,7 @@ export function openPty(
   referenceTarget = null,
 ) {
   if (taskId == null) return;
-  const normalizedAgent = agent === "codex" || agent === "kimi" ? agent : "claude";
+  const normalizedAgent = ["codex", "kimi", "shell"].includes(agent) ? agent : "claude";
   let p = panes.get(taskId);
   if (!p) p = createPane(taskId, query, normalizedAgent);
   else {
@@ -811,6 +817,7 @@ export function disposePty(id) {
   p.disposed = true;
   clearUserTurnRetry(p);
   closeSocket(p);
+  p.startup.dispose();
   try { p.imeGuard?.dispose(); } catch {}
   try { p.codexMarkers?.dispose(); } catch {}
   try { p.term.dispose(); } catch {}

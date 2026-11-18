@@ -33,6 +33,11 @@
       // terminal dock
       "term.notConnected": "未连接",
       "term.disconnected": "[已断开]",
+      "term.connecting": "正在连接终端…",
+      "term.starting.codex": "正在启动 Codex…",
+      "term.starting.claude": "正在启动 Claude Code…",
+      "term.starting.kimi": "正在启动 Kimi Code…",
+      "term.waitingOutput": "等待终端输出…",
       "term.creating": "正在创建任务…",
       "task.creating": "创建中…",
       "term.creationFailed": "创建失败",
@@ -388,6 +393,11 @@
 
       "term.notConnected": "Not connected",
       "term.disconnected": "[disconnected]",
+      "term.connecting": "Connecting to terminal…",
+      "term.starting.codex": "Starting Codex…",
+      "term.starting.claude": "Starting Claude Code…",
+      "term.starting.kimi": "Starting Kimi Code…",
+      "term.waitingOutput": "Waiting for terminal output…",
       "term.creating": "Creating task…",
       "task.creating": "Creating…",
       "term.creationFailed": "Creation failed",

@@ -272,7 +272,7 @@ export function connect(id) {
     references: t.references || [],
   } : null;
   openPty(`session=${encodeURIComponent(t.session)}`,
-    `#${t.id} ${t.title}`, "tmux attach -t " + t.session, t.id, t.claude_session || "", t.agent, codeTarget, referenceTarget);
+    `#${t.id} ${t.title}`, "tmux attach -t " + t.session, t.id, t.claude_session || "", t.kind === "local" ? "shell" : t.agent, codeTarget, referenceTarget);
 }
 
 // The agent picker (Claude Code | Codex | Kimi Code). Persists the last pick so the next

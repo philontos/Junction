@@ -148,7 +148,7 @@ export function connectNode(hostId, taskId) {
         references: tk.references || [],
       }
     : null;
-  openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, attach, paneId, "", tk.agent, codeTarget, referenceTarget);
+  openPty(`session=${encodeURIComponent(tk.session)}&host=${hostId}`, `#${tk.id} ${tk.title}`, attach, paneId, "", tk.kind === "local" ? "shell" : tk.agent, codeTarget, referenceTarget);
   renderList();
 }
 
