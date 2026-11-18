@@ -1,0 +1,30 @@
+#!/bin/sh
+# Native deployment administration; uses this release's interpreter and fixed data directory.
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+release_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+run() {
+  if [ "$(id -u)" = 0 ]; then
+    exec runuser -u junction -- "$release_dir/.venv/bin/junction" "$@"
+  elif [ "$(id -un)" = junction ]; then
+    exec "$release_dir/.venv/bin/junction" "$@"
+  else
+    echo "Run as root or the junction service user." >&2
+    exit 1
+  fi
+}
+command=${1:-help}
+if [ "$#" -gt 0 ]; then shift; fi
+case "$command" in
+  check) run check --data-dir /srv/junction/data ;;
+  backup)
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    run backup "/srv/junction/backups/backup-$stamp-$$" --data-dir /srv/junction/data
+    ;;
+  admin) run "$@" --data-dir /srv/junction/data ;;
+  *)
+    echo "Usage: junctionctl {check|backup|admin COMMAND...}"
+    echo "Use systemctl to manage junction.service and junction-backup.timer."
+    [ "$command" = help ]
+    ;;
+esac

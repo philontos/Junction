@@ -51,6 +51,35 @@ curl --fail http://127.0.0.1:8767/healthz
 
 `up` 等待健康检查，失败返回非零。容器随 Docker 重启，日志轮换保留至多 3 × 10 MiB。服务和默认 Caddy 配置不记录 HTTP 访问日志；复用其他网关时同样避免记录 Authorization、请求正文以及含环境描述的完整查询参数。
 
+## 无 Docker 的主机
+
+已有系统服务的轻量 VPS 可以使用 `deploy/native/` 的 systemd 单元。应用、数据格式和 API 相同；选择一种部署方式，不同时启动两个实例。
+
+安装 Python 3.12 和 pip（AlmaLinux 9：`dnf install python3.12 python3.12-pip`），创建专用系统用户 `junction`，shell 设为 `nologin`。沿用上面的 release、data、backups、credentials 目录；后三者改由此用户拥有，权限 700。代码和虚拟环境由 root 拥有，服务用户不可修改。
+
+在新 release 中安装固定依赖，再将 `current` 指向它：
+
+```sh
+python3.12 -m venv .venv
+.venv/bin/pip install --constraint requirements.lock .
+# 首次安装；升级时仍先用旧 release 的 CLI 完成备份
+install -m 0644 deploy/native/junction.service /etc/systemd/system/
+install -m 0644 deploy/native/junction-backup.service deploy/junction-backup.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now junction.service junction-backup.timer
+curl --fail http://127.0.0.1:8767/healthz
+deploy/native/junctionctl check
+systemctl start junction-backup.service
+```
+
+`junctionctl` 随 release 带有执行权限；若通过未保留文件模式的方式传输，只对该脚本执行 `chmod 755 deploy/native/junctionctl`。
+
+原生服务仅监听 `127.0.0.1:8767`，以低权限用户运行，代码只读，仅数据目录可写。管理命令使用 `deploy/native/junctionctl admin ...`，凭证输出路径为 `/srv/junction/credentials/...`。备份仍通过 SQLite 在线备份 API 完成。
+
+无域名的联调可通过 SSH 本地转发：`ssh -N -L 127.0.0.1:18767:127.0.0.1:8767 USER@HOST`，本机 Switchyard 连接 `http://127.0.0.1:18767`。长期隧道使用专用低权限用户和仅允许访问该端口的密钥，由本机进程管理器保持连接；不保存 root 密码。后续添加 HTTPS 网关时只需切换设备服务地址。隧道是该设备的连接方式，其他设备需建立自己的连接。
+
+参考：[systemd 服务隔离](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)、[OpenSSH 密钥限制](https://man.openbsd.org/sshd#AUTHORIZED_KEYS_FILE_FORMAT)。
+
 ## 连接设备
 
 创建用户一次，再为每个本机 Switchyard 的设备 ID 发放独立凭证：
