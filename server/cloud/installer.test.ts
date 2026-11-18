@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { CloudStore, digest } from './store.js';
+import { requestGateway } from './install-network.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const quote=(s:string)=>"'"+s.replaceAll("'","'\\''")+"'";
@@ -16,6 +17,17 @@ function shell(dir:string, code:string, env:Record<string,string>={}) {
     {encoding:'utf8',env:{...process.env,...env},timeout:15000});
 }
 function executable(file:string,source:string){fs.writeFileSync(file,'#!/bin/bash\nset -eu\n'+source,{mode:0o700});}
+
+test('setup retries transient failures, preserves auth errors and never retries enrollment implicitly',async()=>{
+  let calls=0;
+  const io={fetch:(async()=>{calls++;if(calls===1)throw new TypeError('fetch failed');return new Response('{}',{status:calls===2?503:200});}) as typeof fetch,delay:async()=>{},retry:()=>{}};
+  assert.equal((await requestGateway('https://example.test','/hub/node',{},3,io)).status,200);assert.equal(calls,3);
+  calls=0;io.fetch=(async()=>{calls++;return new Response('{}',{status:401});}) as typeof fetch;
+  assert.equal((await requestGateway('https://example.test','/hub/node',{},3,io)).status,401);assert.equal(calls,1);
+  calls=0;io.fetch=(async()=>{calls++;throw new TypeError('fetch failed');}) as typeof fetch;
+  await assert.rejects(requestGateway('https://example.test','/hub/enroll',{},1,io));assert.equal(calls,1);
+  calls=0;await assert.rejects(requestGateway('https://example.test','/hub/node',{},3,io));assert.equal(calls,3);
+});
 
 test('installation claim is device-bound, extends only once, survives restart and preserves enrollment',t=>{
   const dir=temp(t);let store=new CloudStore(dir);t.after(()=>store.db.close());

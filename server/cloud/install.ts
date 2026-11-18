@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { requestGateway } from './install-network.js';
 
 const [origin, directory] = process.argv.slice(2);
 if (!origin || new URL(origin).protocol !== 'https:' || !directory || !path.isAbsolute(directory)) throw new Error('Invalid installation target');
@@ -25,18 +26,18 @@ const identityFile = path.join(dir, 'data/controller-id');
 let instance: string;
 if (fs.existsSync(identityFile)) instance = fs.readFileSync(identityFile,'utf8').trim();
 else { instance = crypto.randomBytes(4).toString('hex'); save(identityFile,instance+'\n'); }
-const claim=await fetch(origin+'/hub/installations/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,instance_id:instance}),signal:AbortSignal.timeout(15000)});
+const claim=await requestGateway(origin,'/hub/installations/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,instance_id:instance})});
 if(!claim.ok)throw new Error((await claim.json() as any).error || '安装码无效，请在网页重新生成命令。');
 let config: any;
 async function identity(token:string) {
-  const response=await fetch(origin+'/hub/node',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)});
+  const response=await requestGateway(origin,'/hub/node',{headers:{Authorization:'Bearer '+token}});
   if(response.status===401)return undefined;
   if(!response.ok)throw new Error('暂时无法核对设备身份，请检查网络后重试。');
   return await response.json() as any;
 }
-async function progress(status:string,step='start') {
-  const response=await fetch(origin+'/hub/installations/progress',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+config.device_token},
-    body:JSON.stringify({code,instance_id:instance,step,status,issue:'none'}),signal:AbortSignal.timeout(15000)});
+async function progress(status:string,step='start',attempts=3) {
+  const response=await requestGateway(origin,'/hub/installations/progress',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+config.device_token},
+    body:JSON.stringify({code,instance_id:instance,step,status,issue:'none'})},attempts);
   if(!response.ok)throw new Error((await response.json() as any).error || '无法确认安装状态，请重试。');
 }
 if (fs.existsSync(configFile)) {
@@ -60,11 +61,17 @@ if (!config) {
   // A prior pending credential may have been revoked. A 401 confirms it is
   // not an active identity; rotate it before starting a fresh enrollment.
   pending.device_token=crypto.randomBytes(32).toString('base64url');save(pendingFile,JSON.stringify(pending)+'\n');
-  const result = await fetch(origin+'/hub/enroll',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({code,instance_id:instance,name:os.hostname(),device_token:pending.device_token}),signal:AbortSignal.timeout(15000)});
-  const body = await result.json() as any;
-  if (!result.ok) throw new Error(body.error || '绑定失败');
-  config = {...body,server:origin,schema_version:1};
+  try {
+    const result = await requestGateway(origin,'/hub/enroll',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code,instance_id:instance,name:os.hostname(),device_token:pending.device_token})},1);
+    const body = await result.json() as any;
+    if (!result.ok) throw new Error(body.error || '绑定失败');
+    config = {...body,server:origin,schema_version:1};
+  }catch(error){
+    const confirmed=await identity(pending.device_token);
+    if(!confirmed)throw error;
+    config={...confirmed,device_token:pending.device_token,server:origin,schema_version:1};
+  }
   }
   save(configFile,JSON.stringify(config,null,2)+'\n');
   fs.unlinkSync(pendingFile);
@@ -111,13 +118,14 @@ if (process.platform === 'darwin') {
 } else throw new Error('当前支持 macOS 和 Linux。');
 console.log('  等待本机服务和云端连接验证…');
 let ready=false;
-for(let attempt=0;attempt<90;attempt++) {
+const deadline=Date.now()+90000;
+while(Date.now()<deadline) {
   try {
     const runtime=JSON.parse(fs.readFileSync(path.join(dir,'runtime.json'),'utf8'));
     if(runtime.device_id===config.device_id && runtime.root===root && runtime.started_at>=startTime && runtime.state==='online'){
       process.kill(runtime.pid,0);
       const response=await fetch(`http://127.0.0.1:${runtime.port}/api/junction/connection`,{signal:AbortSignal.timeout(1500)});
-      if(response.ok){await progress('succeeded','complete');ready=true;break;}
+      if(response.ok){await progress('succeeded','complete',1);ready=true;break;}
     }
   }catch{}
   await new Promise(resolve=>setTimeout(resolve,1000));
