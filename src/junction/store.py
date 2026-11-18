@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .errors import Problem, not_found
 from .models import NativeRecord, NormalizedContext
-from .overview import OVERVIEW_EXTENSION, build_overview
+from .overview import OVERVIEW_EXTENSION, OVERVIEW_GENERATOR, build_overview
 from .parsers import normalize
 from .parsers.common import json_text
 from .parsers.registry import get_adapter
@@ -467,6 +467,39 @@ class Store:
     def _save_overview(db, revision_id, parsed, title):
         db.execute("INSERT OR IGNORE INTO revision_overviews VALUES (?,?)",
                    (revision_id, json_text(build_overview(parsed, title))))
+
+    def refresh_overviews(self):
+        """Rebuild derived reading aids from saved messages, without reparsing archives."""
+        updated = unchanged = 0
+        with self.connection() as db:
+            ids = [r[0] for r in db.execute("SELECT id FROM revisions ORDER BY rowid")]
+        for rid in ids:
+            # One revision per transaction bounds the write lock and is safe to resume.
+            with self.connection(write=True) as db:
+                row = db.execute("SELECT r.*,c.title FROM revisions r JOIN contexts c ON c.id=r.context_id "
+                                 "WHERE r.id=?", (rid,)).fetchone()
+                old = db.execute("SELECT data_json FROM revision_overviews WHERE revision_id=?", (rid,)).fetchone()
+                overview = json.loads(old[0]) if old else {}
+                if overview.get("generator") == OVERVIEW_GENERATOR:
+                    unchanged += 1
+                    continue
+                value = json.loads(row["header_json"])
+                value["session"]["turns"] = []
+                value["session"]["messages"] = [
+                    {**json.loads(m["data_json"]), "content": json.loads(m["content_json"])}
+                    for m in db.execute("SELECT data_json,content_json FROM messages WHERE revision_id=? "
+                                        "ORDER BY sequence", (rid,))
+                ]
+                value["diagnostics"] = [json.loads(d[0]) for d in db.execute(
+                    "SELECT data_json FROM diagnostics WHERE revision_id=? ORDER BY sequence", (rid,))]
+                title = overview.get("title") if overview.get("title_source") == "provided" else None
+                if not old:
+                    title = row["title"]
+                data = build_overview(NormalizedContext.model_validate(value), title)
+                db.execute("INSERT INTO revision_overviews VALUES (?,?) ON CONFLICT(revision_id) "
+                           "DO UPDATE SET data_json=excluded.data_json", (rid, json_text(data)))
+                updated += 1
+        return {"updated": updated, "unchanged": unchanged, "generator": OVERVIEW_GENERATOR}
 
     @staticmethod
     def _header(db, row):

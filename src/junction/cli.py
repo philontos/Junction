@@ -147,6 +147,8 @@ def parser():
     backup = sub.add_parser("backup", help="Create and verify a consistent backup in a new directory")
     backup.add_argument("destination")
     backup.add_argument("--data-dir", default=".local/data")
+    overviews = sub.add_parser("refresh-overviews", help="Refresh derived titles and summaries from saved messages")
+    overviews.add_argument("--data-dir", default=".local/data")
     sub.add_parser("whoami")
     sub.add_parser("providers", help="List adapters installed on the server")
     imp = sub.add_parser("import", help="Import an existing JSONL file as an immutable snapshot")
@@ -250,6 +252,9 @@ def run(args):
         return
     if args.command == "backup":
         print_json(Store(args.data_dir).backup(args.destination))
+        return
+    if args.command == "refresh-overviews":
+        print_json(Store(args.data_dir).refresh_overviews())
         return
     client = Client(args.url, args.token_file)
     if args.command == "providers":

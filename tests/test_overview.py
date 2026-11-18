@@ -72,3 +72,84 @@ def test_v2_archive_gains_overview_on_reimport_without_rewriting_original(tmp_pa
         assert db.execute("SELECT header_json FROM revisions WHERE id=?", (rev["id"],)).fetchone()[0] == original_header
     assert restored.read_raw("alice", rev["context_id"], rev["id"])[0] == claude_bytes
     assert restored.check()["ok"]
+
+
+def test_card_summary_uses_requests_and_ignores_scaffolding_and_greetings(service):
+    client, store, auth = service
+    texts = [
+        "测试", "<environment_context><cwd>/private/worktree</cwd></environment_context>",
+        "<system-reminder>SessionStart hook: very long instructions</system-reminder>",
+        "hello who are you", "# AGENTS.md instructions for /work\nUse the tools",
+        "我想做一个简单的五子棋游戏，然后先讨论方案再编码",
+        "<system-reminder>Tools unavailable</system-reminder>我想做一个简单的五子棋游戏，然后先讨论方案再编码",
+        "Base directory for this skill: /skills/design\n# Follow these instructions",
+        "一个人和 AI 下棋，提升水平", "初学者，希望有提示和复盘", "浏览器网页，技术栈你来定",
+    ]
+    records = [{"type": "user", "uuid": f"u{i}", "message": {"role": "user", "content": text}}
+               for i, text in enumerate(texts)]
+    records.append({"type": "assistant", "message": {"role": "assistant", "content": "已上线，所有测试通过"}})
+    raw = "\n".join(json.dumps(r, ensure_ascii=False) for r in records).encode()
+    rev, _ = upload(client, auth["alice"], raw, title="测试", shared=True)
+    overview = rev["normalized"]["extensions"][KEY]
+    assert overview["title"] == "做一个简单的五子棋游戏"
+    assert overview["title_source"] == "user_request"
+    assert all(text in overview["summary"] for text in ["五子棋", "AI", "提示和复盘", "浏览器"])
+    assert all(text not in overview["summary"] for text in ["private", "instructions", "skill", "已上线", "hello"])
+    assert len(overview["summary"]) <= 160
+    assert [e["lines"] for e in overview["summary_evidence"]] == [[6], [9], [10], [11]]
+    exported = store.export("alice", rev["context_id"], rev["id"])
+    assert len(exported["session"]["messages"]) == len(records)
+    assert store.read_raw("alice", rev["context_id"], rev["id"])[0] == raw
+
+
+def test_card_summary_preserves_meaningful_titles_and_extracts_handoff_request(service):
+    client, _, auth = service
+    text = ("<environment_context>hidden paths</environment_context>\n"
+            "请接续 Junction 中的历史任务。先读取 .tdsp/context/SKILL.md 和 manifest.json。\n\n"
+            "接手人的本次要求：\n完成 `None` 输入支持并运行测试。不要提交或推送。")
+    raw = json.dumps({"type": "user", "message": {"role": "user", "content": text}}).encode()
+    rev, _ = upload(client, auth["alice"], raw, title="输入边界处理")
+    overview = rev["normalized"]["extensions"][KEY]
+    assert overview["title"] == "输入边界处理"
+    assert overview["summary"] == "完成 None 输入支持并运行测试。不要提交或推送"
+    assert overview["summary_evidence"][0]["lines"] == [1]
+
+
+def test_refresh_old_overviews_only_changes_derived_copy(service, claude_bytes, monkeypatch):
+    from junction import cli
+
+    client, store, auth = service
+    rev, _ = upload(client, auth["alice"], claude_bytes, title="Original title")
+    with store.connection(write=True) as db:
+        old = {"generator": "extractive/1", "title": "Original title", "title_source": "provided"}
+        db.execute("UPDATE revision_overviews SET data_json=? WHERE revision_id=?", (json.dumps(old), rev["id"]))
+        tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                  if r[0] != "revision_overviews"]
+        before = {t: [tuple(r) for r in db.execute(f'SELECT * FROM "{t}" ORDER BY rowid')] for t in tables}
+    output = []
+    monkeypatch.setattr(cli, "print_json", output.append)
+    cli.run(cli.parser().parse_args(["refresh-overviews", "--data-dir", str(store.root)]))
+    assert output[0]["updated"] == 1
+    overview = store.get_context("alice", rev["context_id"])["revision"]["normalized"]["extensions"][KEY]
+    assert overview["title"] == "Original title"
+    assert overview["summary"].startswith("Add an empty-input guard")
+    assert store.refresh_overviews()["updated"] == 0
+    with store.connection() as db:
+        after = {t: [tuple(r) for r in db.execute(f'SELECT * FROM "{t}" ORDER BY rowid')] for t in tables}
+    assert after == before
+    assert store.read_raw("alice", rev["context_id"], rev["id"])[0] == claude_bytes
+    assert store.check()["ok"]
+
+
+def test_summary_is_bounded_and_does_not_invent_a_goal(service):
+    client, _, auth = service
+    raw = json.dumps({"type": "user", "message": {"role": "user", "content": "测试"}}).encode()
+    rev, _ = upload(client, auth["alice"], raw)
+    overview = rev["normalized"]["extensions"][KEY]
+    assert overview["summary"] == ""
+    assert overview["summary_evidence"] == []
+    long = json.dumps({"type": "user", "message": {"role": "user", "content": "改进测试覆盖率 " * 1000}}).encode()
+    rev, _ = upload(client, auth["alice"], long)
+    overview = rev["normalized"]["extensions"][KEY]
+    assert len(overview["summary"]) <= 160
+    assert len(overview["title"]) <= 48

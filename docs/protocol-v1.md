@@ -130,10 +130,13 @@ The CLI accepts `junction import ... --source-key tool:task:123 --extensions-fil
 
 每次新导入自动保存一份 `junction.overview/1`，读取与导出时放入标准化记录的 `extensions`，接续 Agent 可以通过同一份 Context 查询它。它是独立保存的派生说明，不代替完整历史。
 
-- `generator`：当前为 `extractive/1`，不额外调用模型。
-- `title` / `title_source`：优先使用调用方已有任务标题，否则摘录首条用户文本；无可用文本时给出 Agent 名称占位标题。
+- `generator`：当前为 `extractive/2`，本地提取，不额外调用模型。
+- `title` / `title_source`：保留有意义的已有标题；“测试”等占位标题改用首条有效需求生成短标题。跳过寒暄、环境注入、skill 正文等。无可用需求时保留原标题或使用 Agent 名称占位。
+- `summary` / `summary_evidence`：最多 160 字符的任务需求摘录，结合首次有效需求与最近补充，保留对应消息 ID 和行号。缺少有效需求时为空，不根据助手回复推断完成状态。
 - `description` / `evidence`：摘录首条用户、最近用户和最近助手文本，保留消息 ID、原始行号、截断标记。每条摘录最多 360 字符；完整内容仍保存在 messages 中。
 - `missing`：没有记录的会话 ID、工作目录、用户/助手文本和消息时间等，不推测补全。
 - `diagnostic_counts` / `resource_availability`：解析问题和附件可用性计数，详细数据仍在 diagnostics 与 messages 中。
 
 阅读说明不把“最近助手声称完成”当成已核验事实。当前代码状态、目标与下一步仍由接续 Agent 结合原文和实际环境判断。
+
+旧数据可运行 `junction refresh-overviews --data-dir .local/data` 补齐标题和摘要。该命令仅更新派生说明，不改写原始 JSONL、标准化消息、Context 身份或版本校验值；重复执行跳过当前生成器版本。升级前可用 `junction backup` 保留旧说明。
