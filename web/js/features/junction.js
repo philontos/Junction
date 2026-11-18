@@ -18,6 +18,17 @@ function select(options, label) { const s = el("select"); s.setAttribute("aria-l
 function field(label, input) { const f = el("label", undefined, "jx-field"); f.append(el("span", label), input); return f; }
 function textInput(value = "", placeholder = "") { const input = el("input"); input.value = value; input.placeholder = placeholder; return input; }
 function note(text) { return el("p", text, "jx-note"); }
+const agentNames = new Map([["claude", "Claude Code"], ["codex", "Codex"], ["kimi", "Kimi"], ["pi", "Pi"]]);
+const agentName = provider => agentNames.get(provider) || provider || "Agent";
+function contextCopy(meta) {
+  const overview = meta.revision.normalized?.extensions?.["junction.overview/1"];
+  return { title: overview?.title || meta.title, summary: overview?.summary || "" };
+}
+function cardFact(kind, text) {
+  const fact = el("span", undefined, `jx-card-fact jx-card-${kind}`);
+  const icon = el("span", undefined, `jx-fact-icon jx-icon-${kind}`); icon.setAttribute("aria-hidden", "true");
+  fact.title = text; fact.append(icon, el("span", text)); return fact;
+}
 function closeContextDialog(restoreFocus = true) {
   if (launchingContext) return false;
   if (!contextDialogIsOpen()) return true;
@@ -28,13 +39,11 @@ function closeContextDialog(restoreFocus = true) {
   $("jx-detail").replaceChildren(); $("jx-task-submit-slot").replaceChildren();
   if (restoreFocus) {
     const card = [...$("jx-list").querySelectorAll(".jx-card")].find(b => b.dataset.contextId === selectedContext?.cid);
-    const version = [...$("jx-list").querySelectorAll(".jx-version")].find(b => b.dataset.revisionId === selectedContext?.rid);
-    (version?.closest("details").querySelector("summary") || card || $("jx-refresh")).focus({ preventScroll: true });
+    (card || $("jx-refresh")).focus({ preventScroll: true });
   }
   return true;
 }
 function detailRoot(title = L("新建任务", "New task")) {
-  closeVersionLists();
   $("jx-extra-menu").open = false;
   const opening = !contextDialogIsOpen();
   $("jx-task-heading").textContent = title;
@@ -46,7 +55,7 @@ function detailRoot(title = L("新建任务", "New task")) {
   $("jx-task-submit-slot").replaceChildren();
   const d = $("jx-detail"); d.replaceChildren(); return d;
 }
-export function closeJunction() { if (!closeContextDialog(false)) return; closeVersionLists(); $("junction-modal").hidden = true; generation++; }
+export function closeJunction() { if (!closeContextDialog(false)) return; $("junction-modal").hidden = true; generation++; }
 export function junctionIsOpen() { return !$("junction-modal").hidden; }
 export async function openJunction(taskId = null) {
   if (taskId) return shareTask(taskId);
@@ -69,7 +78,6 @@ async function loadList(append = false) {
   clearError("jx-error");
   list.setAttribute("aria-busy", "true"); $("jx-more").disabled = true;
   if (!append) {
-    closeVersionLists();
     listCursor = null; $("jx-more").hidden = true;
     list.replaceChildren(el("p", L("读取中…", "Loading…"), "jx-empty"));
   }
@@ -79,17 +87,21 @@ async function loadList(append = false) {
     if (!append) list.replaceChildren();
     for (const item of page.items) {
       const r = item.revision, workspace = r.normalized?.extensions?.["switchyard.workspace/1"] || r.normalized?.extensions?.["switchyard.capture/1"];
+      const copy = contextCopy(item);
       const group = el("div", undefined, "jx-context-card");
       const card = button("", () => { openDetail(item.id, r.id); }, "jx-card");
       card.dataset.contextId = item.id;
-      card.setAttribute("aria-label", `${L("基于此 Context 新建任务", "Create a task from this context")}: ${item.title}`);
-      card.append(el("strong", item.title));
-      if (workspace?.repo_name) card.append(el("span", [workspace.repo_name, workspace.branch].filter(Boolean).join(" / "), "jx-card-repo"));
-      card.append(el("span", `v${r.number} · ${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}`, "jx-meta"));
+      card.setAttribute("aria-label", `${L("预览并接续", "Preview and continue")}: ${copy.title}`);
+      const heading = el("span", undefined, "jx-card-heading"), title = el("strong", copy.title);
+      title.title = copy.title;
+      const agent = el("span", agentName(r.provider), "jx-card-agent"); agent.dataset.agent = r.provider;
+      agent.title = agentName(r.provider);
+      heading.append(title, agent); card.append(heading);
+      card.append(el("span", copy.summary || L("暂无任务摘要", "No task summary yet"), "jx-card-summary"));
       const footer = el("span", undefined, "jx-card-footer");
-      footer.append(el("span", new Date(r.created_at).toLocaleString(), "jx-meta"), el("span", L("新建任务 →", "New task →"), "jx-card-open"));
+      footer.append(cardFact("repo", workspace?.repo_name || L("仓库未记录", "Repository not recorded")),
+        cardFact("branch", workspace?.branch || L("分支未记录", "Branch not recorded")));
       card.append(footer); group.append(card);
-      group.append(versionList(item));
       list.append(group);
     }
     if (!list.children.length) list.append(el("p", L("还没有共享的 Context", "No shared contexts yet"), "jx-empty"));
@@ -102,31 +114,8 @@ async function loadList(append = false) {
     if (request === listRequest) { list.setAttribute("aria-busy", "false"); $("jx-more").disabled = false; }
   }
 }
-function closeVersionLists(except = null) {
-  for (const details of $("jx-list").querySelectorAll(".jx-versions[open]")) {
-    if (details !== except) details.open = false;
-  }
-}
-function positionVersionList(details) {
-  if (!details.open || !details.isConnected) return;
-  // Keep the panel out of the grid flow and within the visible library bounds.
-  const panel = details.querySelector(".jx-version-panel");
-  const anchor = details.querySelector("summary").getBoundingClientRect();
-  const bounds = $("jx-library").getBoundingClientRect();
-  const gap = 6, inset = 8;
-  const left = Math.max(inset, bounds.left + inset), right = Math.min(innerWidth - inset, bounds.right - inset);
-  const top = Math.max(inset, bounds.top + inset), bottom = Math.min(innerHeight - inset, bounds.bottom - inset);
-  const below = bottom - anchor.bottom - gap, above = anchor.top - top - gap;
-  const upwards = below < 224 && above > below;
-  const width = Math.min(340, right - left);
-  panel.style.width = `${width}px`;
-  panel.style.maxHeight = `${Math.max(0, Math.min(224, upwards ? above : below))}px`;
-  panel.style.left = `${Math.max(left, Math.min(anchor.left, right - width))}px`;
-  panel.style.top = `${upwards ? anchor.top - gap - panel.offsetHeight : anchor.bottom + gap}px`;
-  panel.style.visibility = "visible";
-}
 function versionList(item) {
-  const details = el("details", undefined, "jx-versions");
+  const details = el("details", undefined, "jx-versions jx-section");
   details.append(el("summary", L("版本记录", "Versions")));
   const panel = el("div", undefined, "jx-version-panel"), rows = el("div"), controls = el("div");
   panel.setAttribute("aria-label", `${item.title} · ${L("版本记录", "Versions")}`);
@@ -136,7 +125,6 @@ function versionList(item) {
     if (loading) return;
     loading = true;
     controls.replaceChildren(note(L("读取中…", "Loading…")));
-    positionVersionList(details);
     try {
       const q = more && cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
       const page = await call(`/contexts/${item.id}/revisions${q}`);
@@ -145,7 +133,7 @@ function versionList(item) {
       for (const revision of page.items) {
         const b = button("", () => { openDetail(item.id, revision.id); }, "jx-version");
         b.dataset.revisionId = revision.id;
-        b.append(el("span", `v${revision.number}${revision.id === item.revision.id ? L(" · 最新", " · Latest") : ""}`),
+        b.append(el("span", `v${revision.number}${revision.id === item.revision.id ? L(" · 当前", " · Current") : ""}`),
           el("span", new Date(revision.created_at).toLocaleString(), "jx-meta"));
         rows.append(b);
       }
@@ -154,15 +142,11 @@ function versionList(item) {
       if (cursor) controls.append(button(L("更多版本", "More versions"), () => load(true)));
     } catch (e) {
       if (details.isConnected) controls.replaceChildren(note(e.message), button(L("重试", "Retry"), () => load(more)));
-    } finally { loading = false; positionVersionList(details); }
+    } finally { loading = false; }
   };
   details.ontoggle = () => {
-    if (!details.open) { panel.style.visibility = "hidden"; return; }
-    closeVersionLists(details);
-    if (!loaded) load();
-    positionVersionList(details);
+    if (details.open && !loaded) load();
   };
-  details.onfocusout = e => { if (e.relatedTarget && !details.contains(e.relatedTarget)) details.open = false; };
   return details;
 }
 async function openDetail(cid, rid) {
@@ -174,10 +158,12 @@ async function openDetail(cid, rid) {
     const meta = await call(`/contexts/${cid}/revisions/${rid}`);
     if (epoch !== generation) return;
     const r = meta.revision, w = r.normalized.extensions?.["switchyard.workspace/1"];
+    const copy = contextCopy(meta);
     const d = detailRoot();
     const source = el("div", undefined, "jx-task-source");
-    source.append(el("span", L("来源 Context", "Source context"), "jx-meta"), el("strong", meta.title),
-      el("span", `v${r.number} · ${r.provider === "claude" ? "Claude Code" : "Codex"} · ${r.turn_count} ${L("轮对话", "turns")}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`, "jx-meta"));
+    source.append(el("span", L("来源 Context", "Source context"), "jx-meta"), el("strong", copy.title));
+    if (copy.summary) source.append(el("p", copy.summary, "jx-source-summary"));
+    source.append(el("span", `v${r.number} · ${agentName(r.provider)}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`, "jx-meta"));
     d.append(source);
     d.append(el("div", undefined, "jx-continuation"));
     showContinue(meta);
@@ -186,9 +172,10 @@ async function openDetail(cid, rid) {
     const msgs = el("div"); msgs.id = "jx-messages"; msgs.append(note(L("读取中…", "Loading…"))); history.append(msgs);
     const more = button(L("继续读取", "Load more"), () => loadMessages(meta, true)); more.id = "jx-message-more"; more.hidden = true; history.append(more);
     const contextInfo = el("details", undefined, "jx-section jx-context-info");
-    contextInfo.append(el("summary", L("查看 Context 详情", "View context details")), history); d.append(contextInfo);
+    contextInfo.append(el("summary", L("查看 Context 详情", "View context details")), versionList(meta), history); d.append(contextInfo);
     const details = el("details", undefined, "jx-section");
     details.append(el("summary", L("详细信息与导出", "Details and export")), el("code", `${cid} / ${rid}`, "jx-ids"));
+    details.append(note(`${new Date(r.created_at).toLocaleString()} · ${r.turn_count} ${L("轮对话", "turns")}`));
     const overview = r.normalized.extensions?.["junction.overview/1"];
     if (overview) details.append(el("p", overview.description, "jx-note jx-description"));
     const capture = r.normalized.extensions?.["switchyard.capture/1"];
@@ -286,7 +273,7 @@ function showContinue(meta) {
     };
     agents.append(b);
   }
-  const title = textInput(`${L("接续", "Continue")}: ${meta.title}`.slice(0, 200)); title.maxLength = 200; title.required = true;
+  const title = textInput(`${L("接续", "Continue")}: ${contextCopy(meta).title}`.slice(0, 200)); title.maxLength = 200; title.required = true;
   const branch = textInput(match?.default_branch || "main");
   repo.onchange = () => { branch.value = repos.find(r => r.id === Number(repo.value))?.default_branch || "main"; };
   const prompt = el("textarea"); prompt.rows = 2; prompt.maxLength = 8000; prompt.placeholder = L("接下来要做什么？留空则按 Context 继续。", "What should the agent do next? Leave blank to continue from the context.");
@@ -423,8 +410,6 @@ export function initJunction(callbacks) {
   $("jx-heading").textContent = L("共享 Context", "Shared contexts");
   $("jx-close").onclick = closeJunction;
   modal.onclick = e => {
-    // A retry/pagination click can replace its own button before bubbling here.
-    closeVersionLists(e.composedPath().find(node => node instanceof Element && node.matches(".jx-versions")));
     if (e.target === modal) closeJunction();
   };
   document.addEventListener("keydown", e => {
@@ -441,14 +426,7 @@ export function initJunction(callbacks) {
       }
       return;
     }
-    if (e.key !== "Escape") return;
-    const details = $("jx-list").querySelector(".jx-versions[open]");
-    if (!details) return;
-    e.preventDefault(); e.stopPropagation();
-    details.open = false; details.querySelector("summary").focus({ preventScroll: true });
   }, true);
-  $("jx-library").addEventListener("scroll", () => closeVersionLists());
-  window.addEventListener("resize", () => closeVersionLists());
   $("jx-refresh").textContent = L("刷新", "Refresh");
   $("jx-refresh").onclick = async () => {
     $("jx-refresh").disabled = true;
