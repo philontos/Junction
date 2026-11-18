@@ -5,7 +5,7 @@ import { readShareStream } from "./junction-stream.js";
 
 const L = (zh, en) => I18N.lang === "zh" ? zh : en;
 let hooks, status, listCursor, messageCursor, generation = 0, listRequest = 0, activeShare = null, shareDismissTimer;
-let selectedContext = null, launchingContext = false;
+let selectedContext = null, launchingContext = false, connectingJunction = false;
 const call = (url, options = {}) => api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const base = meta => `/contexts/${meta.id}/revisions/${meta.revision.id}`;
@@ -32,7 +32,7 @@ function cardFact(kind, text) {
   fact.append(icon, el("span", text)); return fact;
 }
 function closeContextDialog(restoreFocus = true) {
-  if (launchingContext) return false;
+  if (launchingContext || connectingJunction) return false;
   if (!contextDialogIsOpen()) return true;
   ++generation;
   $("jx-task-modal").hidden = true;
@@ -47,6 +47,7 @@ function closeContextDialog(restoreFocus = true) {
 }
 function detailRoot(title = L("新建任务", "New task")) {
   const opening = !contextDialogIsOpen();
+  $("jx-task-modal").dataset.view = "task";
   $("jx-task-heading").textContent = title;
   $("jx-task-modal").hidden = false;
   if (opening) $("jx-task-close").focus({ preventScroll: true });
@@ -67,11 +68,65 @@ export async function openJunction(taskId = null) {
   $("jx-detail").replaceChildren();
   clearError("jx-error");
   try {
+    const connection = await call("/connection");
+    if (epoch !== generation) return;
+    if (!connection.configured) {
+      $("jx-list").replaceChildren(button(L("连接 Junction", "Connect Junction"), () => showConnection(), "jx-empty sec"));
+      $("jx-more").hidden = true;
+      return showConnection(connection);
+    }
     await Promise.all([refreshStatus(), loadList()]);
   } catch (e) { if (epoch === generation) showError(e); }
 }
 async function refreshStatus() {
   status = await call("/status");
+}
+async function showConnection(known) {
+  const epoch = ++generation;
+  selectedContext = null;
+  const d = detailRoot(L("连接 Junction", "Connect Junction"));
+  $("jx-task-modal").dataset.view = "connection";
+  d.append(note(L("读取连接信息…", "Loading connection…")));
+  try {
+    const info = known || await call("/connection");
+    if (epoch !== generation) return;
+    d.replaceChildren();
+    const form = el("form", undefined, "jx-connect-form");
+    const url = textInput(info.url, "https://junction.example.com"); url.id = "jx-connect-url";
+    url.type = "url"; url.required = true; url.autocomplete = "url"; url.spellcheck = false;
+    const token = textInput("", L("粘贴设备凭证", "Paste device credential"));
+    token.id = "jx-connect-token"; token.type = "password"; token.required = true; token.maxLength = 256;
+    token.autocomplete = "off"; token.spellcheck = false;
+    const node = textInput(info.node_id); node.id = "jx-connect-node"; node.readOnly = true;
+    node.onclick = () => node.select();
+    form.append(field(L("服务地址", "Service URL"), url), field(L("设备凭证", "Device credential"), token),
+      field(L("当前设备 ID", "This device ID"), node));
+    const enter = el("button"); enter.type = "submit"; enter.hidden = true; form.append(enter);
+    d.append(form);
+    if (info.error) d.append(note(info.error));
+    const submit = button(L("验证并连接", "Verify and connect"), async () => {
+      if (!form.reportValidity() || connectingJunction) return;
+      clearError();
+      connectingJunction = true;
+      $("jx-task-close").disabled = $("jx-task-cancel").disabled = true;
+      submit.textContent = L("正在连接…", "Connecting…");
+      try {
+        const result = await send("/connection", { url: url.value.trim(), token: token.value.trim() });
+        token.value = "";
+        connectingJunction = false;
+        closeContextDialog();
+        toast(L("已连接 Junction · ", "Connected to Junction · ") + result.user_id);
+        await openJunction();
+      } finally {
+        connectingJunction = false;
+        $("jx-task-close").disabled = $("jx-task-cancel").disabled = false;
+        submit.textContent = L("验证并连接", "Verify and connect");
+      }
+    }, "primary");
+    form.onsubmit = e => { e.preventDefault(); submit.click(); };
+    $("jx-task-submit-slot").append(submit);
+    url.focus({ preventScroll: true });
+  } catch (e) { if (epoch === generation) showError(e); }
 }
 async function loadList(append = false) {
   const request = ++listRequest, list = $("jx-list");
@@ -387,7 +442,7 @@ export function initJunction(callbacks) {
   hooks = callbacks;
   const modal = el("div"); modal.id = "junction-modal"; modal.hidden = true;
   modal.innerHTML = `<section class="jx-shell" role="dialog" aria-modal="true" aria-labelledby="jx-heading">
-    <div class="jx-head"><h2 id="jx-heading"></h2><span class="jx-spacer"></span><button id="jx-refresh" class="sec"></button><button class="sec" id="jx-close" aria-label="Close">×</button></div>
+    <div class="jx-head"><h2 id="jx-heading"></h2><span class="jx-spacer"></span><button id="jx-connect" class="sec"></button><button id="jx-refresh" class="sec"></button><button class="sec" id="jx-close" aria-label="Close">×</button></div>
     <p id="jx-error" class="jx-warning" role="alert" hidden></p>
     <div class="jx-body"><main id="jx-library"><div id="jx-list"></div><button id="jx-more" class="sec" hidden></button></main></div>
   </section>`;
@@ -429,6 +484,8 @@ export function initJunction(callbacks) {
     }
   }, true);
   $("jx-refresh").textContent = L("刷新", "Refresh");
+  $("jx-connect").textContent = L("连接", "Connect");
+  $("jx-connect").onclick = () => showConnection();
   $("jx-refresh").onclick = async () => {
     $("jx-refresh").disabled = true;
     const epoch = generation;

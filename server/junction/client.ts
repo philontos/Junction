@@ -5,20 +5,28 @@ export class JunctionError extends Error {
 }
 export interface Account { id: string; label: string; token_file: string }
 export interface JunctionConfig { url: string; accounts: Account[]; default_account: string }
+export function serviceUrl(value: unknown): string {
+  let u: URL;
+  try { if (typeof value !== "string" || value.length > 2048) throw new Error(); u = new URL(value); }
+  catch { throw new JunctionError(400, "Junction URL 无效。"); }
+  if (!["http:", "https:"].includes(u.protocol) || u.username || u.password || u.search || u.hash || u.pathname !== "/") {
+    throw new JunctionError(400, "Junction URL 必须是 HTTP(S) 服务地址，不含凭据或路径。");
+  }
+  return u.origin;
+}
 export function readConfig(file: string): JunctionConfig {
   if (!fs.existsSync(file)) throw new JunctionError(503, "Junction 未配置；请设置 SWITCHYARD_JUNCTION_CONFIG。");
-  const c = JSON.parse(fs.readFileSync(file, "utf8"));
-  const u = new URL(c.url);
-  if (!["http:", "https:"].includes(u.protocol) || u.username || u.password || u.search || u.hash || u.pathname !== "/") {
-    throw new JunctionError(503, "Junction URL 必须是 HTTP(S) 服务地址，不含凭据或路径。");
-  }
+  let c: any;
+  try { c = JSON.parse(fs.readFileSync(file, "utf8")); }
+  catch { throw new JunctionError(503, "Junction 配置文件无法读取。"); }
+  const url = serviceUrl(c?.url);
   if (!Array.isArray(c.accounts) || !c.accounts.length || c.accounts.some((a: Account) =>
-    !/^[a-zA-Z0-9_-]{1,64}$/.test(a.id) || typeof a.token_file !== "string" || typeof a.label !== "string") ||
+    !a || !/^[a-zA-Z0-9_-]{1,64}$/.test(a.id) || typeof a.token_file !== "string" || typeof a.label !== "string") ||
     new Set(c.accounts.map((a: Account) => a.id)).size !== c.accounts.length ||
     !c.accounts.some((a: Account) => a.id === c.default_account)) {
     throw new JunctionError(503, "Junction 账号配置无效。");
   }
-  return { ...c, url: u.origin };
+  return { ...c, url };
 }
 export class JunctionClient {
   readonly account: Account;
@@ -29,14 +37,18 @@ export class JunctionClient {
   }
   async request(route: string, init: RequestInit = {}): Promise<any> {
     if (!route.startsWith("/v1/") || route.includes("\\") || route.includes("..")) throw new Error("Invalid Junction route");
-    const token = fs.readFileSync(this.account.token_file, "utf8").trim();
+    let token: string;
+    try { token = fs.readFileSync(this.account.token_file, "utf8").trim(); }
+    catch { throw new JunctionError(503, "Junction 令牌文件无法读取，请重新连接服务。"); }
     if (!token || token.length > 4096 || /[\r\n]/.test(token)) throw new JunctionError(503, "Junction 令牌文件无效。");
     let response: Response;
     try {
       response = await this.fetcher(this.config.url + route, { ...init, redirect: "error", signal: AbortSignal.timeout(60_000),
         headers: { ...init.headers, Authorization: `Bearer ${token}` } });
     } catch { throw new JunctionError(502, "无法连接 Junction，请检查服务是否在线。"); }
-    const body = response.status === 204 ? null : await response.json();
+    let body: any;
+    try { body = response.status === 204 ? null : await response.json(); }
+    catch { throw new JunctionError(502, `Junction 返回了无效响应（HTTP ${response.status}），请检查服务地址和网关。`); }
     if (!response.ok) throw new JunctionError(response.status, body?.error?.detail || "Junction 请求失败。");
     return body;
   }

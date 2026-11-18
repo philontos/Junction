@@ -4,6 +4,11 @@
 .jx-head { display: flex; flex-shrink: 0; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
 .jx-head h2 { margin: 0; font-size: 22px; }
 .jx-spacer { flex: 1; }
+.jx-connect-form { display: grid; gap: 18px; padding: 12px 0; }
+.jx-connect-form input { width: 100%; }
+.jx-task-shell .jx-connect-form .jx-field { margin: 0; }
+#jx-connect-node { font-family: ui-monospace, monospace; color: var(--muted); }
+#jx-task-modal[data-view=connection] .jx-task-shell { width: min(520px, 100%); height: min(490px, 92dvh); }
 .jx-body { display: flex; flex: 1; min-height: 0; }
 #jx-library { min-width: 0; flex: 1; padding: 24px; overflow-y: auto; }
 #jx-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }

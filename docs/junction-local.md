@@ -1,6 +1,16 @@
 # Switchyard × Junction 本机联调
 
-Switchyard 继续管理机器、仓库、worktree 和 Agent 终端。Junction 独立保存 JSONL 原件、标准化会话、版本和共享列表。浏览器通过 Switchyard 服务端访问 Junction，不持有 Junction 令牌。
+Switchyard 继续管理机器、仓库、worktree 和 Agent 终端。Junction 独立保存 JSONL 原件、标准化会话、版本和共享列表。浏览器通过 Switchyard 服务端访问 Junction；连接时输入的凭证仅保存在服务端私有文件中，后续不会返回给浏览器。
+
+## 连接云端服务
+
+打开 **共享 Context → 连接**，填写 Junction 服务地址和当前设备凭证。未配置的节点首次打开共享库会显示连接表单。公网地址使用 HTTPS，本机和可信组网 IP 可用 HTTP。
+
+同一窗口显示设备 ID；Junction 管理员用 `device-add USER DEVICE_ID` 发放凭证。连接验证超时为 10 秒，凭证无效、设备不匹配或服务不可达时保留原配置。成功后写入默认 `DATA_DIR/junction.json`，或 `SWITCHYARD_JUNCTION_CONFIG` 指定的位置，无需重启服务。
+
+新凭证单独保存为权限 600 的文件。旧配置备份在配置目录的 `.junction-credentials/*.previous.json`；旧令牌文件保留，供进行中的请求和手动回退使用。换服务时不会把旧服务的其他账号令牌发给新服务。确认无需回退后可清理旧文件。
+
+每台节点独立安装 Switchyard，不复制另一台设备的整个数据目录或 `controller-id`。设备只是凭证身份与执行位置，一个用户可以有多台设备。云端部署、设备撤销和备份操作见 Junction 仓库的 `docs/deployment.md`。
 
 ## 运行
 
@@ -83,6 +93,8 @@ node .tdsp/context/read.mjs check-environment system,runtimes,dependencies
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/status` | 连接状态，无令牌 |
+| GET | `/connection` | 本机设备 ID、服务地址和是否已配置；不返回令牌 |
+| POST | `/connection` | 接收 `{url,token}`，验证服务身份后保存本机连接 |
 | GET | `/contexts` | 分页列出共享记录，固定最新已分享版本 |
 | GET | `/contexts/:cid/revisions` | 分页列出可见版本 |
 | GET | `/contexts/:cid/revisions/:rid` | 固定版本详情 |

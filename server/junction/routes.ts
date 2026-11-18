@@ -12,6 +12,7 @@ import { JunctionClient, JunctionError, readConfig, revisionPath } from "./clien
 import { WORKSPACE_EXTENSION, workspaceOf, publicRepoUrl, repoIdentity, writeHandoff, handoffPrompt } from "./handoff.js";
 import { collectEnvironment, ENVIRONMENT_EXTENSION } from "./environment-runtime.mjs";
 import { pinEnvironment } from "./environment.js";
+import { connectionInfo, connectJunction } from "./connection.js";
 
 const configFile = () => process.env.SWITCHYARD_JUNCTION_CONFIG || path.join(DATA_DIR, "junction.json");
 const clientFor = (req: Request) => new JunctionClient(readConfig(configFile()), String(req.headers["x-junction-account"] || "") || undefined);
@@ -80,11 +81,16 @@ async function sourceBytes(file: string, size: number) {
   } finally { await handle.close(); }
 }
 export function registerJunctionRoutes(app: Express) {
+  app.get("/api/junction/connection", wrap(async (_req, res) => res.json(connectionInfo(configFile(), NS))));
+  app.post("/api/junction/connection", wrap(async (req, res) => {
+    if (!req.is("application/json")) throw new JunctionError(415, "请使用 JSON 连接配置。");
+    res.json(await connectJunction(configFile(), NS, req.body));
+  }));
   app.get("/api/junction/status", wrap(async (req, res) => {
     const client = clientFor(req);
     const me = await client.request("/v1/me");
     res.json({ configured: true, url: client.config.url, node_id: NS, account: client.account.id,
-      accounts: client.config.accounts.map(({ id, label }) => ({ id, label })), user_id: me.user_id });
+      accounts: client.config.accounts.map(({ id, label }) => ({ id, label })), user_id: me.user_id, device_id: me.device_id });
   }));
   app.get("/api/junction/contexts", wrap(async (req, res) => {
     const q = new URLSearchParams({ limit: "20", shared_only: "true" });
