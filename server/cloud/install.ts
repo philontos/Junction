@@ -54,11 +54,21 @@ if (process.platform === 'darwin') {
   save(file,`<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>
 <key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${args.map(a=>'<string>'+xml(a)+'</string>').join('')}</array>
 <key>WorkingDirectory</key><string>${xml(root)}</string><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(runtimePath)}</string></dict>
-<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>15</integer><key>Umask</key><integer>63</integer>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>15</integer><key>Umask</key><integer>63</integer><key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>${xml(path.join(dir,'node.log'))}</string><key>StandardErrorPath</key><string>${xml(path.join(dir,'node.log'))}</string>
 </dict></plist>`);
   const domain='gui/'+process.getuid!();
-  run('launchctl',['bootout',domain+'/'+label],true); run('launchctl',['bootstrap',domain,file]);
+  run('launchctl',['bootout',domain+'/'+label],true);
+  // bootout can return before launchd has finished removing the old job.
+  // Bootstrap only this node's label, retrying that short asynchronous teardown.
+  let failure='';
+  for(let attempt=0;attempt<20;attempt++) {
+    const result=spawnSync('launchctl',['bootstrap',domain,file],{encoding:'utf8'});
+    if(!result.error && result.status===0){failure='';break;}
+    failure=result.stderr || result.error?.message || 'unknown launchctl error';
+    await new Promise(resolve=>setTimeout(resolve,300));
+  }
+  if(failure)throw new Error('无法启动本机节点：'+failure);
 } else if (process.platform === 'linux') {
   const quote=(s:string)=>'"'+s.replaceAll('%','%%').replaceAll('\\','\\\\').replaceAll('"','\\"').replaceAll('\n','\\n')+'"';
   const file=path.join(os.homedir(),'.config/systemd/user',label+'.service');

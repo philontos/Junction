@@ -85,7 +85,7 @@ async function probeVersion(name, cwd, signal) {
     const binary = await executable(name, cwd);
     if (!binary) return { status: "missing", value: null, reason: "not_on_path" };
     const result = await exec(binary, ["--version"], { cwd, timeout: 1200, killSignal: "SIGKILL", maxBuffer: 2048, signal });
-    const version = (result.stdout + result.stderr).match(/\b\d+\.\d+(?:\.\d+)?(?:[-+][\w.-]+)?\b/)?.[0];
+    const version = (result.stdout + result.stderr).match(/(?:^|\s)v?(\d+\.\d+(?:\.\d+)?(?:[-+][\w.-]+)?)(?=\s|$)/)?.[1];
     return version ? { status: "present", value: { version } } : { status: "unknown", value: null, reason: "unrecognized_version" };
   } catch (error) { return { status: "unknown", value: null, reason: failure(error) }; }
 }

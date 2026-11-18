@@ -22,6 +22,17 @@ const raw = Buffer.from(JSON.stringify({ type: "assistant", version: "2.1.300", 
     { type: "tool_use", name: "Read", input: { file_path: "/old/project/.env" } },
   ] } }) + "\n");
 
+test("capture preserves the complete v-prefixed Node runtime version", async t => {
+  const { cwd } = fixture(t);
+  const previous = process.env.PATH;
+  process.env.PATH = path.dirname(process.execPath) + path.delimiter + (previous || "");
+  try {
+    const environment = await collectEnvironment({ cwd, raw: Buffer.alloc(0), agent: "codex" });
+    const node = environment.groups.runtimes.items.find(i => i.id === "node");
+    assert.equal(node.observed.value.version, process.versions.node);
+  } finally { process.env.PATH = previous; }
+});
+
 test("capture retains task evidence and unknown access, without environment values or config contents", async t => {
   const { cwd } = fixture(t);
   fs.writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ engines: { node: ">=22" }, secret: "PACKAGE_SECRET_CANARY" }));
