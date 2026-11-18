@@ -70,8 +70,14 @@ async function daemon(configPath:string) {
     await new Promise(r=>setTimeout(r,250));
   }
   if(!ready){stop();throw new Error('Local Switchyard startup timeout');}
-  fs.writeFileSync(path.join(dir,'runtime.json'),JSON.stringify({port,pid:process.pid,device_id:config.device_id}),{mode:0o600});
-  tunnel=startNodeTunnel(config.server,config.device_token,port,state=>console.log(new Date().toISOString()+' node '+state));
+  const startedAt=Date.now();
+  const runtime=(state:string)=>{
+    const file=path.join(dir,'runtime.json'),temporary=file+'.'+process.pid;
+    fs.writeFileSync(temporary,JSON.stringify({port,pid:process.pid,device_id:config.device_id,root,state,started_at:startedAt,updated_at:Date.now()}),{mode:0o600});
+    fs.renameSync(temporary,file);
+  };
+  runtime('connecting');
+  tunnel=startNodeTunnel(config.server,config.device_token,port,state=>{runtime(state);console.log(new Date().toISOString()+' node '+state);});
 }
 if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   const file=process.argv[2];if(!file)throw new Error('Usage: node.ts CONFIG');

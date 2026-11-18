@@ -71,10 +71,34 @@ export function createGateway(config: GatewayConfig) {
     res.setHeader('Set-Cookie',`sw_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`); res.json({ok:true});
   });
   app.get('/hub/devices', (req,res) => res.json({items:store.devices(user(req).id).map(d=>({...d,online:broker.nodes.has(d.id)}))}));
-  app.post('/hub/pairings', (req,res) => { csrf(req); const u=user(req); rate('pair:'+u.id);res.json({code:store.pair(u.id),expires_in:600,origin}); });
+  app.post('/hub/pairings', (req,res) => { csrf(req); const u=user(req); rate('pair:'+u.id);const code=store.pair(u.id);res.json({code,installation_id:digest(code),expires_in:600,origin}); });
+  app.get('/hub/installations/:id', (req,res) => {
+    const row=store.installation(req.params.id,user(req).id);if(!row)throw new CloudError(404,'安装记录不存在。');
+    const device=row.device_id && store.device(row.device_id,row.user_id);
+    res.json({id:row.id,step:row.step,status:row.status,issue:row.issue,updated_at:row.updated_at,expires:row.expires,
+      device_id:device ? device.id : null,online:!!device && broker.nodes.has(device.id)});
+  });
+  app.post('/hub/installations/claim', (req,res) => {
+    rate('install-claim:'+clientIp(req),120);
+    const row=store.claimInstallation(String(req.body.code || ''),String(req.body.instance_id || ''));
+    res.json({id:row.id,expires:row.expires});
+  });
+  app.post('/hub/installations/progress', (req,res) => {
+    rate('install-progress:'+clientIp(req),1200);
+    const {code,instance_id,step,status,issue}=req.body;
+    const device=store.deviceByToken(bearer(req.headers.authorization));
+    if(device)store.attachInstallation(String(code || ''),device);
+    if(status==='succeeded' && (!device || !broker.nodes.has(device.id)))throw new CloudError(409,'设备尚未通过云端连接验证。');
+    store.installationProgress(String(code || ''),String(instance_id || ''),String(step || ''),String(status || ''),String(issue || 'none'));
+    res.json({ok:true});
+  });
+  app.get('/hub/node', (req,res) => {
+    const device=store.deviceByToken(bearer(req.headers.authorization));if(!device)throw new CloudError(401,'设备凭证无效。');
+    res.json({device_id:device.id,user_id:device.user_id,instance_id:device.instance_id,online:broker.nodes.has(device.id)});
+  });
   app.post('/hub/enroll', (req,res) => {
     rate('enroll:'+clientIp(req),60);
-    const result=store.enroll(String(req.body.code || ''),String(req.body.instance_id || ''),String(req.body.name || ''));
+    const result=store.enroll(String(req.body.code || ''),String(req.body.instance_id || ''),String(req.body.name || ''),String(req.body.device_token || ''));
     res.json({...result,server:origin,protocol:'switchyard-tunnel/1'});
   });
   app.delete('/hub/devices/:id', (req,res) => {csrf(req);store.revoke(req.params.id,user(req).id);broker.disconnect(req.params.id);res.json({ok:true});});
@@ -124,6 +148,12 @@ export function createGateway(config: GatewayConfig) {
   });
   app.get('/downloads/node.tar.gz', (_req,res) => {
     if(!config.bundle)throw new CloudError(503,'安装包尚未就绪。');res.download(config.bundle,'switchyard-node.tar.gz');
+  });
+  app.get('/downloads/bundles/:hash.tar.gz', (req,res) => {
+    if(!config.bundle || !/^[a-f0-9]{64}$/.test(req.params.hash))throw new CloudError(404,'安装包不存在。');
+    const file=path.join(path.dirname(config.bundle),'bundles',req.params.hash+'.tar.gz');
+    if(!fs.existsSync(file))throw new CloudError(404,'安装包不存在。');
+    res.download(file,'switchyard-node.tar.gz');
   });
   app.get('/downloads/node.sha256', (_req,res) => {
     if(!config.bundle)throw new CloudError(503,'安装包尚未就绪。');res.type('text/plain').send(fs.readFileSync(config.bundle+'.sha256','utf8'));

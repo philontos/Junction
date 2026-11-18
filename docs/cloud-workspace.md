@@ -14,9 +14,19 @@
 
 ## 本机安装
 
-需要 Node.js 22+、npm、Git、tmux、zsh。Agent CLI 和认证自行安装在本机。网页「安装本机节点」产生 10 分钟有效的一次性安装码。
+网页「安装本机节点」生成命令，用户在终端执行一次。安装器自动完成六步：系统检查 → Node.js/npm → Git/tmux/zsh 与编译工具 → 下载校验 → 组件运行验证 → 绑定、启动与云端连接验证。Agent CLI 和认证仍由用户自行选择和安装。
+
+已可用的 Node.js 22/24 与工具会被复用。缺少或不兼容的 Node.js 使用官方 v24.22.3 二进制，按系统/CPU 校验固定 SHA-256，安装在节点自己的 `runtime/` 下，不修改系统 Node.js 或 shell 配置。macOS 通过 Homebrew 补装缺失工具；缺少 Homebrew 时使用其官方安装器。Apple 命令行工具由系统安装弹窗引导，安装器等待并复查。Debian/Ubuntu 使用 apt-get，Fedora/RHEL 系列使用 dnf。需要系统安装权限时提示用户在本机授权，不保存或上传密码。Linux 后台运行需要可用的用户级 systemd。
+
+下载入口需要 curl、tar 及一种 SHA-256 工具（shasum、sha256sum 或 openssl）；macOS 自带这些基础工具。极简 Linux 如果连 curl 都没有，需要先通过系统包管理器安装 curl 和 CA 证书。自动安装覆盖 macOS、使用 glibc 的 Linux x64/arm64；其他系统会明确提示。安装器只补装缺失依赖，不做全系统升级。
+
+安装码须在 10 分钟内开始使用。开始后绑定本机 instance ID，获得固定 24 小时续跑窗口，重复请求不会无限延长。过期后网页生成新命令，复用本地已有结果。安装状态存在网关 schema 2 的 `installations` 表中，只有所属用户可以读取；上报内容限于阶段、状态和错误分类，不上传本机命令输出、环境变量或安装日志。
 
 安装器从同一 HTTPS 服务下载发布包、校验 SHA-256，使用锁定依赖安装；在 `~/.switchyard/cloud/<服务地址哈希>/` 保存独立配置、数据、日志和版本。macOS 使用独立 LaunchAgent，Linux 使用用户级 systemd。不会改动其他 Switchyard 实例。
+
+`install/cache/` 保留已下载文件和可续传的 `.part` 文件，`install/state` 记录最近阶段，`install/install.log` 是本地详细日志。重试始终重新检查工具、文件摘要及组件运行结果，不仅依赖“已完成”标记；组件安装失败会保留源码和 npm 下载缓存。并发安装由本机进程锁阻止。原生组件按发布摘要和 Node ABI 分目录，运行中的旧版本不会原地覆盖。数据库实际查询、PTY 子进程启动、本机 HTTP 服务和云端在线状态均通过后，才显示安装成功。
+
+设备凭证在请求绑定前保存到权限 0600 的临时文件；若服务端已绑定但响应丢失，重试可用同一凭证恢复设备身份。安装成功后清理临时凭证文件。重新安装同一实例保留原设备身份与任务。
 
 新增 Agent 安装在常用 PATH 目录后会被本机发现；自定义 PATH 有调整时，重新运行安装命令更新后台服务环境。凭据、SSH 密钥和 skills 不上传同步。首次选择仓库需要在这个独立节点登记仓库地址。
 
@@ -32,6 +42,7 @@
 | `/srv/switchyard-cloud/data` | 网关 SQLite，schema 1 |
 | `/srv/switchyard-cloud/credentials` | 每个用户的 Junction 令牌，0600 |
 | `/srv/switchyard-cloud/downloads/node.tar.gz` | 与 `.sha256` 成对发布的节点安装包 |
+| `/srv/switchyard-cloud/downloads/bundles/<sha256>.tar.gz` | 不可变安装包，先上传并校验，再更新当前 `.sha256` 指针 |
 | `/srv/switchyard-cloud/acme` | HTTP-01 验证目录 |
 | `/etc/switchyard-cloud/gateway.env` | 网关配置，0600 |
 
@@ -62,3 +73,7 @@ node --import tsx server/cloud/admin.ts activate USER /srv/switchyard-cloud/cred
 节点协议为 `switchyard-tunnel/1`。控制连接只接收连接请求和心跳；每次 HTTP/终端会话建立独立 WSS 字节流，节点只能转发到本进程固定的回环端口。保留 HTTP/WebSocket 原有消息格式和流控，不引入任务执行 RPC，也不修改 Context 标准。
 
 `server/cloud/cloud.test.ts` 覆盖登录/绑定的单次使用和过期、设备归属、撤销、大请求、流式进度、终端、断线不重放、重连及本机访问限制。前端继续使用现有组件，只给 API 和终端 URL 加设备前缀。
+
+`server/cloud/installer.test.ts` 覆盖 schema 1→2 保留身份数据、安装认领与重试、凭证恢复、断点下载与校验、仅补装缺失工具、安装后复查和并发锁；`web/cloud/install-progress.test.mjs` 验证成功判定与失败恢复提示。安装器会显示真实阶段，进度条表示完成了多少阶段，不估计剩余时间。
+
+实现参考：[Homebrew 官方安装说明](https://docs.brew.sh/Installation)、[Node.js 官方发布文件](https://nodejs.org/dist/v24.22.3/)、[Node.js 二进制校验说明](https://github.com/nodejs/node#verifying-binaries)。

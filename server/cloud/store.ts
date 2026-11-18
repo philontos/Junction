@@ -7,6 +7,9 @@ export const secret = () => crypto.randomBytes(32).toString('base64url');
 export const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 export interface CloudUser { id: string; password: string | null; junction_token_file: string }
 export interface CloudDevice { id: string; user_id: string; instance_id: string; name: string; created_at: number; revoked_at: number | null }
+export const installSteps = ['check','runtime','tools','download','dependencies','start','complete'] as const;
+export const installIssues = ['none','network','permission','tools','download','integrity','dependencies','binding','service','interrupted','unsupported','unknown'] as const;
+export interface CloudInstallation { id: string; user_id: string; instance_id: string | null; device_id: string | null; step: string; status: string; issue: string; updated_at: number; expires: number }
 export class CloudError extends Error { constructor(public status: number, message: string) { super(message); } }
 
 function passwordHash(password: string) {
@@ -26,7 +29,7 @@ export class CloudStore {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.db = new Database(path.join(dir, 'gateway.sqlite3'));
     const version = this.db.pragma('user_version', { simple: true }) as number;
-    if (version > 1) { this.db.close(); throw new Error('Gateway database requires a newer Switchyard'); }
+    if (version > 2) { this.db.close(); throw new Error('Gateway database requires a newer Switchyard'); }
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('synchronous = FULL');
@@ -38,7 +41,11 @@ export class CloudStore {
       CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), instance_id TEXT NOT NULL,
         name TEXT NOT NULL, token_hash TEXT UNIQUE NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER);
       CREATE UNIQUE INDEX IF NOT EXISTS device_instance ON devices(user_id, instance_id) WHERE revoked_at IS NULL;
-      PRAGMA user_version = 1;
+      CREATE TABLE IF NOT EXISTS installations(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+        instance_id TEXT, device_id TEXT REFERENCES devices(id), step TEXT NOT NULL, status TEXT NOT NULL,
+        issue TEXT NOT NULL, updated_at INTEGER NOT NULL, expires INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS installation_user ON installations(user_id,updated_at);
+      PRAGMA user_version = 2;
     `);
     fs.chmodSync(path.join(dir, 'gateway.sqlite3'), 0o600);
   }
@@ -82,21 +89,64 @@ export class CloudStore {
   logout(token: string) { this.db.prepare('DELETE FROM sessions WHERE hash=?').run(digest(token)); }
   pair(user: string) {
     const token = crypto.randomBytes(12).toString('hex');
-    this.db.prepare('DELETE FROM pairings WHERE expires<=?').run(Date.now());
-    this.db.prepare('INSERT INTO pairings VALUES (?,?,?)').run(digest(token), user, Date.now() + 10 * 60_000);
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM pairings WHERE expires<=?').run(Date.now());
+      this.db.prepare('DELETE FROM installations WHERE expires<?').run(Date.now()-7*86400_000);
+      const expires=Date.now()+10*60_000;
+      this.db.prepare('INSERT INTO pairings VALUES (?,?,?)').run(digest(token), user, expires);
+      this.db.prepare("INSERT INTO installations VALUES (?,?,NULL,NULL,'check','pending','none',?,?)").run(digest(token),user,Date.now(),expires);
+    })();
     return token;
   }
-  enroll(code: string, instance: string, name: string) {
+  installation(id: string, user: string) {
+    return this.db.prepare('SELECT * FROM installations WHERE id=? AND user_id=?').get(id,user) as CloudInstallation | undefined;
+  }
+  claimInstallation(code: string, instance: string) {
+    if (!/^[a-z0-9]{8,64}$/.test(instance)) throw new CloudError(400,'设备信息无效。');
+    return this.db.transaction(() => {
+      const row=this.db.prepare('SELECT * FROM installations WHERE id=? AND expires>?').get(digest(code),Date.now()) as CloudInstallation | undefined;
+      if(!row)throw new CloudError(401,'安装码已过期，请在网页生成新命令；已安装内容会保留。');
+      if(row.instance_id && row.instance_id!==instance)throw new CloudError(409,'安装码已由另一台设备使用，请生成新命令。');
+      // A code must START within ten minutes. Claiming binds it to one local
+      // installation and allows a fixed 24-hour recovery window, never sliding.
+      if(!row.instance_id){
+        const expires=Date.now()+86400_000;
+        this.db.prepare("UPDATE installations SET instance_id=?,status='running',updated_at=?,expires=? WHERE id=?").run(instance,Date.now(),expires,row.id);
+        this.db.prepare('UPDATE pairings SET expires=? WHERE hash=?').run(expires,row.id);
+      }
+      return this.installation(row.id,row.user_id)!;
+    })();
+  }
+  installationProgress(code: string, instance: string, step: string, status: string, issue: string) {
+    if(!installSteps.includes(step as any) || !['running','waiting','failed','paused','succeeded'].includes(status) || !installIssues.includes(issue as any)) throw new CloudError(400,'安装状态无效。');
+    const row=this.db.prepare('SELECT * FROM installations WHERE id=? AND instance_id=? AND expires>?').get(digest(code),instance,Date.now()) as CloudInstallation | undefined;
+    if(!row)throw new CloudError(401,'安装记录已过期，请重新生成安装命令。');
+    this.db.prepare('UPDATE installations SET step=?,status=?,issue=?,updated_at=? WHERE id=?').run(step,status,issue,Date.now(),row.id);
+  }
+  attachInstallation(code: string, device: CloudDevice) {
+    return this.db.transaction(() => {
+      const row=this.installation(digest(code),device.user_id);
+      if(!row || row.instance_id!==device.instance_id || row.expires<=Date.now())throw new CloudError(403,'安装记录与当前设备不匹配。');
+      if(row.device_id && row.device_id!==device.id)throw new CloudError(409,'安装记录已绑定另一台设备。');
+      this.db.prepare('UPDATE installations SET device_id=?,updated_at=? WHERE id=?').run(device.id,Date.now(),row.id);
+      this.db.prepare('DELETE FROM pairings WHERE hash=?').run(row.id);
+    })();
+  }
+  enroll(code: string, instance: string, name: string, suppliedToken = '') {
     if (!/^[a-z0-9]{8,64}$/.test(instance) || !name.trim() || name.length > 100 || /[\x00-\x1f]/.test(name)) throw new CloudError(400, '设备信息无效。');
+    if(suppliedToken && !/^[A-Za-z0-9_-]{43}$/.test(suppliedToken))throw new CloudError(400,'设备凭证无效。');
     return this.db.transaction(() => {
       const pair = this.db.prepare('SELECT user_id FROM pairings WHERE hash=? AND expires>?').get(digest(code), Date.now()) as any;
       if (!pair) throw new CloudError(401, '安装码已使用或过期，请在网页重新生成。');
+      const installation=this.installation(digest(code),pair.user_id);
+      if(installation?.instance_id && installation.instance_id!==instance)throw new CloudError(409,'安装码已由另一台设备使用。');
       if (this.db.prepare('SELECT 1 FROM devices WHERE user_id=? AND instance_id=? AND revoked_at IS NULL').get(pair.user_id, instance)) {
         throw new CloudError(409, '该节点已绑定；请先在设备列表断开旧绑定。');
       }
-      const id = crypto.randomUUID(), token = secret();
+      const id = crypto.randomUUID(), token = suppliedToken || secret();
       this.db.prepare('INSERT INTO devices VALUES (?,?,?,?,?,?,NULL)').run(id, pair.user_id, instance, name.trim(), digest(token), Date.now());
       this.db.prepare('DELETE FROM pairings WHERE hash=?').run(digest(code));
+      if(installation)this.db.prepare('UPDATE installations SET instance_id=?,device_id=?,updated_at=? WHERE id=?').run(instance,id,Date.now(),installation.id);
       return { device_id: id, device_token: token, user_id: pair.user_id, instance_id: instance };
     })();
   }

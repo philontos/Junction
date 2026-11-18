@@ -4,6 +4,7 @@
 .cloud-portal [hidden] { display: none !important; }
 .cloud-portal :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .cloud-portal .header-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.cloud-portal .header-actions button { flex: none; white-space: nowrap; }
 .cloud-portal #account { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .cloud-portal #username { color: var(--muted); font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
 .cloud-portal main { width: 100%; max-width: 1040px; margin: 32px auto; padding: 0 24px 24px; }
@@ -26,6 +27,7 @@
 .cloud-portal .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; display: inline-block; background: var(--faint); }
 .cloud-portal .dot.online { background: var(--green); }
 .cloud-portal .dot.waiting { background: var(--amber); }
+.cloud-portal .dot.failed { background: var(--red); }
 .cloud-portal .device-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
 .cloud-portal .enter { padding: 5px 10px; border: 1px solid #d9775744; border-radius: 6px; background: #d9775714; color: var(--accent-text); font-size: 12px; font-weight: 500; text-decoration: none; cursor: pointer; transition: background .12s, border-color .12s; }
 .cloud-portal .enter:hover { background: #d9775724; border-color: #d9775766; }
@@ -40,6 +42,12 @@
 .cloud-portal .command code { flex: 1; min-width: 0; font: 12px/1.7 Menlo, Consolas, monospace; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
 .cloud-portal .command button { flex: none; }
 .cloud-portal .setup-status { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--muted); }
+.cloud-portal #setup-progress { display: block; width: 100%; height: 5px; margin-top: 12px; border: 0; border-radius: 4px; overflow: hidden; appearance: none; background: var(--surface-2); accent-color: var(--accent); }
+.cloud-portal #setup-progress::-webkit-progress-bar { background: var(--surface-2); }
+.cloud-portal #setup-progress::-webkit-progress-value { background: var(--accent); }
+.cloud-portal #setup-progress::-moz-progress-bar { background: var(--accent); }
+.cloud-portal .setup-actions { display: flex; gap: 8px; margin-top: 12px; }
+.cloud-portal .setup-actions:has(> [hidden]):not(:has(> :not([hidden]))) { display: none; }
 .cloud-portal .note, .cloud-portal .footnote { font-size: 11px; color: var(--faint); }
 .cloud-portal .note { margin-bottom: 0; }
 .cloud-portal .footnote { margin-top: 16px; }

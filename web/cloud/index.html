@@ -31,10 +31,13 @@
       <div id="devices" class="devices"></div>
       <section id="setup" class="setup" hidden>
         <div class="setup-heading"><h2>连接这台电脑</h2><button id="close-setup" class="text" aria-label="关闭安装面板">关闭</button></div>
-        <p id="setup-help">在本机终端执行下面的命令。首次安装需要 Node.js 22+、Git 和 tmux。</p>
+        <p id="setup-help">在本机终端执行一次。自动检测并安装缺失的 Node.js、Git、tmux 等工具，每一步验证通过后继续。</p>
         <div class="command"><code id="command"></code><button id="copy">复制命令</button></div>
-        <div class="setup-status" role="status"><span class="dot waiting"></span><span id="setup-status">等待本机连接 · 安装码 10 分钟内有效</span></div>
-        <p class="note">节点在后台运行，Agent 使用这台电脑的工具和环境。</p>
+        <div class="setup-status" role="status"><span class="dot waiting"></span><span id="setup-status">等待执行安装命令</span></div>
+        <progress id="setup-progress" max="6" value="0" aria-label="安装进度" hidden></progress>
+        <p id="setup-detail" class="note">请在 10 分钟内开始；开始后可在 24 小时内继续。</p>
+        <div class="setup-actions"><button id="retry-install" class="sec" type="button" hidden>重新生成命令</button><a id="setup-enter" class="enter" hidden>进入工作台 →</a></div>
+        <p class="note">中断后再次执行即可继续。系统授权在本机确认；Agent 安装和登录由你选择。</p>
       </section>
       <p class="footnote">任务在所选设备执行，共享 Context 保存在 Junction。</p>
     </section>

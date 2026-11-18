@@ -1,4 +1,5 @@
 const $ = id => document.getElementById(id);
+import { installationView } from './install-progress.js';
 Theme.init();
 function renderThemeToggle() {
   const toLight = Theme.theme === 'dark';
@@ -11,7 +12,7 @@ $('theme-toggle').onclick = () => Theme.toggle();
 renderThemeToggle();
 const setupCode = new URLSearchParams(location.hash.slice(1)).get('setup');
 if (location.hash) history.replaceState(null, '', location.pathname);
-let signedIn = false, knownDevices = new Set(), waiting = false, lastDevices = '';
+let signedIn = false, installationId = '', installationKey = '', lastDevices = '', refreshing = false;
 async function api(route, body, method = 'POST') {
   const response = await fetch('/hub/' + route, body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const result = await response.json();
@@ -31,18 +32,34 @@ function auth() {
 }
 async function workspace(user) {
   signedIn = true; $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; $('username').textContent = user;
+  installationKey='switchyard-install:'+user;
+  try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
   await refresh();
+}
+function renderInstallation(record) {
+  const view=installationView(record);
+  $('setup').hidden=false;
+  $('setup-status').textContent=view.title;
+  $('setup-status').previousElementSibling.className='dot '+view.tone;
+  $('setup-detail').textContent=view.detail;
+  $('setup-progress').hidden=record.status==='pending';
+  $('setup-progress').value=view.progress;
+  if(!$('command').textContent)$('command').parentElement.hidden=true;
+  $('retry-install').hidden=!(view.retry || (!$('command').textContent && !view.complete));
+  $('setup-enter').hidden=!view.complete;
+  if(view.complete){
+    $('setup-enter').href='/workspace/'+encodeURIComponent(record.device_id)+'/';
+    $('command').parentElement.hidden=true; $('setup-help').hidden=true;
+    try { sessionStorage.removeItem(installationKey); } catch {}
+  }
 }
 const computer = '<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></svg>';
 async function refresh() {
-  if (!signedIn) return;
-  const { items } = await api('devices');
-  if (waiting && items.some(d => !knownDevices.has(d.id) && d.online)) {
-    waiting = false; $('setup-status').textContent = '已连接，在设备卡片点击「进入工作台」即可开始';
-    $('setup-status').previousElementSibling.className = 'dot online';
-    $('command').parentElement.hidden = true;
-    $('setup-help').hidden = true;
-  }
+  if (!signedIn || refreshing) return;
+  refreshing=true;
+  try {
+  const [{items}, installation] = await Promise.all([api('devices'),installationId ? api('installations/'+installationId) : null]);
+  if(installation)renderInstallation(installation);
   const signature = JSON.stringify(items);
   if (signature === lastDevices) return;
   lastDevices = signature; $('devices').replaceChildren();
@@ -64,6 +81,7 @@ async function refresh() {
     };
     $('devices').append(card);
   }
+  } finally { refreshing=false; }
 }
 $('auth-form').onsubmit = async event => {
   event.preventDefault(); error(); $('submit').disabled = true;
@@ -72,21 +90,22 @@ $('auth-form').onsubmit = async event => {
     $('password').value = ''; await workspace(result.user_id);
   } catch (e) { error(e.message); } finally { $('submit').disabled = false; }
 };
-$('logout').onclick = async () => { try { await api('logout', {}); location.href = '/'; } catch (e) { error(e.message); } };
+$('logout').onclick = async () => { try { await api('logout', {}); try { sessionStorage.removeItem(installationKey); } catch {} location.href = '/'; } catch (e) { error(e.message); } };
 $('install').onclick = async () => {
   error(); $('install').disabled = true;
   try {
-    const { code, origin } = await api('pairings', {});
-    const { items } = await api('devices'); knownDevices = new Set(items.map(d => d.id)); waiting = true;
-    // The pairing code is single-use and expires after ten minutes. It is not
-    // a device credential and is never saved in browser storage.
+    const { code, origin, installation_id } = await api('pairings', {});
+    installationId=installation_id;
+    try { sessionStorage.setItem(installationKey,installationId); } catch {}
+    // Only the non-secret status ID is kept across reloads. The one-use code
+    // is claimed by the installer within ten minutes, never stored in the web.
     $('command').textContent = `curl -fsS '${origin}/install.sh' | bash -s -- '${code}'`;
     $('command').parentElement.hidden = false; $('setup-help').hidden = false; $('setup').hidden = false;
-    $('setup-status').textContent = '等待本机连接 · 安装码 10 分钟内有效';
-    $('setup-status').previousElementSibling.className = 'dot waiting';
+    renderInstallation(await api('installations/'+installationId));
   } catch (e) { error(e.message); } finally { $('install').disabled = false; }
 };
-$('close-setup').onclick = () => { $('setup').hidden = true; };
+$('retry-install').onclick = () => $('install').click();
+$('close-setup').onclick = () => { $('setup').hidden = true; installationId=''; try { sessionStorage.removeItem(installationKey); } catch {} };
 $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText($('command').textContent); $('copy').textContent = '已复制'; setTimeout(() => { $('copy').textContent = '复制命令'; }, 1500); }
   catch { error('请选中命令复制到本机终端。'); }
