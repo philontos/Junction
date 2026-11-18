@@ -62,6 +62,8 @@ Junction v0.2 的快照还包含原生记录索引（行号、字节位置、校
 
 第一版新增的发布与创建接续任务在当前 Switchyard 节点执行；远程节点现有功能保留。自动把 Context 调度到任意远程节点尚未接入。
 
+后续环境清单的范围、空值语义与接收方检查方式见 [Context 环境清单设计](context-environment.md)。该文档是设计草案；系统、依赖、skills、服务与权限清单的自动采集尚未实现。
+
 ## 新增 Web 服务接口
 
 路径前缀 `/api/junction`，可选请求头 `X-Junction-Account` 选择服务端预配置别名。它不是用户认证头，也不出现在 Web 主流程中；整套 Switchyard Web 应只开放给可信设备。旧的 grants 代理接口保留兼容。
