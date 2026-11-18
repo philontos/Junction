@@ -183,6 +183,21 @@ function openDetail(meta) {
   const capture = r.normalized.extensions?.["switchyard.capture/1"];
   if (capture?.notes) for (const item of capture.notes) details.append(note(item.detail));
   if (w) details.append(note(`${L("代码版本", "Commit")}: ${w.commit}`));
+  const environment = r.normalized.extensions?.["junction.environment/1"];
+  const environmentDetails = el("details", undefined, "jx-section");
+  environmentDetails.append(el("summary", L("来源环境", "Source environment")));
+  if (environment) {
+    environmentDetails.append(note(L("记录分享时的环境线索；接续 Agent 会按需检查当前设备。", "Captured environment evidence; the receiving agent checks the current device as needed.")));
+    const names = { system: L("系统", "System"), workspace: L("工作区", "Workspace"), runtimes: L("运行时", "Runtimes"), dependencies: L("依赖文件", "Dependency files"), agent: "Agent", tools: L("工具", "Tools"), skills: "Skills", variables: L("变量名称", "Variable names"), services: L("服务", "Services"), resources: L("文件资源", "Resources"), access: L("权限需求", "Access") };
+    const coverage = { collected: L("已记录", "Recorded"), partial: L("部分记录", "Partial"), not_collected: L("未采集", "Not collected"), not_applicable: L("不适用", "Not applicable") };
+    for (const [key, value] of Object.entries(environment.groups || {})) {
+      const row = el("details");
+      const count = value.items?.length || 0;
+      row.append(el("summary", `${names[key] || key} · ${coverage[value.coverage] || value.coverage}${count ? ` · ${count}` : ""}`), el("pre", JSON.stringify(value, null, 2)));
+      environmentDetails.append(row);
+    }
+  } else environmentDetails.append(note(L("此版本未记录环境清单。接续时由 Agent 检查本机环境。", "This version has no environment manifest. The receiving agent checks locally.")));
+  contextInfo.append(environmentDetails);
   details.append(note(L("保留原始记录和标准化历史。工具、附件和权限由当前设备提供。", "Original and normalized records are retained. Tools, attachments and permissions come from the current device.")));
   const actions = el("div", undefined, "jx-actions");
   actions.append(button(L("下载 Context", "Export context"), async () => {

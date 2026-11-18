@@ -92,6 +92,9 @@ test("handoff preserves provenance and full history, with a working paginated of
     const info = JSON.parse(execFileSync(process.execPath, [reader, "info"], { encoding: "utf8" }));
     assert.deepEqual(info.extensions["junction.overview/1"], overview);
     assert.equal(info.records, undefined);
+    assert.equal(info.environment.status, "not_recorded");
+    const environment = JSON.parse(execFileSync(process.execPath, [reader, "environment"], { encoding: "utf8" }));
+    assert.equal(environment.status, "not_recorded");
     const records = JSON.parse(execFileSync(process.execPath, [reader, "records", "0", "1"], { encoding: "utf8" }));
     assert.deepEqual(records.items, normalized.records);
     const record = JSON.parse(execFileSync(process.execPath, [reader, "record", "r1"], { encoding: "utf8" }));

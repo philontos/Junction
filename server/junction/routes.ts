@@ -10,6 +10,8 @@ import { createRepoTask } from "../task/createtask.js";
 import { locateNativeJsonl } from "../session/transcript.js";
 import { JunctionClient, JunctionError, readConfig, revisionPath } from "./client.js";
 import { WORKSPACE_EXTENSION, workspaceOf, publicRepoUrl, repoIdentity, writeHandoff, handoffPrompt } from "./handoff.js";
+import { collectEnvironment, ENVIRONMENT_EXTENSION } from "./environment-runtime.mjs";
+import { pinEnvironment } from "./environment.js";
 
 const configFile = () => process.env.SWITCHYARD_JUNCTION_CONFIG || path.join(DATA_DIR, "junction.json");
 const clientFor = (req: Request) => new JunctionClient(readConfig(configFile()), String(req.headers["x-junction-account"] || "") || undefined);
@@ -144,7 +146,13 @@ export function registerJunctionRoutes(app: Express) {
       const raw = await sourceBytes(src.file, src.bytes);
       progress("snapshot", `已固定会话快照，${raw.length} 字节；已记录可用的仓库和分支信息。`);
       for (const item of src.notes) progress("annotation", item.detail);
-      const extensions = src.workspace ? { [WORKSPACE_EXTENSION]: src.workspace } : { "switchyard.capture/1": { ...src.capture, notes: src.notes } };
+      const extensions: Record<string, any> = src.workspace ? { [WORKSPACE_EXTENSION]: src.workspace } : { "switchyard.capture/1": { ...src.capture, notes: src.notes } };
+      progress("environment", "正在记录工作环境与任务中使用过的工具…");
+      const captured = await collectEnvironment({ cwd: src.task.worktree_path, agent: src.task.agent, raw,
+        workspaceExtension: src.workspace ? WORKSPACE_EXTENSION : "switchyard.capture/1" });
+      extensions[ENVIRONMENT_EXTENSION] = await pinEnvironment(
+        path.join(DATA_DIR, "tasks", String(src.task.id), "environment-snapshots"), raw, extensions, captured,
+      );
       const q = new URLSearchParams({ provider: src.task.agent, source_name: path.basename(src.file), shared: "true", extensions: JSON.stringify(extensions),
         source_key: `switchyard:${NS}:task:${src.task.id}` });
       const title = src.task.title.trim().slice(0, 200);
