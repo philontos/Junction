@@ -9,10 +9,9 @@ import type { Task } from "../core/db.js";
 import { localHostId } from "../core/ownership.js";
 import { resolveCwd } from "../fleet/local.js";
 import { type Runner } from "../fleet/runner.js";
-import { type AgentKind } from "../session/agent.js";
+import { type AgentKind, isAgentKind, agentAdapter } from "../session/agent.js";
 import { hookSettingsJson } from "../session/hooks.js";
 import { startSession, killSession } from "../session/tmux.js";
-import { locateNativeJsonl, locateDirectoryKimi } from "../session/transcript.js";
 import { writeTaskManifestFromDb } from "./taskmanifest.js";
 import { taskCwd, taskMarker, taskControlDir } from "./workspace.js";
 
@@ -55,7 +54,7 @@ export async function createDirectoryTask(env: DirectoryEnv, options: DirectoryO
   }
   // Validate before recording a task; no mkdir or Git operations on user data.
   const cwd = await directoryCwd(options.cwd, env.home);
-  if (!["claude", "codex", "kimi"].includes(options.agent)) throw new Error("请选择有效的 Agent。");
+  if (!isAgentKind(options.agent)) throw new Error("请选择有效的 Agent。");
   const owner = localHostId(env.db);
   if (owner == null) throw new Error("本机节点未初始化。");
   const title = options.title?.trim().slice(0, 200) || `${options.agent} · ${path.basename(cwd) || cwd}`;
@@ -89,7 +88,10 @@ export async function startDirectorySession(runner: Runner, task: Task, options:
   // tmux can outlive installation changes and retain an older PATH. Resolve on
   // the owning node before launching, and report a missing CLI immediately.
   const binary = (await runner.exec("sh", ["-c", 'command -v "$1"', "sh", options.agent]).catch(() => "")).trim();
-  if (!path.isAbsolute(binary)) throw new Error(`本机未找到 ${options.agent}，请先安装该 Agent CLI。`);
+  if (!path.isAbsolute(binary)) {
+    const adapter = agentAdapter(options.agent);
+    throw new Error(`本机未找到 ${adapter.name}，请先安装该 Agent CLI。${adapter.installCommand ? `安装命令：${adapter.installCommand}` : ""}`);
+  }
   const control = taskControlDir(runner.dataDir, task);
   await fs.mkdir(path.join(control, ".claude"), { recursive: true, mode: 0o700 });
   const settings = path.join(control, ".claude", "settings.local.json");
@@ -99,25 +101,9 @@ export async function startDirectorySession(runner: Runner, task: Task, options:
   const kimiFile = path.join(control, "kimi-agent.md");
   await fs.writeFile(kimiFile, `---\nname: switchyard-directory\ndescription: Switchyard directory task\n---\n\n\${base_prompt}\n\n${instructions}\n`, { mode: 0o600 });
   let sessionId = task.claude_session || undefined;
-  if (resume) {
-    if (task.agent === "claude") {
-      const observed = (await runner.readText(path.join(control, ".claude", "session-id")))?.trim();
-      if (observed && /^[a-zA-Z0-9_-]{1,128}$/.test(observed)) sessionId = observed;
-    } else if (task.agent === "codex") {
-      const file = await locateNativeJsonl(runner, task);
-      if (file) {
-        const handle = await fs.open(file, "r");
-        try {
-          const buffer = Buffer.alloc(1024 * 1024);
-          const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-          const meta = JSON.parse(buffer.subarray(0, bytesRead).toString().split("\n")[0]);
-          sessionId = meta.payload?.id || meta.payload?.session_id;
-        } finally { await handle.close(); }
-      }
-    } else {
-      const found = await locateDirectoryKimi(runner, task);
-      sessionId = found?.source.replace(/^kimi:/, "");
-    }
+  const resumeId = agentAdapter(options.agent).directoryResumeId;
+  if (resume && resumeId) {
+    sessionId = await resumeId(runner, task) || undefined;
     if (!sessionId || !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) {
       throw new Error("未找到此任务自己的会话记录，无法安全恢复。请新建任务或从共享 Context 接续。");
     }

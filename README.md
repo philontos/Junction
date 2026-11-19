@@ -40,6 +40,8 @@ machine B owns: B's repos · database · worktrees · tmux sessions · agents
 
 Machine A can ask B to create or control a task, but B performs the operation and stores the result. A remote machine without Switchyard is never used as a compatibility shortcut and cannot receive tasks.
 
+Pi is supported for interactive tasks, native transcript sharing, and Context handoff. See [Agent adapters](docs/agent-adapters.md) for installation and the local / Junction integration boundary.
+
 ## Quick start
 
 Install this once on every computer you want to use as a development machine.

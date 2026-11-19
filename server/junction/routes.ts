@@ -10,6 +10,7 @@ import { createRepoTask } from "../task/createtask.js";
 import { buildDirectoryEnv, createDirectoryTask, directoryCwd } from "../task/directory.js";
 import { taskControlDir, taskCwd } from "../task/workspace.js";
 import { locateNativeJsonl } from "../session/transcript.js";
+import { isAgentKind, canShareAgent } from "../session/agent.js";
 import { JunctionClient, JunctionError, readConfig, revisionPath } from "./client.js";
 import { WORKSPACE_EXTENSION, workspaceOf, publicRepoUrl, repoIdentity, writeHandoff, handoffPrompt } from "./handoff.js";
 import { collectEnvironment, ENVIRONMENT_EXTENSION } from "./environment-runtime.mjs";
@@ -36,7 +37,7 @@ async function taskSource(id: unknown) {
   if (!Number.isSafeInteger(Number(id)) || Number(id) < 1) throw new JunctionError(400, "任务 ID 无效。");
   const task = getTask.get(Number(id)) as Task | undefined;
   if (!task || task.kind === "local") throw new JunctionError(404, "找不到本机 Agent 任务。");
-  if (!["claude", "codex"].includes(task.agent)) throw new JunctionError(409, "当前仅支持 Claude Code 和 Codex JSONL。");
+  if (!canShareAgent(task.agent)) throw new JunctionError(409, "该 Agent 尚未安装 Context 共享适配器。");
   const repo = getRepo.get(task.repo_id) as Repo | undefined;
   const cwd = taskCwd(task);
   const file = await locateNativeJsonl(localRunner, task);
@@ -190,7 +191,7 @@ export function registerJunctionRoutes(app: Express) {
   // Explicit file selection supports pre-existing logs without arbitrary server filesystem access.
   app.post("/api/junction/import", express.raw({ type: "application/x-ndjson", limit: "32mb" }), wrap(async (req, res) => {
     if (!Buffer.isBuffer(req.body)) throw new JunctionError(415, "请选择 JSONL 文件。");
-    if (!["claude", "codex"].includes(String(req.query.provider))) throw new JunctionError(400, "请选择 Claude 或 Codex。");
+    if (!canShareAgent(req.query.provider)) throw new JunctionError(400, "请选择已支持的 Context 格式。");
     const q = new URLSearchParams({ provider: String(req.query.provider), shared: "true", source_name: str(req.query.name, 255) || "upload.jsonl" });
     if (str(req.query.title, 200).trim()) q.set("title", str(req.query.title, 200).trim());
     const result = await clientFor(req).request(`/v1/imports?${q}`, { method: "POST", headers: { "content-type": "application/x-ndjson" }, body: new Uint8Array(req.body).buffer });
@@ -199,7 +200,7 @@ export function registerJunctionRoutes(app: Express) {
   app.post("/api/junction/continue", wrap(async (req, res) => {
     const b = req.body || {};
     const client = clientFor(req);
-    if (!["claude", "codex", "kimi"].includes(b.agent)) throw new JunctionError(400, "请选择有效的 Agent。");
+    if (!isAgentKind(b.agent)) throw new JunctionError(400, "请选择有效的 Agent。");
     const provider = b.agent === "claude" && b.provider_id ? getProvider.get(Number(b.provider_id)) as Provider | undefined : undefined;
     if (b.provider_id && !provider) throw new JunctionError(400, "模型后端不存在。");
     // Validate the local destination before downloading a potentially large history.

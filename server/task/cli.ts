@@ -1,3 +1,4 @@
+import { agentCatalog, isAgentKind } from "../agents/index.js";
 // The `tdsp` node-local API: pure functions that take a DB handle (like tasks.ts
 // / schema.ts), so they're testable against an in-memory sqlite and reusable by
 // both the HTTP server (tdsp serve) and the one-shot CLI verbs. A node is the
@@ -157,6 +158,7 @@ export type NodeTaskReference = Pick<
 >;
 
 export interface TaskListPayload {
+  agents?: ReturnType<typeof agentCatalog>;
   schema_version: number;
   capabilities: string[];
   tasks: NodeTask[];
@@ -237,6 +239,7 @@ export async function taskListPayload(db: DB, liveness: TaskLiveness): Promise<T
   return {
     schema_version: TASK_LIST_VERSION,
     capabilities: [...TASK_CAPABILITIES],
+    agents: agentCatalog(),
     tasks: enriched,
     repos: reposForList(db),
   };
@@ -253,6 +256,7 @@ export interface NodeRef {
 }
 
 export interface NodeTasks<T extends NodeRef = NodeRef> {
+  agents?: ReturnType<typeof agentCatalog>;
   node: T;
   ok: boolean;
   reason?: "unreachable" | "version" | "error"; // why ok=false
@@ -302,6 +306,7 @@ export async function aggregateNodes<T extends NodeRef>(
         ok: true,
         schema_version: payload.schema_version,
         capabilities,
+        agents: Array.isArray(payload.agents) ? payload.agents.filter((a: any) => a && typeof a.id === "string" && typeof a.name === "string").map((a: any) => ({ id: a.id, name: a.name, version: a.version, native_format: a.native_format, sharing: a.sharing === true })) : undefined,
         // Older list payloads exposed the full task row. Re-project at the
         // controller boundary so those owner-private fields never reach its UI.
         tasks: (Array.isArray(payload.tasks) ? payload.tasks : [])
@@ -762,6 +767,10 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       } catch {
         deps.err("create: expected a base64-encoded JSON spec");
         deps.out(JSON.stringify({ ok: false, error: "invalid spec" }));
+        return 1;
+      }
+      if (spec.agent != null && !isAgentKind(spec.agent)) {
+        deps.out(JSON.stringify({ ok: false, error: "invalidRequest", message: "Unsupported agent; update this node." }));
         return 1;
       }
       const r = await deps.createRepo(spec);

@@ -243,7 +243,7 @@ function fleetCard(hostId, tk, orderKey = null) {
   // Same agent split as the local taskCard — the node ships `agent` in its
   // `tdsp list` payload (SELECT *). An un-updated node (no agent column) omits it
   // → defaults to claude. Colour only, no text label.
-  const agent = tk.agent === "codex" || tk.agent === "kimi" ? tk.agent : "claude";
+  const agent = typeof tk.agent === "string" && /^[a-z][a-z0-9_-]*$/.test(tk.agent) ? tk.agent : "claude";
   const meta = tk.kind === "local" || tk.kind === "directory"
     ? `<div class="muted">📂 <code>${esc(tk.cwd || "~")}</code> <span class="tag-local">${tk.kind === "directory" ? agent : t("local.tag")}</span></div>`
     : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;

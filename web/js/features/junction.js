@@ -1,3 +1,4 @@
+import { agentCatalog, agentName, canShareAgent, loadAgentCatalog, requireAgent } from "../core/agents.js";
 import { $, api, nodePath } from "../core/dom.js";
 import { requireDirectoryTasks } from "../core/directory-tasks.js";
 import { state } from "../core/state.js";
@@ -21,8 +22,6 @@ function select(options, label) { const s = el("select"); s.setAttribute("aria-l
 function field(label, input) { const f = el("label", undefined, "jx-field"); f.append(el("span", label), input); return f; }
 function textInput(value = "", placeholder = "") { const input = el("input"); input.value = value; input.placeholder = placeholder; return input; }
 function note(text) { return el("p", text, "jx-note"); }
-const agentNames = new Map([["claude", "Claude Code"], ["codex", "Codex"], ["kimi", "Kimi"], ["pi", "Pi"]]);
-const agentName = provider => agentNames.get(provider) || provider || "Agent";
 const contextOwner = meta => meta.owner_name || meta.owner_id || L("未记录", "Not recorded");
 function contextCopy(meta) {
   const overview = meta.revision.normalized?.extensions?.["junction.overview/1"];
@@ -202,6 +201,7 @@ async function loadList(append = false) {
     const [page, currentStatus] = await Promise.all([
       call("/contexts" + (cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""), options),
       append ? status : call("/status", options),
+      loadAgentCatalog(),
     ]);
     if (request !== listRequest) return;
     status = currentStatus;
@@ -363,9 +363,9 @@ function showContinue(meta) {
   const repo = select([["", L("工作目录", "Working directory")], ...repos.map(r => [String(r.id), `${r.name} · Worktree`])], "Workspace");
   const cwd = textInput("~", "~/Projects"); cwd.maxLength = 4096;
   const cwdField = field(L("工作目录（当前设备）", "Working directory (this device)"), cwd);
-  let agent = ["claude", "codex", "kimi"].includes(meta.revision.provider) ? meta.revision.provider : "claude";
+  let agent = agentCatalog().some(a => a.id === meta.revision.provider) ? meta.revision.provider : "claude";
   const agents = el("div", undefined, "agent-seg"); agents.setAttribute("role", "group"); agents.setAttribute("aria-label", "Agent");
-  for (const [value, label] of [["claude", "Claude Code"], ["codex", "Codex"], ["kimi", "Kimi Code"]]) {
+  for (const { id: value, name: label } of agentCatalog()) {
     const b = el("button", label, "agent-opt"); b.type = "button"; b.dataset.agent = value;
     b.classList.toggle("selected", value === agent); b.setAttribute("aria-pressed", String(value === agent));
     b.onclick = () => {
@@ -413,6 +413,7 @@ function showContinue(meta) {
     setBusy(true);
     let result;
     try {
+      await requireAgent(agent);
       if (!repo.value) await requireDirectoryTasks();
       result = await send("/continue", { context_id: meta.id, revision_id: meta.revision.id, repo_id: Number(repo.value), agent,
         cwd: repo.value ? undefined : cwd.value.trim() || "~",
@@ -469,7 +470,7 @@ async function shareTask(taskId) {
   }
 }
 function showPublish() {
-  const tasks = hooks.allTasks().filter(t => t.kind !== "local" && ["claude", "codex"].includes(t.agent));
+  const tasks = hooks.allTasks().filter(t => t.kind !== "local" && canShareAgent(t.agent));
   if (tasks.some(t => t.id === state.selectedTaskId)) return shareTask(state.selectedTaskId);
   ++generation; selectedContext = null;
   const d = detailRoot(L("选择要共享的任务", "Choose a task to share"));

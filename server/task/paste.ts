@@ -3,7 +3,9 @@
 // unit-testable. The HTTP endpoint wires these to the Runner (land the file on
 // the task's machine) and tmux (bracketed-paste whatever the target CLI expects).
 import path from "node:path";
-import type { AgentKind } from "../session/agent.js";
+import { agentAdapter, type AgentKind } from "../agents/index.js";
+import type { ImagePasteAdapter } from "../agents/types.js";
+export type { ImagePasteAdapter } from "../agents/types.js";
 
 // Clipboard screenshots are PNG; allow the few other web image types too. The
 // value is the on-disk extension the target CLI needs to recognize the file as
@@ -36,40 +38,8 @@ export function pasteTargetBase(task: { worktree_path?: string | null; cwd?: str
   return null;
 }
 
-export interface ImagePasteAdapter {
-  /** Relative directory under the task cwd/worktree where pasted images land. */
-  storageDir: string;
-  /** Pattern added to .git/info/exclude so pasted images stay out of git status. */
-  gitExcludePattern: string;
-  /** Text bracketed-pasted into the CLI after the image has landed. */
-  inputText: (imagePath: string) => string;
-}
-
-const ADAPTERS: Record<AgentKind, ImagePasteAdapter> = {
-  // Claude Code turns a bracketed-pasted image path into an inline attachment.
-  claude: {
-    storageDir: path.join(".claude", "pasted"),
-    gitExcludePattern: ".claude/pasted/",
-    inputText: (imagePath) => imagePath,
-  },
-  // Codex CLI documents image attachments for initial prompts and interactive
-  // composer paste. Through this web tmux bridge we can only inject text, so keep
-  // Codex's storage and prompt wording isolated here until a native attachment
-  // transport is added.
-  codex: {
-    storageDir: path.join(".codex", "pasted"),
-    gitExcludePattern: ".codex/pasted/",
-    inputText: (imagePath) => `Use this image as visual context: ${imagePath}`,
-  },
-  kimi: {
-    storageDir: path.join(".kimi-code", "pasted"),
-    gitExcludePattern: ".kimi-code/pasted/",
-    inputText: (imagePath) => `Use this image as visual context: ${imagePath}`,
-  },
-};
-
 export function imagePasteAdapter(agent: AgentKind): ImagePasteAdapter {
-  return ADAPTERS[agent];
+  return agentAdapter(agent).imagePaste;
 }
 
 /** Absolute dest for one pasted image under the adapter's storage dir. */

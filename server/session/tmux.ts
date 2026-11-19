@@ -1,32 +1,8 @@
 import type { CommandRunner } from "../fleet/runner.js";
-import { agentArgv, type AgentKind } from "./agent.js";
-
-const KIMI_READY_TEXT = "Welcome to Kimi Code!";
-const KIMI_READY_POLL_MS = 100;
-const KIMI_READY_ATTEMPTS = 100;
+import { agentAdapter, type AgentKind, type LaunchOpts } from "../agents/index.js";
 
 async function tmux(runner: CommandRunner, args: string[]): Promise<string> {
   return runner.exec("tmux", args);
-}
-
-async function kimiBinary(runner: CommandRunner): Promise<string> {
-  const script = "command -v kimi 2>/dev/null || { p=\"$HOME/.kimi-code/bin/kimi\"; [ -x \"$p\" ] && printf '%s\\n' \"$p\"; }";
-  const out = (await runner.exec("sh", ["-c", script]).catch(() => "")).trim();
-  return out.split("\n").find(Boolean) || "kimi";
-}
-
-async function waitForKimiReady(runner: CommandRunner, session: string): Promise<void> {
-  for (let attempt = 0; attempt < KIMI_READY_ATTEMPTS; attempt++) {
-    // Include scrollback: on a short pane the welcome card can move above the
-    // visible screen once startup notices and the editor have rendered.
-    const pane = await tmux(runner, ["capture-pane", "-p", "-t", session, "-S", "-100"]);
-    if (pane.includes(KIMI_READY_TEXT)) return;
-    if (attempt + 1 < KIMI_READY_ATTEMPTS) {
-      await new Promise<void>((resolve) => setTimeout(resolve, KIMI_READY_POLL_MS));
-    }
-  }
-  // A future Kimi release may change the welcome copy. After the bounded wait,
-  // still submit so a cosmetic change does not permanently drop every opening.
 }
 
 function absGitPath(cwd: string, p: string): string {
@@ -49,7 +25,7 @@ async function gitPath(runner: CommandRunner, cwd: string, flag: "--git-dir" | "
 }
 
 async function extraWritableGitDirs(runner: CommandRunner, cwd: string, agent: AgentKind): Promise<string[]> {
-  if (agent !== "codex" && agent !== "kimi") return [];
+  if (!agentAdapter(agent).writableGitDirs) return [];
   const dirs = await Promise.all([
     gitPath(runner, cwd, "--git-dir"),
     gitPath(runner, cwd, "--git-common-dir"),
@@ -67,7 +43,7 @@ async function sessionAddDirs(
   // Codex/Kimi sandbox roots must also cover the linked worktree's per-worktree
   // gitdir and shared bare mirror. Claude already follows Git metadata from each
   // --add-dir root using its own permission model.
-  const metadata = agent === "codex" || agent === "kimi"
+  const metadata = agentAdapter(agent).writableGitDirs
     ? (await Promise.all([cwd, ...roots].map((root) => extraWritableGitDirs(runner, root, agent)))).flat()
     : [];
   return [...new Set([...roots, ...metadata])];
@@ -104,7 +80,7 @@ function requireOwnerNode(runner: CommandRunner): void {
  * How to launch/resume each agent lives in agentArgv — this stays agent-agnostic.
  */
 export async function startSession(
-  runner: CommandRunner,
+  runner: CommandRunner & { dataDir?: string },
   session: string,
   cwd: string,
   prompt?: string | null,
@@ -127,28 +103,24 @@ export async function startSession(
   // The env prefix (provider) goes BEFORE the agent argv so the vars land on the
   // agent process.
   const agent = opts?.agent ?? "claude";
+  const adapter = agentAdapter(agent);
   const pre = envPrefix(opts?.env);
-  const addDirs = await sessionAddDirs(runner, cwd, agent, opts?.addDirs);
-  const launch = agentArgv(agent, {
-    prompt,
-    model: opts?.model,
-    resume: opts?.continue,
-    addDirs,
-    workspaceInstructions: opts?.workspaceInstructions,
-    kimiAgentFile: opts?.kimiAgentFile,
-    sessionId: opts?.sessionId,
-    claudeSettings: opts?.claudeSettings,
-  });
-  if (opts?.binary) launch[0] = opts.binary;
-  else if (agent === "kimi") launch[0] = await kimiBinary(runner);
+  const launchOpts: LaunchOpts = {
+    ...opts, prompt, resume: opts?.continue,
+    addDirs: await sessionAddDirs(runner, cwd, agent, opts?.addDirs),
+  };
+  const prepared = await adapter.prepareLaunch?.({ runner, session, cwd, opts: launchOpts });
+  const finalOpts = { ...launchOpts, ...prepared };
+  const launch = adapter.launch(finalOpts);
+  if (finalOpts.binary) launch[0] = finalOpts.binary;
   const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...pre, ...launch];
   await tmux(runner, cmd);
   await ensureSessionOptions(runner, session);
-  if (agent === "kimi" && !opts?.continue && prompt?.trim()) {
+  if (adapter.initialPrompt === "afterReady" && !opts?.continue && prompt?.trim()) {
     // tmux reports a detached session before Kimi has switched the pane into TUI
     // input mode. Text sent in that window is merely echoed by the terminal and
     // never reaches Kimi, so wait for its first complete render before pasting.
-    await waitForKimiReady(runner, session);
+    await adapter.waitUntilReady?.(runner, session);
     await pasteSubmit(runner, session, prompt);
   }
 }

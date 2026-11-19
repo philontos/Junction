@@ -111,7 +111,7 @@ function taskEvidence(raw, provider, cwd, groups) {
     add(groups.tools, item(name, "unknown", { name, invoked: true }, evidence));
     if (name === "Skill" && label(args?.skill)) add(groups.skills, item(args.skill, "unknown", { name: args.skill }, evidence));
     const file = args?.file_path ?? args?.path;
-    if (["Read", "read_file", "view_image"].includes(name) && typeof file === "string" && file.length < 512 && !/[\x00-\x1f]/.test(file)) {
+    if (["Read", "read", "read_file", "view_image"].includes(name) && typeof file === "string" && file.length < 512 && !/[\x00-\x1f]/.test(file)) {
       if (/(^|[/\\])(?:\.env(?:\.|$)|\.ssh|auth\.json|credentials)/i.test(file)) return;
       if (file.endsWith("/SKILL.md")) {
         const name = label(path.basename(path.dirname(file)));
@@ -150,6 +150,10 @@ function taskEvidence(raw, provider, cwd, groups) {
       if (typeof entry.version === "string" && entry.version.length <= 64 && /^\d+\.\d+\.\d+[\w.+-]*$/.test(entry.version)) version = item(provider, "present", { name: provider, version: entry.version }, evidence);
       for (const block of Array.isArray(entry.message?.content) ? entry.message.content : []) {
         if (block?.type === "tool_use") call(block.name, block.input, evidence);
+      }
+    } else if (provider === "pi") {
+      for (const block of Array.isArray(entry.message?.content) ? entry.message.content : []) {
+        if (entry.type === "message" && block?.type === "toolCall") call(block.name, block.arguments, evidence);
       }
     } else if (provider === "codex") {
       const payload = entry.payload;

@@ -146,3 +146,7 @@ Junction 仓库独立执行 `pytest` 和 `ruff check src tests`。本地验收�
 - 目录任务记录为 `kind=directory`，`cwd` 指向用户目录，`worktree_path` 为空。归档仅停止会话，删除仅移除任务记录和节点元数据，不删除工作目录。
 - 每个任务的 Context、Claude hooks、Kimi Agent 文件保存在节点的 `tasks/<id>/` 中，不写入用户目录。Claude 绑定独立 session ID；Codex/Kimi 从原生指令记录匹配任务标记，恢复时使用精确 session ID。不能确认归属就拒绝恢复或共享，不回退到同目录最新会话。
 - 共享仍支持 Claude Code、Codex 原生 JSONL。Kimi 可启动并读取导入的 Context，其原生记录上传尚未支持。
+
+## Agent 适配
+
+Claude Code、Codex 和 Pi 支持原始 JSONL 共享与跨 Agent 接续；Kimi 目前支持运行和阅读。安装及扩展方式见 [Agent 接入](agent-adapters.md)。Pi 首次使用需在目标设备安装 CLI 并完成本机模型认证。

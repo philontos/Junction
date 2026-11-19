@@ -789,7 +789,7 @@ export function openPty(
   referenceTarget = null,
 ) {
   if (taskId == null) return;
-  const normalizedAgent = ["codex", "kimi", "shell"].includes(agent) ? agent : "claude";
+  const normalizedAgent = typeof agent === "string" && /^[a-z][a-z0-9_-]*$/.test(agent) ? agent : "claude";
   let p = panes.get(taskId);
   if (!p) p = createPane(taskId, query, normalizedAgent);
   else {

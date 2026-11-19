@@ -1,3 +1,4 @@
+import { agentCatalog, loadAgentCatalog, requireAgent } from "../core/agents.js";
 // Tasks: the dispatch-task modal, the live/archived card lists, task lifecycle
 // (archive / remove-worktree / delete), and connect() which attaches the dock
 // to a task's tmux session. paintSelection() reflects the currently-open card
@@ -22,7 +23,7 @@ let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
 const LS_AGENT = "tdsp.agent";
 let selectedAgent = "claude";
 function normalizeAgent(kind) {
-  return kind === "codex" || kind === "kimi" ? kind : "claude";
+  return typeof kind === "string" && /^[a-z][a-z0-9_-]*$/.test(kind) ? kind : "claude";
 }
 // whether the modal's current target node has a provider catalog reachable from
 // this UI. Providers belong to the node that will run the task: local catalog for
@@ -278,6 +279,28 @@ export function connect(id) {
     `#${t.id} ${t.title}`, "tmux attach -t " + t.session, t.id, t.claude_session || "", t.kind === "local" ? "shell" : t.agent, codeTarget, referenceTarget);
 }
 
+let agentPickerEpoch = 0;
+function renderAgentChoices(catalog) {
+  const picker = $("t-agent-seg");
+  picker.replaceChildren(...catalog.map(a => {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "agent-opt";
+    button.dataset.agent = a.id; button.textContent = a.name;
+    button.onclick = () => selectAgent(a.id);
+    button.classList.toggle("selected", a.id === selectedAgent);
+    return button;
+  }));
+}
+function refreshAgentChoices(hostId = null) {
+  const epoch = ++agentPickerEpoch;
+  renderAgentChoices(agentCatalog(hostId));
+  loadAgentCatalog(hostId).then(catalog => {
+    if (epoch !== agentPickerEpoch) return;
+    renderAgentChoices(catalog);
+    if (!catalog.some(a => a.id === selectedAgent)) selectAgent(catalog[0].id);
+  }).catch(e => { if (epoch === agentPickerEpoch) toast(e.message, "error"); });
+}
+
 // The agent picker (Claude Code | Codex | Kimi Code). Persists the last pick so the next
 // dispatch defaults to it, repaints the segmented control, and reflects the
 // choice onto the modal's panels via applyAgentUI.
@@ -295,9 +318,9 @@ function applyAgentUI() {
   const external = selectedAgent !== "claude";
   $("t-codex-sec").style.display = external ? "" : "none";
   const model = $("t-codex-model");
-  model.placeholder = t(selectedAgent === "kimi" ? "agent.kimiModelPh" : "agent.codexModelPh");
+  model.placeholder = t(`agent.${external ? selectedAgent : "codex"}ModelPh`);
   const note = $("t-agent-auto-note");
-  note.textContent = t(selectedAgent === "kimi" ? "agent.kimiAutoNote" : "agent.codexAutoNote");
+  note.textContent = t(`agent.${external ? selectedAgent : "codex"}AutoNote`);
   if (external) {
     $("t-provider-sec").style.display = "none";
     $("prov-panel").style.display = "none";
@@ -339,6 +362,7 @@ export function openTaskModal(repoId = null) {
   $("t-agent-sec").style.display = "";
   $("t-codex-model").value = "";
   selectAgent(normalizeAgent(localStorage.getItem(LS_AGENT)));
+  refreshAgentChoices(nodeTask?.hostId ?? null);
   sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
   if (modalProviderAvailable) refreshProviders();      // fill the target node's backend picker
@@ -347,6 +371,7 @@ export function openTaskModal(repoId = null) {
 // Pure DOM close, shared by every path. Dispatch calls THIS (the sheet's history
 // entry is then morphed into the terminal entry by enterTerminal — never popped).
 export function closeTaskModal() {
+  ++agentPickerEpoch;
   const modal = $("task-modal");
   if (modal.contains(document.activeElement)) document.activeElement.blur();
   modal.style.display = "none";
@@ -385,6 +410,7 @@ export function openNodeTaskModal(hostId, repoId) {
   $("t-agent-sec").style.display = "";
   $("t-codex-model").value = "";
   selectAgent(normalizeAgent(localStorage.getItem(LS_AGENT)));
+  refreshAgentChoices(nodeTask?.hostId ?? null);
   sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
   loadNodeBranches(hostId, repo);
@@ -476,6 +502,7 @@ async function loadBranches() {
 // over ssh can be slow), then settle into the node's live terminal.
 async function addNodeTask() {
   const { hostId, repo } = nodeTask;
+  try { await requireAgent(selectedAgent, hostId); } catch (e) { return toast(e.message, "error"); }
   const references = referencePayload();
   if (references == null) return toast(t("toast.taskFieldsRequired"), "error");
   const external = selectedAgent !== "claude";
@@ -516,6 +543,9 @@ async function addNodeTask() {
 export async function addTask() {
   if (directoryCheckPending) return;
   if (nodeTask) return addNodeTask();
+  directoryCheckPending = true;
+  try { await requireAgent(selectedAgent); } catch (e) { return toast(e.message, "error"); }
+  finally { directoryCheckPending = false; }
   const references = taskRepoId ? referencePayload() : [];
   if (references == null) return toast(t("toast.taskFieldsRequired"), "error");
   // provider_id belongs to the target node's own provider catalog. A hidden picker

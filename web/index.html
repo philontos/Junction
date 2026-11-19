@@ -121,11 +121,7 @@
          the same agent locally, whether this is the controller or a remote node. -->
     <div id="t-agent-sec">
       <label class="tm-lbl" data-i18n="task.agentLabel"></label>
-      <div id="t-agent-seg" class="agent-seg">
-        <button type="button" class="agent-opt selected" data-agent="claude" onclick="selectAgent('claude')">Claude Code</button>
-        <button type="button" class="agent-opt" data-agent="codex" onclick="selectAgent('codex')">Codex</button>
-        <button type="button" class="agent-opt" data-agent="kimi" onclick="selectAgent('kimi')">Kimi Code</button>
-      </div>
+      <div id="t-agent-seg" class="agent-seg" role="group" aria-label="Agent"></div>
     </div>
     <div id="t-workspace-sec">
       <label class="tm-lbl" for="t-workspace" data-i18n="task.workspaceLabel"></label>

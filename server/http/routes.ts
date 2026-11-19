@@ -12,7 +12,7 @@ import { db, Repo, Task, Host, Provider } from "../core/db.js";
 import { renameTask } from "../task/tasks.js";
 import { removeWorktree } from "../repo/git.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions } from "../session/tmux.js";
-import { asAgentKind } from "../session/agent.js";
+import { asAgentKind, isAgentKind, agentCatalog } from "../session/agent.js";
 import {
   isTranscriptReadRequest,
   isTranscriptResult,
@@ -509,7 +509,7 @@ app.delete("/api/repos/:id", async (req, res) => {
 });
 
 // ---------- tasks ----------
-app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, home: os.homedir() }));
+app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, agents: agentCatalog(), home: os.homedir() }));
 app.get("/api/tasks", async (_req, res) => {
   const tasks = listOwnedTasks(db);
   const withLive = await Promise.all(
@@ -568,6 +568,7 @@ async function addReferenceOnThisNode(taskId: number, input: any) {
 
 app.post("/api/tasks", async (req, res) => {
   const { repo_id, base_branch, title, prompt, provider_id, agent, agent_model, references } = req.body ?? {};
+  if (agent != null && !isAgentKind(agent)) return res.status(400).json({ error: "请选择有效的 Agent。" });
   const lang = langFromReq(req);
   const requestedHost = req.body?.host_id;
   if (requestedHost != null && Number(requestedHost) !== localHostId(db)) {
@@ -575,7 +576,6 @@ app.post("/api/tasks", async (req, res) => {
   }
   if (!repo_id) {
     if (references?.length) return res.status(400).json({ error: "请在仓库 Worktree 模式中添加参考仓库。" });
-    if (agent != null && !["claude", "codex", "kimi"].includes(agent)) return res.status(400).json({ error: "请选择有效的 Agent。" });
     const kind = asAgentKind(agent);
     const provider = kind === "claude" && provider_id ? getProvider.get(provider_id) as Provider | undefined : undefined;
     if (provider_id && !provider) return res.status(400).json({ error: "模型后端不存在。" });
@@ -1012,13 +1012,26 @@ app.delete("/api/nodes/:hostId/repos/:repoId", async (req, res) => {
 
 // Dispatch refers only to a repo id owned by B; B resolves its own mirror and
 // performs every worktree/session/database mutation locally.
+// Additive discovery; old nodes retain their original three agents.
+app.get("/api/nodes/:hostId/tasks/options", async (req, res) => {
+  const host = remoteHost(req, res);
+  if (!host) return;
+  const { result } = await runNodeJson(host, ["list", "--json"]);
+  if (!result) return res.status(502).json({ error: "无法读取目标节点的 Agent 列表。" });
+  res.json({ agents: result.agents || agentCatalog().filter(a => ["claude", "codex", "kimi"].includes(a.id)) });
+});
+
 app.post("/api/nodes/:hostId/tasks", async (req, res) => {
   const lang = langFromReq(req);
   const host = remoteHost(req, res);
   if (!host) return;
   const { repo_id, base, title, prompt, agent, provider_id } = req.body ?? {};
   if (!Number.isInteger(Number(repo_id)) || !base || !title) return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
+  if (agent != null && !isAgentKind(agent)) return res.status(400).json({ error: "请选择有效的 Agent。" });
   const agentKind = asAgentKind(agent);
+  const { result: advertised } = await runNodeJson(host, ["list", "--json"]);
+  const supported = advertised?.agents?.map((a: any) => a.id) || ["claude", "codex", "kimi"];
+  if (!supported.includes(agentKind)) return res.status(409).json({ error: "请先更新目标设备节点，再使用该 Agent。" });
   const spec = {
     repo_id: Number(repo_id),
     base,
