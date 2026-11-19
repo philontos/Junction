@@ -7,9 +7,11 @@ export interface AttachBins { ssh: string; mosh: string; tmux: string; }
 // machine. Local (or no host) → attach with local tmux. Remote → node-pty spawns
 // ssh/mosh locally and we attach to the session ON the remote; the shell, tmux,
 // and files all live there, this box is just the relay.
+// xterm accepts UTF-8 even when launchd/systemd or SSH provides no UTF-8 locale.
+// Tell tmux explicitly; otherwise it replaces Chinese and other Unicode with '_'.
 export function attachCommand(host: Host | undefined, session: string, bins: AttachBins): { file: string; args: string[]; label: string } {
   if (host && host.kind !== "local") {
-    const remote = `exec tmux attach -t ${session}`;
+    const remote = `exec tmux -u attach -t ${session}`;
     const label = `${host.target} ${session}`;
     return host.kind === "mosh"
       ? { file: bins.mosh, args: [host.target, "--", "sh", "-c", remote], label }
@@ -22,5 +24,5 @@ export function attachCommand(host: Host | undefined, session: string, bins: Att
           label,
         };
   }
-  return { file: bins.tmux, args: ["attach", "-t", session], label: session };
+  return { file: bins.tmux, args: ["-u", "attach", "-t", session], label: session };
 }
