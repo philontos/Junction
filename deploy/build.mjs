@@ -14,7 +14,7 @@ const hashes = {};
 try {
   const node = path.join(stage, 'node'), context = path.join(stage, 'context'); fs.mkdirSync(node); fs.mkdirSync(context);
   for (const file of files) {
-    if (['package.json', 'package-lock.json', 'deploy/postinstall.mjs', 'deploy/node/install.sh'].includes(file) || /^(apps\/workbench|packages\/agent-adapters\/node|packages\/node-transport|services\/junction\/gateway)\//.test(file)) copy(file, path.join(node, file));
+    if (file.startsWith('deploy/cloud/') || ['package.json', 'package-lock.json', 'deploy/postinstall.mjs', 'deploy/node/install.sh'].includes(file) || /^(apps\/workbench|packages\/agent-adapters\/node|packages\/node-transport|services\/junction\/gateway)\//.test(file)) copy(file, path.join(node, file));
     if (file.startsWith('services/junction/') && !file.startsWith('services/junction/gateway/')) copy(file, path.join(context, file.slice('services/junction/'.length)));
     if (file.startsWith('packages/agent-adapters/python/')) copy(file, path.join(context, 'agent-adapters', file.slice('packages/agent-adapters/python/'.length)));
     if (file.startsWith('deploy/junction/')) copy(file, path.join(context, 'deploy', file.slice('deploy/junction/'.length)));
