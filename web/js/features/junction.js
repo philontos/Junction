@@ -8,6 +8,7 @@ import { createContextReader } from "./junction-reader.js";
 const L = (zh, en) => I18N.lang === "zh" ? zh : en;
 let hooks, status, listCursor, generation = 0, listRequest = 0, activeShare = null, shareDismissTimer;
 let selectedContext = null, launchingContext = false, connectingJunction = false;
+let listController, listItems = [], listReady = false;
 const call = (url, options = {}) => api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const base = meta => `/contexts/${meta.id}/revisions/${meta.revision.id}`;
@@ -60,29 +61,24 @@ function detailRoot(title = L("新建任务", "New task")) {
   $("jx-task-navigation").replaceChildren(); $("jx-task-navigation").hidden = true;
   const d = $("jx-detail"); d.replaceChildren(); return d;
 }
-export function closeJunction() { if (!closeContextDialog(false)) return; $("junction-modal").hidden = true; generation++; }
+export function closeJunction() {
+  if (!closeContextDialog(false)) return;
+  $("junction-modal").hidden = true;
+  generation++; listRequest++; listController?.abort();
+}
 export function junctionIsOpen() { return !$("junction-modal").hidden; }
 export async function openJunction(taskId = null) {
   if (taskId) return shareTask(taskId);
   if (!closeContextDialog(false)) return;
-  const epoch = ++generation;
-  $("junction-modal").hidden = false;
+  ++generation;
   selectedContext = null;
   $("jx-detail").replaceChildren();
-  clearError("jx-error");
-  try {
-    const connection = await call("/connection");
-    if (epoch !== generation) return;
-    if (!connection.configured) {
-      $("jx-list").replaceChildren(button(L("连接 Junction", "Connect Junction"), () => showConnection(), "jx-empty sec"));
-      $("jx-more").hidden = true;
-      return showConnection(connection);
-    }
-    await Promise.all([refreshStatus(), loadList()]);
-  } catch (e) { if (epoch === generation) showError(e); }
-}
-async function refreshStatus() {
-  status = await call("/status");
+  $("jx-search").value = "";
+  // Clear the previous visit before showing the dialog, including while the
+  // connection check is pending. Detail navigation has its own generation.
+  const loading = loadList();
+  $("junction-modal").hidden = false;
+  return loading;
 }
 async function showConnection(known) {
   const epoch = ++generation;
@@ -131,47 +127,103 @@ async function showConnection(known) {
     url.focus({ preventScroll: true });
   } catch (e) { if (epoch === generation) showError(e); }
 }
+function renderContextList() {
+  if (!listReady) return;
+  const normalize = value => String(value || "").normalize("NFKC").toLowerCase();
+  const terms = normalize($("jx-search").value).trim().split(/\s+/).filter(Boolean);
+  const matches = listItems.filter(item => {
+    const text = normalize([contextCopy(item).title, item.title, item.owner_name, item.owner_id].join(" "));
+    return terms.every(term => text.includes(term));
+  });
+  const list = $("jx-list"), cards = document.createDocumentFragment();
+  for (const item of matches) {
+    const r = item.revision, workspace = r.normalized?.extensions?.["switchyard.workspace/1"] || r.normalized?.extensions?.["switchyard.capture/1"];
+    const copy = contextCopy(item);
+    const group = el("div", undefined, "jx-context-card");
+    const card = button("", () => openDetail(item), "jx-card");
+    card.dataset.contextId = item.id;
+    card.setAttribute("aria-label", `${L("预览并接续", "Preview and continue")}: ${copy.title}`);
+    const heading = el("span", undefined, "jx-card-heading"), title = el("strong", copy.title);
+    title.title = copy.title;
+    const agent = el("span", agentName(r.provider), "jx-card-agent"); agent.dataset.agent = r.provider;
+    agent.title = agentName(r.provider);
+    heading.append(title, agent); card.append(heading);
+    card.append(el("span", copy.summary || L("暂无任务摘要", "No task summary yet"), "jx-card-summary"));
+    const footer = el("span", undefined, "jx-card-footer");
+    footer.append(cardFact("repo", workspace?.repo_name || L("仓库未记录", "Repository not recorded")),
+      cardFact("branch", workspace?.branch || L("分支未记录", "Branch not recorded")),
+      cardFact("owner", contextOwner(item)));
+    card.append(footer); group.append(card);
+    cards.append(group);
+  }
+  if (!matches.length) {
+    const empty = el("div", undefined, "jx-empty");
+    empty.append(el("p", terms.length ? L("未找到匹配的 Context", "No matching contexts") : L("还没有共享的 Context", "No shared contexts yet")));
+    if (terms.length && listCursor) empty.append(note(L("可加载更多，或换个关键词。", "Load more, or try another search.")));
+    cards.append(empty);
+  }
+  list.replaceChildren(cards);
+  const count = $("jx-count");
+  count.textContent = terms.length ? `${matches.length} / ${listItems.length}` : `${listItems.length} ${listCursor ? L("已加载", "loaded") : L("个", "contexts")}`;
+  count.title = terms.length ? L("匹配数 / 已加载数", "Matches / loaded contexts") : L("已加载的 Context", "Loaded contexts");
+  count.setAttribute("aria-label", L(`已加载 ${listItems.length} 个 Context，匹配 ${matches.length} 个`, `${listItems.length} contexts loaded, ${matches.length} matches`));
+}
 async function loadList(append = false) {
-  const request = ++listRequest, list = $("jx-list");
+  if (append && !listCursor) return;
+  listController?.abort();
+  const controller = new AbortController(); listController = controller;
+  const request = ++listRequest, list = $("jx-list"), options = { signal: controller.signal };
   const cursor = append ? listCursor : null;
   clearError("jx-error");
-  list.setAttribute("aria-busy", "true"); $("jx-more").disabled = true;
+  list.setAttribute("aria-busy", "true");
+  $("jx-refresh").disabled = $("jx-more").disabled = true;
   if (!append) {
-    listCursor = null; $("jx-more").hidden = true;
-    list.replaceChildren(el("p", L("读取中…", "Loading…"), "jx-empty"));
+    listReady = false; listItems = []; listCursor = null;
+    $("jx-more").hidden = true; $("jx-count").textContent = "";
+    $("jx-count").removeAttribute("aria-label"); $("jx-count").removeAttribute("title");
+    $("jx-search").disabled = $("jx-connect").disabled = true;
+    $("jx-library").inert = true; $("jx-library").scrollTop = 0;
+    $("jx-library-loading").setAttribute("aria-hidden", "false");
+    $("jx-library").parentElement.dataset.loading = "true";
+    list.replaceChildren();
+  } else {
+    const spinner = el("span", undefined, "spinner"); spinner.setAttribute("aria-hidden", "true");
+    $("jx-more").replaceChildren(spinner, document.createTextNode(L("加载中…", "Loading…")));
   }
   try {
-    const page = await call("/contexts" + (cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""));
-    if (request !== listRequest) return;
-    if (!append) list.replaceChildren();
-    for (const item of page.items) {
-      const r = item.revision, workspace = r.normalized?.extensions?.["switchyard.workspace/1"] || r.normalized?.extensions?.["switchyard.capture/1"];
-      const copy = contextCopy(item);
-      const group = el("div", undefined, "jx-context-card");
-      const card = button("", () => openDetail(item), "jx-card");
-      card.dataset.contextId = item.id;
-      card.setAttribute("aria-label", `${L("预览并接续", "Preview and continue")}: ${copy.title}`);
-      const heading = el("span", undefined, "jx-card-heading"), title = el("strong", copy.title);
-      title.title = copy.title;
-      const agent = el("span", agentName(r.provider), "jx-card-agent"); agent.dataset.agent = r.provider;
-      agent.title = agentName(r.provider);
-      heading.append(title, agent); card.append(heading);
-      card.append(el("span", copy.summary || L("暂无任务摘要", "No task summary yet"), "jx-card-summary"));
-      const footer = el("span", undefined, "jx-card-footer");
-      footer.append(cardFact("repo", workspace?.repo_name || L("仓库未记录", "Repository not recorded")),
-        cardFact("branch", workspace?.branch || L("分支未记录", "Branch not recorded")),
-        cardFact("owner", contextOwner(item)));
-      card.append(footer); group.append(card);
-      list.append(group);
+    if (!append) {
+      const connection = await call("/connection", options);
+      if (request !== listRequest) return;
+      if (!connection.configured) {
+        list.append(button(L("连接 Junction", "Connect Junction"), () => showConnection(), "jx-empty sec"));
+        return showConnection(connection);
+      }
     }
-    if (!list.children.length) list.append(el("p", L("还没有共享的 Context", "No shared contexts yet"), "jx-empty"));
-    listCursor = page.next_cursor; $("jx-more").hidden = !listCursor;
+    const [page, currentStatus] = await Promise.all([
+      call("/contexts" + (cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""), options),
+      append ? status : call("/status", options),
+    ]);
+    if (request !== listRequest) return;
+    status = currentStatus;
+    listItems = [...new Map([...listItems, ...page.items].map(item => [item.id, item])).values()];
+    listCursor = page.next_cursor; listReady = true;
+    renderContextList();
+    $("jx-more").hidden = !listCursor;
   } catch (e) {
     if (request !== listRequest) return;
+    controller.abort();
     if (!append) list.replaceChildren(button(L("重新加载", "Retry"), () => loadList()));
     if (junctionIsOpen()) showError(e, "jx-error");
   } finally {
-    if (request === listRequest) { list.setAttribute("aria-busy", "false"); $("jx-more").disabled = false; }
+    if (request === listRequest) {
+      list.setAttribute("aria-busy", "false");
+      $("jx-refresh").disabled = $("jx-connect").disabled = $("jx-more").disabled = false;
+      $("jx-search").disabled = !listReady;
+      $("jx-more").textContent = L("加载更多", "Load more");
+      $("jx-library").inert = false;
+      $("jx-library-loading").setAttribute("aria-hidden", "true");
+      $("jx-library").parentElement.dataset.loading = "false";
+    }
   }
 }
 function versionList(item) {
@@ -429,8 +481,9 @@ export function initJunction(callbacks) {
   const modal = el("div"); modal.id = "junction-modal"; modal.hidden = true;
   modal.innerHTML = `<section class="jx-shell" role="dialog" aria-modal="true" aria-labelledby="jx-heading">
     <div class="jx-head"><h2 id="jx-heading"></h2><span class="jx-spacer"></span><button id="jx-connect" class="sec"></button><button id="jx-refresh" class="sec"></button><button class="sec" id="jx-close" aria-label="Close">×</button></div>
+    <div class="jx-search-bar"><label class="jx-search-field"><span class="jx-search-icon" aria-hidden="true"></span><input id="jx-search" type="search" autocomplete="off" spellcheck="false"></label><span id="jx-count" role="status" aria-live="polite" aria-atomic="true"></span></div>
     <p id="jx-error" class="jx-warning" role="alert" hidden></p>
-    <div class="jx-body"><main id="jx-library"><div id="jx-list"></div><button id="jx-more" class="sec" hidden></button></main></div>
+    <div class="jx-body"><main id="jx-library"><div id="jx-list"></div><button id="jx-more" class="sec" hidden></button></main><div id="jx-library-loading" class="jx-loading" role="status" aria-hidden="true"><div class="spinner" aria-hidden="true"></div><span id="jx-loading-label"></span></div></div>
   </section>`;
   document.body.append(modal);
   const taskModal = el("div"); taskModal.id = "jx-task-modal"; taskModal.hidden = true;
@@ -451,6 +504,10 @@ export function initJunction(callbacks) {
   feedback.innerHTML = `<span id="jx-share-label"></span><progress id="jx-share-progress" max="3" value="0" aria-labelledby="jx-share-label"></progress><p id="jx-share-error" hidden></p>`;
   document.body.append(feedback);
   $("jx-heading").textContent = L("共享 Context", "Shared contexts");
+  $("jx-search").placeholder = L("搜索标题或用户名", "Search titles or people");
+  $("jx-search").setAttribute("aria-label", $("jx-search").placeholder);
+  $("jx-search").oninput = () => { renderContextList(); $("jx-library").scrollTop = 0; };
+  $("jx-loading-label").textContent = L("加载中…", "Loading…");
   $("jx-close").onclick = closeJunction;
   modal.onclick = e => {
     if (e.target === modal) closeJunction();
@@ -473,12 +530,7 @@ export function initJunction(callbacks) {
   $("jx-refresh").textContent = L("刷新", "Refresh");
   $("jx-connect").textContent = L("连接", "Connect");
   $("jx-connect").onclick = () => showConnection();
-  $("jx-refresh").onclick = async () => {
-    $("jx-refresh").disabled = true;
-    const epoch = generation;
-    try { await Promise.all([refreshStatus(), loadList()]); } catch (e) { if (epoch === generation) showError(e); }
-    finally { $("jx-refresh").disabled = false; }
-  };
+  $("jx-refresh").onclick = () => loadList();
   $("jx-more").textContent = L("加载更多", "Load more"); $("jx-more").onclick = () => loadList(true);
   $("junction-nav").textContent = L("共享 Context", "Shared contexts");
   $("junction-nav").onclick = () => openJunction();

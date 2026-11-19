@@ -1,5 +1,6 @@
 #junction-modal[hidden], #junction-modal [hidden], #jx-task-modal[hidden], #jx-task-modal [hidden] { display: none; }
-#junction-modal { position: fixed; inset: 0; z-index: 230; background: #0009; display: flex; align-items: center; justify-content: center; padding: 24px; }
+#junction-modal { position: fixed; inset: 0; z-index: 230; background: #0009; display: flex; align-items: center; justify-content: center; padding: 24px; animation: jx-enter .25s ease; }
+@keyframes jx-enter { from { opacity: 0; } to { opacity: 1; } }
 .jx-shell { display: flex; flex-direction: column; width: min(1000px, 100%); height: min(720px, 92dvh); min-height: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; box-shadow: 0 24px 90px #0006; }
 .jx-head { display: flex; flex-shrink: 0; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
 .jx-head h2 { margin: 0; font-size: 22px; }
@@ -9,10 +10,22 @@
 .jx-task-shell .jx-connect-form .jx-field { margin: 0; }
 #jx-connect-node { font-family: ui-monospace, monospace; color: var(--muted); }
 #jx-task-modal[data-view=connection] .jx-task-shell { width: min(520px, 100%); height: min(490px, 92dvh); }
-.jx-body { display: flex; flex: 1; min-height: 0; }
-#jx-library { min-width: 0; flex: 1; padding: 24px; overflow-y: auto; }
+.jx-search-bar { display: flex; flex-shrink: 0; align-items: center; gap: 16px; padding: 18px 24px 0; }
+.jx-search-field { display: block; position: relative; flex: 1; min-width: 0; }
+.jx-shell #jx-search { margin: 0; padding: 10px 12px 10px 36px; background: var(--bg); border-radius: 8px; font-size: 13px; }
+#jx-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.jx-search-icon { position: absolute; left: 13px; top: 50%; width: 12px; height: 12px; border: 1.5px solid var(--muted); border-radius: 50%; transform: translateY(-60%); pointer-events: none; }
+.jx-search-icon::after { content: ""; position: absolute; width: 5px; height: 1.5px; background: var(--muted); right: -4px; bottom: -2px; transform: rotate(45deg); }
+#jx-count { flex-shrink: 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.jx-body { position: relative; display: flex; flex: 1; min-height: 0; }
+#jx-library { min-width: 0; flex: 1; padding: 24px; overflow-y: auto; opacity: 1; transition: opacity .35s ease; }
+.jx-body[data-loading=true] #jx-library { opacity: 0; }
+/* Use the global spinner and the homepage's fade, keeping the shell stable. */
+.jx-loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--surface); color: var(--text); font-size: 14px; opacity: 1; transition: opacity .35s ease; }
+.jx-loading[aria-hidden=true] { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .35s ease, visibility 0s linear .35s; }
 #jx-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
-#jx-more { display: block; margin: 20px auto 0; }
+#jx-more { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 20px auto 0; }
+#jx-more .spinner { width: 14px; height: 14px; border-width: 2px; }
 .jx-empty { grid-column: 1 / -1; padding: 64px 16px; text-align: center; color: var(--muted); font-size: 14px; }
 .jx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
 #jx-detail { padding: 16px 24px; min-width: 0; min-height: 0; flex: 1; overflow-y: auto; }
@@ -69,9 +82,15 @@
   #junction-modal { padding: 0; }
   .jx-shell { height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0; }
   .jx-head { padding: 16px; gap: 8px; } .jx-head h2 { font-size: 18px; }
+  .jx-search-bar { padding: 16px 16px 0; gap: 10px; }
+  .jx-shell #jx-search { font-size: 16px; }
   #jx-library { padding: 16px; } #jx-list { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .jx-context-card .jx-card { padding: 16px; } .jx-card-heading { gap: 8px; }
   #term-share-context { max-width: 62px; overflow: hidden; } #junction-nav { font-size: 11px; padding: 6px 8px; }
+}
+@media(prefers-reduced-motion: reduce) {
+  #junction-modal { animation: none; }
+  #jx-library, .jx-loading, .jx-loading[aria-hidden=true] { transition: none; }
 }
 .jx-head h2 { text-transform: none; letter-spacing: normal; }
 .jx-section { margin: 18px 0; }
