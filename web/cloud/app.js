@@ -47,6 +47,8 @@ async function workspace(user, username = user) {
   installationKey='switchyard-install:'+user;
   try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
   await refresh();
+  const next = new URLSearchParams(location.search).get('next');
+  if (next && /^\/local\/open\/[0-9a-f-]{36}(?:\?task=(?:[1-9]\d*|n[1-9]\d*%3A[1-9]\d*))?$/.test(next)) location.replace(next);
 }
 function renderInstallation(record) {
   const view=installationView(record);
@@ -70,7 +72,8 @@ function renderInstallation(record) {
   }
   $('setup-enter').hidden=!view.complete;
   if(view.complete){
-    $('setup-enter').href='/workspace/'+encodeURIComponent(record.device_id)+'/';
+    $('setup-enter').href='/local/open/'+encodeURIComponent(record.device_id);
+    $('setup-enter').textContent='打开本机工作台 →';
     $('command').parentElement.hidden=true; $('setup-help').hidden=true;
     try { sessionStorage.removeItem(installationKey); } catch {}
   }
@@ -96,7 +99,15 @@ async function refresh() {
     card.innerHTML = `<div class="device-title"><span class="device-icon">${computer}</span><div><div class="device-name"></div><div class="status"><span class="dot ${d.online ? 'online' : ''}"></span>${d.online ? '在线 · 在此设备执行' : '离线 · 等待节点连接'}</div></div></div><div class="device-actions"><a class="enter ${d.online ? '' : 'offline'}">进入工作台 →</a><button class="text">解除绑定</button></div>`;
     card.querySelector('.device-name').textContent = d.name;
     const enter = card.querySelector('a');
-    if (d.online) enter.href = '/workspace/' + encodeURIComponent(d.id) + '/';
+    if (d.online) {
+      enter.href = (d.local_workspace ? '/local/open/' : '/workspace/') + encodeURIComponent(d.id) + (d.local_workspace ? '' : '/');
+      if (d.local_workspace) {
+        enter.textContent = '本机打开 →';
+        enter.title = '在当前电脑上直接连接此节点';
+        const remote = document.createElement('a'); remote.className = 'text'; remote.href = '/workspace/' + encodeURIComponent(d.id) + '/'; remote.textContent = '远程进入';
+        enter.after(remote);
+      }
+    }
     else { enter.setAttribute('aria-disabled', 'true'); enter.textContent = '设备离线'; }
     card.querySelector('button').onclick = async () => {
       if (!confirm(`解除「${d.name}」的绑定？云端将不能再控制它，本机任务仍会保留。`)) return;

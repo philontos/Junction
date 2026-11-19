@@ -6,6 +6,7 @@ let switcher, panel, list, advanced, hostList, hooks;
 let devices = [], loading = false, failure = "", expired = false, pending;
 let deviceSignature = "";
 let storageKey = "", saved, canRemember = false, restoreCancelled = false, hostSignature = "";
+let direct = false, cloudOrigin = "", requestedTask = null;
 const text = key => t("workspace." + key);
 const localHost = () => Object.values(state.hostsById).find(h => h.kind === "local");
 const element = (tag, className, label) => {
@@ -57,7 +58,7 @@ function renderDevices() {
     const status = element("div", "cloud-device-message", failure);
     status.setAttribute("role", "status");
     const retry = element(expired ? "a" : "button", "cloud-menu-action", text(expired ? "expired" : "retry"));
-    if (expired) retry.href = "/";
+    if (expired) retry.href = direct ? "/local/open" : "/";
     else { retry.type = "button"; retry.onclick = () => refreshDevices(true); }
     list.append(status, retry);
     return;
@@ -66,7 +67,7 @@ function renderDevices() {
     const current = device.id === switcher.dataset.deviceId;
     const row = element("a", "cloud-device-option" + (current ? " current" : ""));
     row.dataset.deviceId = device.id;
-    if (device.online) row.href = "/workspace/" + encodeURIComponent(device.id) + "/";
+    if (device.online) row.href = direct && current ? "/" : cloudOrigin + "/workspace/" + encodeURIComponent(device.id) + "/";
     else { row.setAttribute("aria-disabled", "true"); row.tabIndex = -1; }
     if (current) row.setAttribute("aria-current", "location");
     const name = element("span", "cloud-option-name", device.name);
@@ -98,7 +99,7 @@ async function refreshDevices(showLoading = false) {
   if (showLoading && !devices.length) { loading = true; renderDevices(); }
   pending = (async () => {
     try {
-      const response = await fetch("/hub/devices", { signal: AbortSignal.timeout(10000) });
+      const response = await fetch(direct ? "/local/devices" : "/hub/devices", { signal: AbortSignal.timeout(10000) });
       if (!response.ok) { expired = response.status === 401 || response.status === 403; throw new Error("devices unavailable"); }
       const result = await response.json();
       if (!Array.isArray(result.items)) throw new Error("invalid devices");
@@ -167,10 +168,23 @@ export function repaintCloudWorkspace() {
 
 export function initCloudWorkspace(callbacks) {
   switcher = $("cloud-device-switcher");
-  if (!switcher || !nodeBase()) { switcher = null; return; }
+  if (!switcher || (!nodeBase() && switcher.dataset.mode !== "local")) { switcher = null; return; }
+  direct = switcher.dataset.mode === "local";
+  cloudOrigin = direct ? document.querySelector('meta[name="switchyard-cloud-origin"]')?.content || "" : "";
   hooks = callbacks;
-  storageKey = "switchyard-workspace:" + switcher.dataset.userId + ":" + nodeBase();
+  storageKey = "switchyard-workspace:" + switcher.dataset.userId + ":" + (direct ? switcher.dataset.deviceId : nodeBase());
   try { saved = JSON.parse(sessionStorage.getItem(storageKey)); } catch {}
+  const query = new URLSearchParams(location.search), task = query.get('task');
+  if (task && /^(?:[1-9]\d*|n[1-9]\d*:[1-9]\d*)$/.test(task)) {
+    requestedTask = task.startsWith('n') ? task : Number(task);
+    query.delete('task'); history.replaceState(null, '', location.pathname + (query.size ? '?' + query : ''));
+  }
+  const localOpen = $("workspace-local-open");
+  if (localOpen) localOpen.onclick = () => {
+    const url = new URL('/local/open/' + switcher.dataset.deviceId, location.origin);
+    if (validTask(state.selectedTaskId)) url.searchParams.set('task', String(state.selectedTaskId));
+    localOpen.href = url.href;
+  };
   document.addEventListener("pointerdown", cancelRestore, true);
   document.addEventListener("keydown", cancelRestore, true);
   window.addEventListener("pagehide", remember);
@@ -179,7 +193,7 @@ export function initCloudWorkspace(callbacks) {
   panel = element("div", "cloud-device-panel");
   panel.append(element("div", "cloud-device-heading"));
   list = element("div", "cloud-device-list"); panel.append(list);
-  const manage = element("a", "cloud-menu-action cloud-manage"); manage.href = "/";
+  const manage = element("a", "cloud-menu-action cloud-manage"); manage.href = cloudOrigin + "/";
   panel.append(manage);
   advanced = element("details", "cloud-advanced");
   advanced.append(element("summary"), element("p"));
@@ -197,6 +211,16 @@ export function initCloudWorkspace(callbacks) {
   }, true);
   repaintCloudWorkspace(); refreshDevices(true);
   setInterval(() => { if (!document.hidden && !switcher.open) refreshDevices(); }, 15000);
+  if (direct) setInterval(async () => {
+    if (document.hidden) return;
+    try {
+      const response = await fetch('/local/status');
+      if (response.status === 401) {
+        const task = validTask(state.selectedTaskId) ? '?task=' + encodeURIComponent(state.selectedTaskId) : '';
+        location.replace('/local/open' + task);
+      }
+    } catch { /* The terminal already handles a temporary node restart. */ }
+  }, 30000);
 }
 
 // Only re-attach a still-live task belonging to this user, node and host. Never
@@ -204,6 +228,11 @@ export function initCloudWorkspace(callbacks) {
 export async function restoreCloudWorkspace(firstFleet) {
   if (!switcher) return;
   try {
+    if (requestedTask != null && localHost()) {
+      const remote = typeof requestedTask === 'string' && /^n(\d+):/.exec(requestedTask);
+      saved = { schema_version: 1, host_id: remote ? Number(remote[1]) : localHost().id, task_id: requestedTask, terminal_view: true };
+      requestedTask = null;
+    }
     if (restoreCancelled || saved?.schema_version !== 1 || !Number.isSafeInteger(saved.host_id)) return;
     const host = state.hostsById[saved.host_id];
     if (!host) return;

@@ -1,6 +1,10 @@
 body.cloud-workspace #onboarding-btn,
 body.cloud-workspace #m-rail { display: none !important; }
 body.cloud-workspace .wrap { grid-template-columns: 300px minmax(0, 1fr); }
+.workspace-transport { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.workspace-transport.local { color: var(--green); }
+.workspace-local-open { text-decoration: none; white-space: nowrap; font-size: 12px; padding: 6px 10px; }
+@media (max-width: 640px) { .workspace-transport { display: none; } }
 .cloud-switcher { position: relative; min-width: 0; max-width: 340px; font-weight: 400; }
 .cloud-switcher [hidden] { display: none !important; }
 .cloud-switcher summary { cursor: pointer; list-style: none; }

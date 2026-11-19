@@ -9,12 +9,12 @@ import { CloudError, CloudStore, digest } from './store.js';
 import { TunnelBroker } from './tunnel.js';
 import { fail, proxyHttp, proxyUpgrade } from './proxy.js';
 import { junctionProvisioner } from './registration.js';
+import { localEntryHtml, workspaceHtml } from './workspace.js';
 
 export interface GatewayConfig { root: string; data: string; origin: string; junctionPort: number; bundle?: string; registrationTokenFile?: string }
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const bearer = (authorization = '') => /^Bearer ([A-Za-z0-9_-]{43})$/.exec(authorization)?.[1] || '';
 const cookie = (header = '') => /(?:^|;\s*)sw_session=([A-Za-z0-9_-]{43})(?:;|$)/.exec(header)?.[1] || '';
-const escape = (text: string) => text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 
 export function createGateway(config: GatewayConfig) {
   const origin = new URL(config.origin).origin, secure = origin.startsWith('https:');
@@ -84,7 +84,17 @@ export function createGateway(config: GatewayConfig) {
     for (const [socket,binding] of terminals) if(digest(binding.session)===digest(token)) socket.destroy();
     res.setHeader('Set-Cookie',`sw_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`); res.json({ok:true});
   });
-  app.get('/hub/devices', (req,res) => res.json({items:store.devices(user(req).id).map(d=>({...d,online:broker.nodes.has(d.id)}))}));
+  const devices = (userId: string) => store.devices(userId).map(d=>({...d,online:broker.nodes.has(d.id),local_workspace:broker.localAvailable(d.id)}));
+  app.get('/hub/devices', (req,res) => res.json({items:devices(user(req).id)}));
+  app.post('/hub/devices/:id/local-access', async (req,res) => {
+    try {
+      csrf(req);const u=user(req);rate('local-access:'+u.id,120);
+      const device=store.device(req.params.id,u.id);if(!device)throw new CloudError(404,'设备不存在。');
+      const result=await broker.localAccess(device.id,{user_id:u.id,username:u.username,task_id:typeof req.body?.task_id==='string'?req.body.task_id:undefined});
+      if(!store.session(cookie(req.headers.cookie)) || !store.device(device.id,u.id))throw new CloudError(401,'登录或设备绑定已失效。');
+      res.json(result);
+    }catch(error){fail(res,error);}
+  });
   app.post('/hub/pairings', (req,res) => { csrf(req); const u=user(req); rate('pair:'+u.id);const code=store.pair(u.id);res.json({code,installation_id:digest(code),expires_in:600,origin}); });
   app.get('/hub/installations/:id', (req,res) => {
     const row=store.installation(req.params.id,user(req).id);if(!row)throw new CloudError(404,'安装记录不存在。');
@@ -119,6 +129,10 @@ export function createGateway(config: GatewayConfig) {
   app.get('/hub/node', (req,res) => {
     const device=store.deviceByToken(bearer(req.headers.authorization));if(!device)throw new CloudError(401,'设备凭证无效。');
     res.json({device_id:device.id,user_id:device.user_id,instance_id:device.instance_id,online:broker.nodes.has(device.id)});
+  });
+  app.get('/hub/node/devices', (req,res) => {
+    const device=store.deviceByToken(bearer(req.headers.authorization));if(!device)throw new CloudError(401,'设备凭证无效。');
+    res.json({user_id:device.user_id,items:devices(device.user_id)});
   });
   app.post('/hub/enroll', (req,res) => {
     rate('enroll:'+clientIp(req),60);
@@ -159,12 +173,13 @@ export function createGateway(config: GatewayConfig) {
   app.get(new RegExp(`^/workspace/(${uuid})/?$`), (req,res) => {
     const u=store.session(cookie(req.headers.cookie));if(!u){res.redirect('/');return;}
     const device=store.device(req.params[0],u.id);if(!device)throw new CloudError(404,'设备不存在。');
-    const prefix='/nodes/'+device.id;
-    let html=fs.readFileSync(path.join(config.root,'web/index.html'),'utf8');
-    html=html.replace('<head>',`<head><meta name="switchyard-base" content="${prefix}"><link rel="stylesheet" href="/cloud/workspace.css">`);
-    html=html.replace('<body>','<body class="cloud-workspace">');
-    html=html.replace('<span style="flex:1"></span>',`<span style="flex:1"></span><details id="cloud-device-switcher" class="cloud-switcher" data-device-id="${device.id}" data-device-name="${escape(device.name)}" data-user-id="${escape(u.id)}"><summary class="cloud-current" aria-label="切换设备"><span class="cloud-dot" id="cloud-current-dot"></span><span class="cloud-current-name">${escape(device.name)}</span><span id="cloud-current-ssh" hidden></span><span class="cloud-caret" aria-hidden="true"></span></summary></details>`);
-    res.type('html').send(html);
+    res.type('html').send(workspaceHtml(config.root,{deviceId:device.id,deviceName:device.name,userId:u.id,cloudOrigin:origin}));
+  });
+  app.get(new RegExp(`^/local/open/(${uuid})$`), (req,res) => {
+    const u=store.session(cookie(req.headers.cookie));
+    if(!u){res.redirect('/?next='+encodeURIComponent(req.originalUrl));return;}
+    const device=store.device(req.params[0],u.id);if(!device)throw new CloudError(404,'设备不存在。');
+    res.type('html').send(localEntryHtml(config.root,origin,device.id));
   });
   app.get('/', (_req,res) => res.sendFile(path.join(config.root,'web/cloud/index.html')));
   app.get('/install.sh', (_req,res) => {

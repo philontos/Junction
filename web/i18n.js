@@ -30,6 +30,9 @@
       // top-level nav / layout
       "task.dispatch": "＋ 派发任务",
       "workspace.tasks": "任务",
+      "workspace.direct": "本机直连",
+      "workspace.relay": "云端中转",
+      "workspace.openLocal": "本机打开",
       "workspace.switch": "切换设备",
       "workspace.online": "在线",
       "workspace.offline": "离线",
@@ -416,6 +419,9 @@
     en: {
       "task.dispatch": "＋ Dispatch task",
       "workspace.tasks": "Tasks",
+      "workspace.direct": "Local connection",
+      "workspace.relay": "Cloud relay",
+      "workspace.openLocal": "Open locally",
       "workspace.switch": "Switch device",
       "workspace.online": "Online",
       "workspace.offline": "Offline",
