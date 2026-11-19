@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "junction-agent-adapters"
+version = "0.1.0"
+description = "Portable context models and native JSONL adapters"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.9,<3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

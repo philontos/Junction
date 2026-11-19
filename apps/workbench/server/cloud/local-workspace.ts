@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,8 +9,8 @@ import express from 'express';
 import { proxyHttp, proxyUpgrade } from './proxy.js';
 import { localEntryHtml, workspaceHtml } from './workspace.js';
 
-export interface LocalAccessRequest { user_id: string; username: string; task_id?: string }
-export interface LocalAccessResult { url: string; expires_in: number }
+import type { LocalAccessRequest, LocalAccessResult } from "../../../../packages/node-transport/local-access.js";
+export type { LocalAccessRequest, LocalAccessResult } from "../../../../packages/node-transport/local-access.js";
 interface Config { root: string; cloudOrigin: string; deviceId: string; deviceName: string; deviceToken: string; upstreamPort: number }
 interface Session { user_id: string; username: string; expires: number }
 const digest = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
@@ -114,7 +115,7 @@ export function createLocalWorkspace(config: Config) {
     if (!user) { res.redirect('/local/open'); return; }
     res.type('html').send(workspaceHtml(config.root, { deviceId: config.deviceId, deviceName: config.deviceName, userId: user.user_id, cloudOrigin: origin, local: true }));
   });
-  app.use('/vendor/highlight', express.static(path.join(config.root, 'node_modules/@highlightjs/cdn-assets')));
+  app.use('/vendor/highlight', express.static(path.dirname(createRequire(import.meta.url).resolve('@highlightjs/cdn-assets/package.json'))));
   app.use(express.static(path.join(config.root, 'web'), { index: false, dotfiles: 'deny' }));
   server.on('upgrade', (req, socket, head) => {
     if (!hostAllowed(req) || req.headers.origin !== localOrigin() || !session(req) || new URL(req.url || '/', localOrigin()).pathname !== '/pty') {

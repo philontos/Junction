@@ -95,7 +95,7 @@ async function daemon(configPath:string) {
   runtime('connecting');
   tunnel=startNodeTunnel(config.server,config.device_token,port,state=>{runtime(state);console.log(new Date().toISOString()+' node '+state);},local ? request=>local!.issue(request) : undefined);
 }
-if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+if(process.argv[1] && fs.realpathSync(process.argv[1])===fileURLToPath(import.meta.url)) {
   const file=process.argv[2];if(!file)throw new Error('Usage: node.ts CONFIG');
   daemon(path.resolve(file)).catch(error=>{console.error(error.message);process.exit(1);});
 }

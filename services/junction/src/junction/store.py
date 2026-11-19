@@ -14,13 +14,14 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from junction_adapters.parsers.common import json_text
+from junction_adapters.parsers.registry import get_adapter
+
 from .environment import validate_environment
 from .errors import Problem, not_found
 from .models import NativeRecord, NormalizedContext
 from .overview import OVERVIEW_EXTENSION, OVERVIEW_GENERATOR, build_overview
 from .parsers import normalize
-from .parsers.common import json_text
-from .parsers.registry import get_adapter
 
 MAX_IMPORT_BYTES = 32 * 1024 * 1024
 MAX_INLINE_CHARS = 4096

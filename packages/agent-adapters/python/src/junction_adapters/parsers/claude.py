@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from junction.models import Block
+from junction_adapters.models import Block
 
 from .blocks import content_blocks
 from .common import Candidate, ParseState, identifier, metadata_block, string

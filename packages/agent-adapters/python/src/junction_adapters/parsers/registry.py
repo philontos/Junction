@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from junction.models import PARSER_VERSION
+from junction_adapters.models import PARSER_VERSION
 
 from .claude import parse_claude
 from .codex import parse_codex

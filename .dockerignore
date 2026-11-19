@@ -1,0 +1,15 @@
+**
+!services/
+!services/junction/
+!services/junction/pyproject.toml
+!services/junction/requirements.lock
+!services/junction/src/
+!services/junction/src/**
+!packages/
+!packages/agent-adapters/
+!packages/agent-adapters/python/
+!packages/agent-adapters/python/pyproject.toml
+!packages/agent-adapters/python/src/
+!packages/agent-adapters/python/src/**
+**/__pycache__/
+**/*.egg-info/

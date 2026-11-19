@@ -1,0 +1,8 @@
+{
+  "extends": "./apps/workbench/tsconfig.json",
+  "include": [
+    "apps/workbench/server/**/*.ts",
+    "services/junction/gateway/**/*.ts",
+    "packages/**/*.ts"
+  ]
+}

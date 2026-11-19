@@ -3,10 +3,11 @@ ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca56
 FROM ${PYTHON_IMAGE} AS build
 ENV PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=5
 WORKDIR /build
-COPY pyproject.toml requirements.lock ./
-COPY src ./src
+COPY services/junction/pyproject.toml services/junction/requirements.lock ./
+COPY services/junction/src ./src
+COPY packages/agent-adapters/python ./agent-adapters
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python -m pip wheel --wheel-dir /wheels --constraint requirements.lock .
+    python -m pip wheel --wheel-dir /wheels --constraint requirements.lock ./agent-adapters .
 
 FROM ${PYTHON_IMAGE}
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

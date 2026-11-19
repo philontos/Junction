@@ -1,3 +1,5 @@
+> 此目录现为 Junction 统一仓库的一部分。首次安装和联动开发请从[仓库根目录](../../README.md)执行；以下保留模块说明。
+
 # Junction
 
 保存、查询和共享 Agent 的历史上下文。提供 HTTP 服务、CLI、设备凭证，以及 Claude Code / Codex / Pi 的统一 Context 解析与交接。

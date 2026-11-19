@@ -1,6 +1,6 @@
 from typing import Any
 
-from junction.models import Block, Resource
+from junction_adapters.models import Block, Resource
 
 from .common import ParseState, identifier, string
 

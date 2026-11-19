@@ -9,8 +9,8 @@ from conftest import upload
 from junction.cli import Client, parser
 from junction.models import Block, NormalizedContext
 from junction.parsers import normalize
-from junction.parsers.common import Candidate
-from junction.parsers.registry import ADAPTERS, Adapter
+from junction_adapters.parsers.common import Candidate
+from junction_adapters.parsers.registry import ADAPTERS, Adapter
 from junction.store import DB_VERSION, Store, snapshot_digest
 
 
@@ -34,7 +34,7 @@ def test_native_index_is_byte_exact_with_bom_crlf_blank_and_invalid_lines():
 
 
 def test_record_limit_reports_incomplete_index_without_dropping_archive_identity(monkeypatch):
-    monkeypatch.setattr("junction.parsers.common.MAX_RECORDS", 1)
+    monkeypatch.setattr("junction_adapters.parsers.common.MAX_RECORDS", 1)
     raw = jsonl({"type": "future"}, {"type": "future2"})
     context = normalize(raw, "codex")
     assert not context.record_index.complete

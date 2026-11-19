@@ -20,3 +20,10 @@ pi-review/
 asp-probe-output.json*
 claude-fork-output.json
 pi-context-output.json
+
+*.log
+.data/
+.tdsp/
+.local/
+deploy/junction/.env
+deploy/junction/state/

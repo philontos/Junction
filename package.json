@@ -1,0 +1,27 @@
+{
+  "name": "junction",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/workbench",
+    "packages/agent-adapters/node"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "node deploy/setup.mjs",
+    "dev": "node deploy/dev.mjs",
+    "dev:workbench": "npm run dev --workspace=@junction/workbench",
+    "start": "npm run start --workspace=@junction/workbench",
+    "start:gateway": "node --import tsx services/junction/gateway/main.ts",
+    "start:node": "node --import tsx apps/workbench/server/cloud/node.ts",
+    "tdsp": "npm run tdsp --workspace=@junction/workbench --",
+    "typecheck": "tsc --noEmit --allowImportingTsExtensions",
+    "test:targeted": "node deploy/test-node.mjs",
+    "test:context": ".venv/bin/python -m pytest services/junction/tests/test_parsers.py services/junction/tests/test_pi.py services/junction/tests/test_fidelity.py",
+    "build": "node deploy/build.mjs",
+    "postinstall": "node deploy/postinstall.mjs"
+  }
+}

@@ -104,7 +104,9 @@ ${isolatedData}${ladder}
 # git/tmux for what the app actually does
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 command -v node >/dev/null 2>&1 || { echo "tdsp: no usable node found on this machine" >&2; exit 127; }
-exec node "$APP/node_modules/.bin/tsx" "$APP/server/tdsp.ts" "$@"
+if [ -f "$APP/apps/workbench/server/tdsp.ts" ]; then APP="$APP/apps/workbench"; fi
+cd "$APP"
+exec node --import tsx "$APP/server/tdsp.ts" "$@"
 `;
 }
 
@@ -250,7 +252,7 @@ export async function bootstrapMachine(deps: BootstrapDeps): Promise<BootstrapRe
   // reuse an existing src as-is; clone only when absent (REUSED / CLONED in output)
   const ensure = await deps.run(
     `if [ -e ${shq(src)} ]; then echo REUSED; else mkdir -p ${shq(root)} && git clone ${shq(deps.originUrl)} ${shq(src)} && echo CLONED; fi; ` +
-      `[ -e ${shq(src)}/server/tdsp.ts ] && echo HAVECODE`,
+      `{ [ -e ${shq(src)}/server/tdsp.ts ] || [ -e ${shq(src)}/apps/workbench/server/tdsp.ts ]; } && echo HAVECODE`,
   );
   if (!ensure.ok || !/HAVECODE/.test(ensure.stdout)) {
     return { ok: false, error: "couldn't get the code onto the target — check its git access, or run `tdsp install` there" };

@@ -11,6 +11,8 @@ from typing import Literal
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from junction_adapters.parsers.common import strict_json
+from junction_adapters.parsers.registry import get_adapter, providers
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
@@ -18,8 +20,6 @@ from . import __version__
 from .environment import environment_schema
 from .errors import Problem
 from .models import Model, Provider, context_schema
-from .parsers.common import strict_json
-from .parsers.registry import get_adapter, providers
 from .store import MAX_CHUNK_CHARS, MAX_IMPORT_BYTES, Store
 
 log = logging.getLogger("junction")

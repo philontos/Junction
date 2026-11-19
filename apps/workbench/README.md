@@ -1,3 +1,5 @@
+> 此目录现为 Junction 统一仓库的一部分。首次安装和联动开发请从[仓库根目录](../../README.md)执行；以下保留模块说明。
+
 <p align="center">
   <img src="web/assets/switchyard-wordmark.png" alt="Switchyard" width="360">
 </p>

@@ -6,7 +6,7 @@ Format reference: earendil-works/pi, coding-agent/docs/session-format.md,
 
 from collections import defaultdict
 
-from junction.models import Block, Resource
+from junction_adapters.models import Block, Resource
 
 from .common import Candidate, ParseState, identifier, metadata_block, string
 

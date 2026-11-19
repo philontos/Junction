@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from junction.models import (
+from junction_adapters.models import (
     Block,
     Diagnostic,
     Message,

@@ -270,7 +270,7 @@ def test_multiple_native_sessions_do_not_cross_pair_tool_calls():
 
 
 def test_record_limit_retains_count_and_reports_skipped_tail(monkeypatch):
-    monkeypatch.setattr("junction.parsers.common.MAX_RECORDS", 2)
+    monkeypatch.setattr("junction_adapters.parsers.common.MAX_RECORDS", 2)
     row = {"type": "user", "message": {"role": "user", "content": "repeat"}}
     result = normalize(jsonl(row, row, row, row), "claude")
     assert result.record_count == 4 and len(result.session.messages) == 2
