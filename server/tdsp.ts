@@ -17,6 +17,8 @@ import { uninstallProfile } from "./fleet/profile-uninstall.js";
 import { localRunner } from "./fleet/runner.js";
 import { startSession, startShellSession, hasSession, killSession, listSessions } from "./session/tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
+import { startDirectorySession } from "./task/directory.js";
+import { taskControlDir } from "./task/workspace.js";
 import { addTaskReference } from "./task/addreference.js";
 import { cleanupTask, deleteTaskRecord, resumeTask } from "./task/lifecycle.js";
 import { asAgentKind } from "./session/agent.js";
@@ -176,15 +178,16 @@ process.exitCode = await runCli(process.argv.slice(2), {
   // (set membership) instead of an exec per task.
   liveness: async (tasks) => {
     const live = new Set(await listSessions(localRunner));
-    const out = new Map<number, { alive: boolean; hasWorktree: boolean; waiting: boolean }>();
+    const out = new Map<number, { alive: boolean; hasWorktree: boolean; hasDirectory: boolean; waiting: boolean }>();
     for (const t of tasks) {
       const cleaned = t.status === "cleaned";
       const hasWt = !!t.worktree_path && (await localRunner.exists(t.worktree_path).catch(() => false));
       out.set(t.id, {
         alive: !cleaned && !!t.session && live.has(t.session),
         hasWorktree: hasWt,
+        hasDirectory: t.kind === "directory" && !!t.cwd && (await localRunner.exists(t.cwd).catch(() => false)),
         waiting:
-          !cleaned && hasWt && (await localRunner.exists(path.join(t.worktree_path, ".claude/waiting")).catch(() => false)),
+          !cleaned && !!taskControlDir(DATA_DIR, t) && (await localRunner.exists(path.join(taskControlDir(DATA_DIR, t), ".claude/waiting")).catch(() => false)),
       });
     }
     return out;
@@ -302,6 +305,9 @@ process.exitCode = await runCli(process.argv.slice(2), {
           const provider = task.provider_id
             ? (db.prepare("SELECT * FROM providers WHERE id=?").get(task.provider_id) as Provider | undefined)
             : undefined;
+          if (task.kind === "directory") return startDirectorySession(localRunner, task, {
+            agent: asAgentKind(task.agent), model: task.agent_model, env: providerEnv(provider),
+          }, true);
           await startSession(localRunner, task.session, task.worktree_path, null, {
             continue: true,
             env: providerEnv(provider),

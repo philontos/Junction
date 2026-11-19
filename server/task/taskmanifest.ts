@@ -149,7 +149,7 @@ function writeTaskWorkspaceFiles(
   references: TaskReferenceManifest[],
   primaryName?: string,
 ): void {
-  if (task.kind === "local" || !task.worktree_path) return;
+  if (task.kind !== "repo" || !task.worktree_path) return;
   try {
     if (!fs.statSync(task.worktree_path).isDirectory()) return;
   } catch {
@@ -176,8 +176,8 @@ export function writeTaskManifest(
   fs.writeFileSync(path.join(path.dirname(p), "workspace.json"), JSON.stringify({
     schema_version: 1,
     task_id: task.id,
-    primary: task.kind === "local"
-      ? { kind: "local", path: task.cwd }
+    primary: task.kind !== "repo"
+      ? { kind: task.kind, path: task.cwd }
       : {
           kind: "repository",
           repo_id: task.repo_id,
@@ -207,7 +207,7 @@ export function writeTaskManifestFromDb(dataDir: string, db: DB, id: number): vo
   const task = db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task | undefined;
   if (!task) return;
   const references = listTaskReferences(db, id).map(({ mirror_path: _mirror, ...reference }) => reference);
-  const repo = task.kind === "local"
+  const repo = task.kind !== "repo"
     ? undefined
     : db.prepare("SELECT name FROM repos WHERE id=?").get(task.repo_id) as { name: string } | undefined;
   writeTaskManifest(dataDir, task, references, repo?.name);
@@ -262,7 +262,7 @@ export function adoptTaskManifests(db: DB, manifests: TaskManifest[]): number {
     const t = { ...(m.task as unknown as Record<string, unknown>) };
     if (typeof t?.id !== "number" || have.has(t.id)) continue;
     const kind = t.kind == null ? "repo" : String(t.kind);
-    if (kind === "local") {
+    if (kind === "local" || kind === "directory") {
       // A legacy local manifest without host_id is still local; a manifest that
       // explicitly names another host is controller-owned remote residue and is
       // intentionally left on disk for the legacy auditor/migration tooling.

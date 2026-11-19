@@ -20,6 +20,7 @@ import path from "node:path";
 import type { Runner } from "../fleet/runner.js";
 import { asAgentKind, type AgentKind } from "./agent.js";
 import type { Task } from "../core/db.js";
+import { taskCwd, taskControlDir, taskMarker } from "../task/workspace.js";
 
 // One rendered unit of the conversation. `tool_call`/`tool_result` share an `id` so the
 // client can fold a result into its call; everything else carries display `text`.
@@ -298,7 +299,21 @@ export function parseCodexUserLine(o: any): Entry[] {
 
 // ---- file location ----
 
-const escapeClaudeCwd = (cwd: string) => cwd.replace(/[/.]/g, "-");
+// https://code.claude.com/docs/en/agent-sdk/sessions#resume-by-id
+const escapeClaudeCwd = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-");
+const claudeProjects = (home: string) => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude"), "projects");
+async function claudeFile(runner: Runner, home: string, cwd: string, sid: string): Promise<string | null> {
+  const encoded = escapeClaudeCwd(cwd);
+  const override = process.env.CLAUDE_CODE_PROJECT_DIR_NAME;
+  const name = override && !override.includes("/") && ![".", ".."].includes(override) ? override : encoded;
+  const direct = path.join(claudeProjects(home), name, `${sid}.jsonl`);
+  if (encoded.length <= 200 || override || await runner.exists(direct).catch(() => false)) return direct;
+  // Long paths use a version-dependent hash suffix. Match the exact known
+  // session ID in the documented prefix, never a "latest session" fallback.
+  const found = (await runner.exec("find", [claudeProjects(home), "-maxdepth", "2", "-type", "f", "-name", `${sid}.jsonl`]).catch(() => ""))
+    .trim().split("\n").filter(p => p && path.basename(path.dirname(p)).startsWith(encoded.slice(0, 200)));
+  return found.length === 1 ? found[0] : null;
+}
 
 // Locate a task's Codex rollout: the newest rollout whose session_meta.cwd is the
 // worktree. Normal transcript reads reuse the cache; semantic live-turn checks can
@@ -306,14 +321,33 @@ const escapeClaudeCwd = (cwd: string) => cwd.replace(/[/.]/g, "-");
 const codexPathCache = new Map<number, string>();
 /** Locate native JSONL on its owning node; no UI transcript truncation. */
 export async function locateNativeJsonl(runner: Runner, task: Task): Promise<string | null> {
-  if (runner.kind !== "local" || !task.worktree_path) return null;
+  const cwd = taskCwd(task);
+  if (runner.kind !== "local" || !cwd || task.kind === "local") return null;
   const home = os.homedir();
-  if (task.agent === "codex") return locateCodex(runner, home, task.worktree_path, task.id, true);
+  if (task.agent === "codex") return locateCodex(runner, home, cwd, task.id, true, task.kind === "directory" ? taskMarker(task) : undefined);
   if (task.agent !== "claude") return null;
-  const hook = await runner.readText(path.join(task.worktree_path, ".claude", "session-id")).catch(() => null);
+  const hook = await runner.readText(path.join(taskControlDir(runner.dataDir, task), ".claude", "session-id")).catch(() => null);
   const sid = hook?.trim() || task.claude_session;
   if (!sid || !/^[a-zA-Z0-9_-]{1,128}$/.test(sid)) return null;
-  return path.join(home, ".claude", "projects", escapeClaudeCwd(task.worktree_path), `${sid}.jsonl`);
+  return claudeFile(runner, home, cwd, sid);
+}
+// Only accept the task binding in native instruction/config records. A copied
+// transcript or user message mentioning another task must not claim its session.
+export function hasTaskBinding(prefix: string, marker: string): boolean {
+  return prefix.split("\n").some(line => {
+    try {
+      const record = JSON.parse(line);
+      const p = record.payload;
+      const instruction = record.type === "response_item" && p?.role === "developer" ? p.content
+        : record.type === "session_meta" ? p?.developer_instructions
+        : record.type === "config.update" ? record.systemPrompt : undefined;
+      return instruction != null && JSON.stringify(instruction).includes(marker);
+    } catch { return false; }
+  });
+}
+async function matchesTask(runner: Runner, file: string, marker: string) {
+  const prefix = await runner.exec("head", ["-c", "2097152", file]).catch(() => "");
+  return hasTaskBinding(prefix, marker);
 }
 async function locateCodex(
   runner: Runner,
@@ -321,10 +355,11 @@ async function locateCodex(
   cwd: string,
   taskId: number,
   refresh = false,
+  marker?: string,
 ): Promise<string | null> {
   const cached = codexPathCache.get(taskId);
   if (!refresh && cached && (await runner.exists(cached).catch(() => false))) return cached;
-  const dir = `${home}/.codex/sessions`;
+  const dir = path.join(process.env.CODEX_HOME || path.join(home, ".codex"), "sessions");
   const needle = `"cwd"[[:space:]]*:[[:space:]]*${ere(JSON.stringify(cwd))}`;
   // newest-first (the ISO date lives in the path), stop at the first rollout whose
   // session_meta line names this worktree. Use an ERE instead of a literal
@@ -332,8 +367,12 @@ async function locateCodex(
   // colons; missing that file leaves mobile stuck in the live xterm instead of the
   // native-scrolling reading view.
   const cmd = `find ${sh(dir)} -name 'rollout-*.jsonl' 2>/dev/null | sort -r | while IFS= read -r f; do `
-    + `head -c 4096 "$f" | grep -Eq ${sh(needle)} && { printf '%s' "$f"; break; }; done`;
-  const found = (await runner.exec("sh", ["-c", cmd]).catch(() => "")).trim();
+    + `head -c 4096 "$f" | grep -Eq ${sh(needle)} && { printf '%s\\n' "$f"; ${marker ? "" : "break;"} }; done`;
+  const candidates = (await runner.exec("sh", ["-c", cmd]).catch(() => "")).trim().split("\n").filter(Boolean);
+  let found: string | undefined;
+  for (const candidate of candidates) {
+    if (!marker || await matchesTask(runner, candidate, marker)) { found = candidate; break; }
+  }
   if (found) codexPathCache.set(taskId, found);
   return found || null;
 }
@@ -350,7 +389,7 @@ interface KimiSessionIndexEntry {
 // /sessions, so prefer the state.json with the newest activity timestamp, using
 // index order as a deterministic fallback. Re-evaluating the small index on each
 // poll lets Read follow a session switch and causes the source id to reset cleanly.
-async function locateKimi(runner: Runner, home: string, cwd: string): Promise<{ file: string; source: string } | null> {
+async function locateKimi(runner: Runner, home: string, cwd: string, marker?: string): Promise<{ file: string; source: string } | null> {
   const kimiHome = process.env.KIMI_CODE_HOME || path.join(home, ".kimi-code");
   const sessionsRoot = path.resolve(kimiHome, "sessions");
   const raw = await runner.readText(path.join(kimiHome, "session_index.jsonl")).catch(() => null);
@@ -376,6 +415,7 @@ async function locateKimi(runner: Runner, home: string, cwd: string): Promise<{ 
     if (!rel || rel.startsWith("..") || path.isAbsolute(rel) || path.basename(sessionDir) !== rec.sessionId) continue;
     const file = path.join(sessionDir, "agents", "main", "wire.jsonl");
     if (!(await runner.exists(file).catch(() => false))) continue;
+    if (marker && !(await matchesTask(runner, file, marker))) continue;
 
     let activity = 0;
     const state = await runner.readText(path.join(sessionDir, "state.json")).catch(() => null);
@@ -394,6 +434,9 @@ async function locateKimi(runner: Runner, home: string, cwd: string): Promise<{ 
   if (!best) return null;
   const sessionId = path.basename(path.dirname(path.dirname(path.dirname(best.file))));
   return { file: best.file, source: `kimi:${sessionId}` };
+}
+export function locateDirectoryKimi(runner: Runner, task: Task) {
+  return locateKimi(runner, os.homedir(), taskCwd(task), taskMarker(task));
 }
 const sh = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 const ere = (s: string) => s.replace(/[.[\]{}()*+?^$|\\]/g, "\\$&");
@@ -432,7 +475,7 @@ export async function readTranscript(
   const agent = asAgentKind(task.agent);
   const userOnly = agent === "codex" && options.userOnly === true;
   const mode = userOnly ? "codex-user-message-v1" as const : undefined;
-  const cwd = task.worktree_path;
+  const cwd = task.kind === "local" ? "" : taskCwd(task);
   if (!cwd) return { agent, source: null, entries: [], cursor: 0, hasMore: false, mode };
   const home = os.homedir();
 
@@ -441,16 +484,18 @@ export async function readTranscript(
   if (agent === "codex") {
     // Semantic marker reads refresh discovery so /new or a restarted Codex
     // process cannot leave the client attached to the previous rollout.
-    file = await locateCodex(runner, home, cwd, task.id, userOnly);
+    file = await locateCodex(runner, home, cwd, task.id, userOnly, task.kind === "directory" ? taskMarker(task) : undefined);
     source = file ? `codex:${path.basename(file)}` : null;
   } else if (agent === "kimi") {
-    const located = await locateKimi(runner, home, cwd);
+    const located = await locateKimi(runner, home, cwd, task.kind === "directory" ? taskMarker(task) : undefined);
     file = located?.file ?? null;
     source = located?.source ?? null;
   } else {
-    const sid = task.claude_session;
+    const observed = task.kind === "directory"
+      ? (await runner.readText(path.join(taskControlDir(runner.dataDir, task), ".claude", "session-id")))?.trim() : null;
+    const sid = observed && /^[a-zA-Z0-9_-]{1,128}$/.test(observed) ? observed : task.claude_session;
     if (sid) {
-      file = `${home}/.claude/projects/${escapeClaudeCwd(cwd)}/${sid}.jsonl`;
+      file = await claudeFile(runner, home, cwd, sid);
       source = `claude:${sid}`;
     }
   }

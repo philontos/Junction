@@ -127,6 +127,15 @@
         <button type="button" class="agent-opt" data-agent="kimi" onclick="selectAgent('kimi')">Kimi Code</button>
       </div>
     </div>
+    <div id="t-workspace-sec">
+      <label class="tm-lbl" for="t-workspace" data-i18n="task.workspaceLabel"></label>
+      <select id="t-workspace" onchange="selectTaskWorkspace()"></select>
+      <div id="t-cwd-sec">
+        <label class="tm-lbl" for="t-cwd" data-i18n="task.cwdLabel"></label>
+        <input id="t-cwd" value="~" placeholder="~/Projects" autocomplete="off" spellcheck="false" />
+      </div>
+    </div>
+    <div id="t-repo-options">
     <label class="tm-lbl" data-i18n="task.baseLabel"></label>
     <div id="t-base" class="cs"></div>
     <div id="t-ref-sec" class="tm-ref-sec">
@@ -136,6 +145,7 @@
       </div>
       <div id="t-ref-list" class="tm-ref-list"></div>
       <div id="t-ref-hint" class="hint" data-i18n="task.referencesHint"></div>
+    </div>
     </div>
     <input id="t-title" data-i18n-ph="task.titlePh" />
     <textarea id="t-prompt" rows="3" data-i18n-ph="task.promptPh"></textarea>

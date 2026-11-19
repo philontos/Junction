@@ -3,6 +3,7 @@
 // to a task's tmux session. paintSelection() reflects the currently-open card
 // and is shared with hosts.js (a remote shell clears the task selection).
 import { $, api } from "../core/dom.js";
+import { requireDirectoryTasks } from "../core/directory-tasks.js";
 import { toast, showLoading, hideLoading } from "../core/feedback.js";
 import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
@@ -30,6 +31,8 @@ let modalProviderAvailable = true;
 // when set, the dispatch modal is in "node mode": dispatch to a remote node's OWN
 // repo (surfaced via the fleet) instead of a controller-registered repo.
 let nodeTask = null;   // { hostId, repo } or null
+let directoryCheckPending = false;
+const escapeText = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const TASK_REFERENCES_CAPABILITY = "task-references-v1";
 let taskReferences = [], referenceSeq = 0;
 // key of the task whose title is being edited inline. While set, renderList()
@@ -303,13 +306,27 @@ function applyAgentUI() {
   }
 }
 
-export function openTaskModal(repoId) {
-  const repo = state.repos.find(r => r.id === repoId && r.status === "ready");
-  if (!repo) return toast(t("toast.repoNotReady"), "error");
-  nodeTask = null;
-  taskRepoId = repoId;
+export function selectTaskWorkspace() {
+  taskRepoId = Number($("t-workspace").value) || null;
+  const repo = state.repos.find(r => r.id === taskRepoId);
+  $("t-cwd-sec").hidden = !!repo;
+  $("t-repo-options").hidden = !repo;
+  $("tm-repo").textContent = repo?.name || t("task.directoryMode");
+  $("t-title").dataset.i18nPh = repo ? "task.titlePh" : "task.optionalTitlePh";
+  $("t-title").placeholder = t($("t-title").dataset.i18nPh);
   resetTaskReferences();
-  $("tm-repo").textContent = repo.name;
+  loadBranches();
+}
+
+export function openTaskModal(repoId = null) {
+  const repo = state.repos.find(r => r.id === repoId && r.status === "ready");
+  if (repoId && !repo) return toast(t("toast.repoNotReady"), "error");
+  nodeTask = null;
+  $("t-workspace-sec").hidden = false;
+  $("t-workspace").replaceChildren(option("", t("task.directoryMode")), ...state.repos.filter(r => r.status === "ready").map(r => option(r.id, `${r.name} · Worktree`)));
+  $("t-workspace").value = repo ? String(repo.id) : "";
+  $("t-cwd").value = "~";
+  selectTaskWorkspace();
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
   $("prov-panel").style.display = "none";              // collapse the manage panel
   modalProviderAvailable = true;
@@ -324,7 +341,6 @@ export function openTaskModal(repoId) {
   selectAgent(normalizeAgent(localStorage.getItem(LS_AGENT)));
   sheetOpened();   // claim the mobile history entry BEFORE the sheet paints (list still on the glass)
   $("task-modal").style.display = "flex";
-  loadBranches();
   if (modalProviderAvailable) refreshProviders();      // fill the target node's backend picker
   setTimeout(() => $("t-title").focus(), 30);
 }
@@ -353,6 +369,10 @@ export function openNodeTaskModal(hostId, repoId) {
   if (!repo) return toast(t("toast.repoNotReady"), "error");
   nodeTask = { hostId, repo };
   taskRepoId = null;
+  $("t-workspace-sec").hidden = true;
+  $("t-repo-options").hidden = false;
+  $("t-title").dataset.i18nPh = "task.titlePh";
+  $("t-title").placeholder = t("task.titlePh");
   resetTaskReferences();
   const hostName = state.hostsById[hostId]?.name || hostId;
   $("tm-repo").textContent = `${repo.name} @ ${hostName}`;
@@ -434,6 +454,7 @@ export async function addNodeShell(hostId) {
 
 async function loadBranches() {
   const id = taskRepoId;
+  branchReq?.abort();
   if (!id) { Selects["t-base"].setOptions([]); return; }
   branchReq?.abort();                         // drop any in-flight request from a previous switch
   const ctl = branchReq = new AbortController();
@@ -493,8 +514,9 @@ async function addNodeTask() {
 }
 
 export async function addTask() {
+  if (directoryCheckPending) return;
   if (nodeTask) return addNodeTask();
-  const references = referencePayload();
+  const references = taskRepoId ? referencePayload() : [];
   if (references == null) return toast(t("toast.taskFieldsRequired"), "error");
   // provider_id belongs to the target node's own provider catalog. A hidden picker
   // sends null, which means the target node's default Claude login.
@@ -506,9 +528,16 @@ export async function addTask() {
     provider_id: providerShown ? selectedProviderId() : null,   // null == default claude login
     agent: selectedAgent,
     agent_model: external ? ($("t-codex-model").value.trim() || null) : null,
+    cwd: taskRepoId ? undefined : $("t-cwd").value.trim() || "~",
     references,
   };
-  if (!body.repo_id || !body.base_branch || !body.title) return toast(t("toast.taskFieldsRequired"), "error");
+  if (body.repo_id && (!body.base_branch || !body.title)) return toast(t("toast.taskFieldsRequired"), "error");
+  if (!body.repo_id) {
+    directoryCheckPending = true;
+    try { await requireDirectoryTasks(); }
+    catch (e) { return toast(e.message, "error", 8000); }
+    finally { directoryCheckPending = false; }
+  }
   // Spin up BOTH placeholders before clearing the form (so the title can label them):
   // a card in the left list (selected, replacing the old selection) and the dock
   // loading window. Expand the repo group so the new card is visible even if it was
@@ -516,9 +545,9 @@ export async function addTask() {
   // success → live terminal, failure → inline error — with no global overlay.
   const tmpId = nextTmpId();
   closeTaskModal();
-  openPending(tmpId, body.title, body.prompt ? `· ${body.prompt}` : "", t("loading.creatingWorktree"));
-  expandRepo(body.repo_id);
-  addPendingCard(tmpId, { kind: "repo", repoId: body.repo_id, hostId: null, title: body.title, agent: body.agent });
+  openPending(tmpId, body.title || t("term.creating"), body.prompt ? `· ${body.prompt}` : "", t(body.repo_id ? "loading.creatingWorktree" : "task.startingAgent"));
+  if (body.repo_id) expandRepo(body.repo_id);
+  addPendingCard(tmpId, { kind: body.repo_id ? "repo" : "directory", repoId: body.repo_id, hostId: body.repo_id ? null : localHostId(), title: body.title || t("term.creating"), agent: body.agent, automaticTitle: !body.title });
   $("t-title").value = ""; $("t-prompt").value = "";
   try {
     const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
@@ -572,6 +601,9 @@ export function pendingNodeRepoCards(hostId, repoId) {
 export function pendingShellCards(hostId) {
   return [...pendingCards.values()].filter(p => p.kind === "local" && p.hostId === hostId);
 }
+export function pendingDirectoryCards(hostId) {
+  return [...pendingCards.values()].filter(p => p.kind === "directory" && p.hostId === hostId);
+}
 // A real (server-polled) 'creating' task is hidden while its optimistic placeholder
 // is still up, so the two never double-render in the gap before the POST resolves.
 // Repo tasks match on repo + title; shells match on host (a shell has no real title
@@ -580,6 +612,7 @@ export function isShadowedByPending(tk) {
   if (tk.status !== "creating") return false;
   for (const p of pendingCards.values()) {
     if (p.kind === "local") { if (tk.kind === "local" && p.hostId === tk.host_id) return true; }
+    else if (p.kind === "directory") { if (tk.kind === "directory" && p.hostId === tk.host_id && p.agent === tk.agent && (p.automaticTitle || p.title === tk.title)) return true; }
     else if (tk.repo_id === p.repoId && p.title === tk.title) return true;
   }
   return false;
@@ -611,7 +644,7 @@ export function pendingCard(p) {
   const agent = normalizeAgent(p.agent);
   return `<div class="card task pending-card task-${agent} clickable" data-pending="${p.tmpId}" onclick="focusPending('${p.tmpId}')">
     <div class="t"><span class="sdot cloning" title="${I18N.t("task.creating")}"></span>
-      <span class="tname">${p.title}</span></div>
+      <span class="tname">${escapeText(p.title)}</span></div>
     <div class="muted">${I18N.t("task.creating")}</div>
   </div>`;
 }
@@ -674,13 +707,14 @@ export function taskCard(t, online, orderKey = null) {
   // (cleaned, worktree kept). Offer a one-click relaunch (claude --continue) that
   // reattaches the prior conversation; resuming an archived task flips it back to
   // running (server side), so it rejoins the active list on the next poll.
-  const resumable = (active || t.status === "cleaned") && !t.alive && t.hasWorktree;
+  const resumable = (active || t.status === "cleaned") && !t.alive && (t.hasWorktree || t.hasDirectory);
   const resumeBtn = resumable
     ? `<button class="t-resume" title="${I18N.t("task.resumeTitle")}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();resume(${t.id})">⟳ ${I18N.t("task.resume")}</button>`
     : "";
   // local quick tasks have no branch/MR — show their working dir + a "local" tag
-  const meta = t.kind === "local"
-    ? `<div class="muted">📂 <code>${t.cwd || "~"}</code> <span class="tag-local">${I18N.t("local.tag")}</span></div>`
+  const safeCwd = escapeText(t.cwd || "~");
+  const meta = t.kind === "local" || t.kind === "directory"
+    ? `<div class="muted">📂 <code>${safeCwd}</code> <span class="tag-local">${t.kind === "directory" ? agent : I18N.t("local.tag")}</span></div>`
     : `<div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>`;
   // dot: alive+waiting (blocked on a permission prompt) → yellow; alive → green; else status
   const dot = t.alive
@@ -689,7 +723,7 @@ export function taskCard(t, online, orderKey = null) {
         : `<span class="sdot live" title="live"></span>`)
     : `<span class="sdot ${t.status}" title="${t.status}"></span>`;
   // Single-clicking the title opens the card; double-clicking still renames it.
-  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" ondblclick="renameTask(event,${t.id})">${t.title}</span></div>
+  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" ondblclick="renameTask(event,${t.id})">${escapeText(t.title)}</span></div>
     ${meta}`;
   // only attach-on-click when there's a live session to attach to; a resumable
   // (dead-session) card routes through its Resume button instead.

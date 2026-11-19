@@ -19,6 +19,9 @@ export interface LaunchOpts {
   model?: string | null;
   /** resume the prior conversation in this cwd instead of starting fresh */
   resume?: boolean;
+  /** Exact conversation binding for tasks sharing a working directory. */
+  sessionId?: string;
+  claudeSettings?: string;
   /** Additional workspace roots translated to each agent CLI's `--add-dir`.
    *  For codex/kimi this also carries linked-worktree Git metadata directories. */
   addDirs?: string[];
@@ -62,7 +65,7 @@ export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
       ...addDirArgs(opts.addDirs),
     ];
     if (hasText(opts.model)) base.push("-m", opts.model.trim());
-    if (opts.resume) return [...base, "resume", "--last"];
+    if (opts.resume) return [...base, "resume", opts.sessionId || "--last"];
     const argv = [...base];
     if (hasText(opts.prompt)) argv.push(opts.prompt);
     return argv;
@@ -73,7 +76,7 @@ export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
       : [];
     const base = ["kimi", "--auto", ...boundAgent, ...addDirArgs(opts.addDirs)];
     if (hasText(opts.model)) base.push("-m", opts.model.trim());
-    if (opts.resume) return [...base, "--continue"];
+    if (opts.resume) return [...base, ...(opts.sessionId ? ["--session", opts.sessionId] : ["--continue"])];
     const argv = [...base];
     return argv;
   }
@@ -84,9 +87,11 @@ export function agentArgv(agent: AgentKind, opts: LaunchOpts = {}): string[] {
     ? ["--append-system-prompt", opts.workspaceInstructions]
     : [];
   const dirs = claudeAddDirArgs(opts.addDirs);
-  if (opts.resume) return ["claude", "--continue", ...instructions, ...dirs];
-  if (!hasText(opts.prompt)) return ["claude", ...instructions, ...dirs];
+  const settings = opts.claudeSettings ? ["--settings", opts.claudeSettings] : [];
+  const identity = opts.sessionId ? ["--session-id", opts.sessionId] : [];
+  if (opts.resume) return ["claude", ...(opts.sessionId ? ["--resume", opts.sessionId] : ["--continue"]), ...settings, ...instructions, ...dirs];
+  if (!hasText(opts.prompt)) return ["claude", ...identity, ...settings, ...instructions, ...dirs];
   return dirs.length
-    ? ["claude", ...instructions, ...dirs, "--", opts.prompt]
-    : ["claude", ...instructions, opts.prompt];
+    ? ["claude", ...identity, ...settings, ...instructions, ...dirs, "--", opts.prompt]
+    : ["claude", ...identity, ...settings, ...instructions, opts.prompt];
 }

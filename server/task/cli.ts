@@ -86,6 +86,7 @@ export const TASK_REFERENCES_CAPABILITY = "task-references-v1";
 export const TASK_RUNTIME_REFERENCES_CAPABILITY = "task-runtime-references-v1";
 export const TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY = "task-runtime-reference-manifest-v1";
 export const TASK_CAPABILITIES = [
+  "directory-task-v1",
   ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
   CODE_VIEW_CAPABILITY,
   NODE_CONTROL_CAPABILITY,
@@ -125,6 +126,7 @@ function repoForList(repo: Repo | NodeRepo): NodeRepo {
 export interface TaskLive {
   alive: boolean;        // its tmux session is live
   hasWorktree: boolean;  // its worktree is still on disk
+  hasDirectory?: boolean;
   waiting: boolean;      // blocked on a permission prompt (the .claude/waiting marker)
 }
 // Injected probe: given this node's tasks, report each one's liveness by id. Passed
@@ -144,6 +146,7 @@ export interface NodeTask {
   agent: string;
   alive?: boolean;
   hasWorktree?: boolean;
+  hasDirectory?: boolean;
   waiting?: boolean;
   references: NodeTaskReference[];
 }
@@ -208,6 +211,7 @@ function taskForList(task: Task, live?: Partial<TaskLive>, references?: unknown)
     ...(hasLive ? {
       alive: live?.alive ?? false,
       hasWorktree: live?.hasWorktree ?? false,
+      ...(task.kind === "directory" ? { hasDirectory: live?.hasDirectory ?? false } : {}),
       waiting: live?.waiting ?? false,
     } : {}),
   };

@@ -131,7 +131,13 @@
       "repo.collapseTasks": "收起仓库任务",
 
       // task modal
-      "task.modalTitle": "派发任务",
+      "task.modalTitle": "新建任务",
+      "task.new": "任务",
+      "task.workspaceLabel": "工作位置",
+      "task.directoryMode": "工作目录",
+      "task.cwdLabel": "工作目录（当前设备）",
+      "task.directoryTasks": "Agent 任务",
+      "task.startingAgent": "正在启动 Agent…",
       "task.baseLabel": "基于分支",
       "task.branchPh": "选择分支",
       "task.loadingBranches": "加载分支…",
@@ -169,7 +175,8 @@
       "runtimeRef.nodeUpdate": "该节点版本不支持运行时 Ref，请先更新节点",
       "task.titlePh": "任务标题",
       "task.promptPh": "给智能体的初始指令（可选）",
-      "task.submit": "建 worktree + 起会话",
+      "task.submit": "创建任务",
+      "task.optionalTitlePh": "任务标题（可选）",
 
       // agent axis (which coding-agent CLI runs the task)
       "task.agentLabel": "智能体",
@@ -488,7 +495,13 @@
       "repo.expandTasks": "Expand repository tasks",
       "repo.collapseTasks": "Collapse repository tasks",
 
-      "task.modalTitle": "Dispatch task",
+      "task.modalTitle": "New task",
+      "task.new": "Task",
+      "task.workspaceLabel": "Workspace",
+      "task.directoryMode": "Working directory",
+      "task.cwdLabel": "Working directory (this device)",
+      "task.directoryTasks": "Agent tasks",
+      "task.startingAgent": "Starting agent…",
       "task.baseLabel": "Based on branch",
       "task.branchPh": "Select branch",
       "task.loadingBranches": "Loading branches…",
@@ -526,7 +539,8 @@
       "runtimeRef.nodeUpdate": "This node does not support runtime Refs yet; update it first",
       "task.titlePh": "Task title",
       "task.promptPh": "Initial prompt for the agent (optional)",
-      "task.submit": "Create worktree + start session",
+      "task.submit": "Create task",
+      "task.optionalTitlePh": "Task title (optional)",
 
       // agent axis (which coding-agent CLI runs the task)
       "task.agentLabel": "Agent",

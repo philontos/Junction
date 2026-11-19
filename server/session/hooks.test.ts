@@ -1,8 +1,27 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { hookSettingsJson } from "./hooks.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const WT = "/home/u/.task-dispatcher/worktrees/3-9";
+
+test("hooks write only the literal private directory when its path contains shell syntax", t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "switchyard-hook-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const control = path.join(root, 'task "$HOME" `pwd` \\ files');
+  fs.mkdirSync(path.join(control, ".claude"), { recursive: true });
+  const hooks = JSON.parse(hookSettingsJson(control)).hooks;
+  const run = (event: string, input = "") => execFileSync("sh", ["-c", hooks[event][0].hooks[0].command], { input });
+  run("SessionStart", JSON.stringify({ session_id: "exact-id" }));
+  assert.equal(fs.readFileSync(path.join(control, ".claude/session-id"), "utf8"), "exact-id");
+  run("Notification");
+  assert.equal(fs.existsSync(path.join(control, ".claude/waiting")), true);
+  run("Stop");
+  assert.equal(fs.existsSync(path.join(control, ".claude/waiting")), false);
+});
 
 test("hookSettingsJson: Notification touches the worktree marker on a permission prompt", () => {
   const s = JSON.parse(hookSettingsJson(WT));

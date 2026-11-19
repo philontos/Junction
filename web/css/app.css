@@ -501,6 +501,8 @@ button.danger:hover { background: #f8514914; border-color: #f85149aa; }
 .agent-opt.selected { border-color: var(--accent); color: var(--accent-text); background: #d977571f; }
 /* task-scoped additional repository references */
 #task-modal .modal { width: 560px; max-height: min(860px, 92dvh); overflow-y: auto; }
+#task-modal [hidden] { display: none !important; }
+#t-workspace { width: 100%; margin-bottom: 12px; }
 .tm-ref-sec { margin: 1px 0 9px; padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
 .tm-ref-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tm-ref-head .tm-lbl { flex: 1; margin: 0; }

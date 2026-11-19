@@ -51,7 +51,7 @@ export async function addTaskReference(
 ): Promise<AddTaskReferenceResult> {
   const task = getOwnedTask(env.db, taskId);
   if (!task) return { ok: false, error: "notFound", message: "Task not found on this node" };
-  if (task.kind === "local") {
+  if (task.kind !== "repo") {
     return { ok: false, error: "notRepoTask", message: "Repository references require a repository task" };
   }
   if (!task.worktree_path || !(await env.exists(task.worktree_path).catch(() => false))) {

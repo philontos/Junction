@@ -16,7 +16,7 @@ import { initReading, reflectWaiting } from "./features/reading.js";
 import { state } from "./core/state.js";
 import { loadRepos, openRepoModal, closeRepoModal, addRepo, delRepo, openRepoDetails, openRepoDetailsKey, closeRepoDetails, repaintRepoDetails } from "./features/repos.js";
 import { loadHosts, selectHost, openHostModal, closeHostModal, addHost, delHost, toggleRepo, toggleArchived, toggleHostMenu, initHostMenuDismiss, loadFleet, bootstrapHost, connectNode, stopNodeTask, removeNodeWt, resumeNodeTask, deleteNodeTask, delNodeRepo, updateHost, updateSelf, openDiscoveryModal, closeDiscoveryModal, openManualHostModal, discoverNodes, connectDiscoveredAt } from "./features/hosts.js";
-import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, cancelTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, addNodeShell, allTasks, addTaskReference, repaintTaskReferences } from "./features/tasks.js";
+import { loadTasks, addTask, archive, removeWt, deleteTask, resume, connect, openTaskModal, closeTaskModal, cancelTaskModal, addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, selectTaskWorkspace, addNodeShell, allTasks, addTaskReference, repaintTaskReferences } from "./features/tasks.js";
 import { initCodeView, openRepoCode, openTaskCode, closeCodeView, repaintCodeView, isCodeViewOpen } from "./features/codeview.js";
 import {
   initRuntimeReferences,
@@ -48,7 +48,7 @@ import {
 Object.assign(window, {
   // tasks
   addTask, addTaskReference, openTaskModal, cancelTaskModal, connect, archive, removeWt, deleteTask, resume,
-  addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent,
+  addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, selectTaskWorkspace,
   // repos
   delRepo, delNodeRepo, openRepoModal, closeRepoModal, addRepo, openRepoCode,
   openRepoDetails, openRepoDetailsKey, closeRepoDetails,

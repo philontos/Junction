@@ -116,6 +116,9 @@ export async function startSession(
     addDirs?: string[];
     workspaceInstructions?: string | null;
     kimiAgentFile?: string | null;
+    sessionId?: string;
+    claudeSettings?: string;
+    binary?: string;
   },
 ) {
   requireOwnerNode(runner);
@@ -133,8 +136,11 @@ export async function startSession(
     addDirs,
     workspaceInstructions: opts?.workspaceInstructions,
     kimiAgentFile: opts?.kimiAgentFile,
+    sessionId: opts?.sessionId,
+    claudeSettings: opts?.claudeSettings,
   });
-  if (agent === "kimi") launch[0] = await kimiBinary(runner);
+  if (opts?.binary) launch[0] = opts.binary;
+  else if (agent === "kimi") launch[0] = await kimiBinary(runner);
   const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...pre, ...launch];
   await tmux(runner, cmd);
   await ensureSessionOptions(runner, session);

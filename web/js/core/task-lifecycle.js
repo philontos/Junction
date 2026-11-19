@@ -7,7 +7,7 @@ export function taskLifecycle(task) {
   return {
     active,
     action: active ? "stop" : hasWorktree ? "removeWorktree" : "deleteRecord",
-    resumable: !task.alive && hasWorktree,
+    resumable: !task.alive && (hasWorktree || !!task.hasDirectory),
     connectable: active && !!task.alive,
   };
 }

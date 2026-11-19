@@ -14,7 +14,7 @@ import { replaceHostList } from "../core/host-list-scroll.js";
 import { state } from "../core/state.js";
 import { repoGroupHead, repaintRepoDetails } from "./repos.js";
 import { paintSelection, taskCard, allTasks, isEditingTask, connect,
-         pendingRepoCards, pendingNodeRepoCards, pendingShellCards,
+         pendingRepoCards, pendingNodeRepoCards, pendingShellCards, pendingDirectoryCards,
          isShadowedByPending, isShadowedByNodePending, pendingCard } from "./tasks.js";
 import { detachDock, openPty, pruneNodePanes, setTaskReferences } from "./terminal.js";
 import { duringAutoFollow } from "./mobile.js";
@@ -243,8 +243,8 @@ function fleetCard(hostId, tk, orderKey = null) {
   // `tdsp list` payload (SELECT *). An un-updated node (no agent column) omits it
   // → defaults to claude. Colour only, no text label.
   const agent = tk.agent === "codex" || tk.agent === "kimi" ? tk.agent : "claude";
-  const meta = tk.kind === "local"
-    ? `<div class="muted">📂 <code>${tk.cwd || "~"}</code> <span class="tag-local">${t("local.tag")}</span></div>`
+  const meta = tk.kind === "local" || tk.kind === "directory"
+    ? `<div class="muted">📂 <code>${esc(tk.cwd || "~")}</code> <span class="tag-local">${tk.kind === "directory" ? agent : t("local.tag")}</span></div>`
     : `<div class="muted">${tk.base_branch} → <code>${tk.work_branch}</code></div>`;
   const lifecycle = taskLifecycle(tk);
   let icon, note = "";
@@ -265,7 +265,7 @@ function fleetCard(hostId, tk, orderKey = null) {
     : "";
   return `<div class="card task task-${agent}${open}" data-pane="${paneId}"${drag}>
       <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
-      <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname" title="${t("task.renameHint")}" ondblclick="renameTask(event,${tk.id},${hostId})">${tk.title}</span></div>
+      <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname" title="${t("task.renameHint")}" ondblclick="renameTask(event,${tk.id},${hostId})">${esc(tk.title)}</span></div>
       ${meta}
       ${note}${resumeBtn}
     </div>`;
@@ -446,6 +446,7 @@ function renderListHtml() {
     : "";
   const canAddRepo = isLocal || remoteReady;
   const newRepo = `<button class="mh-act" ${canAddRepo ? "" : "disabled"} onclick="openRepoModal(${h.id})">＋${t("repo.repoWord")}</button>`;
+  const newTask = isLocal ? `<button class="mh-act" onclick="openTaskModal()">＋${t("task.new")}</button>` : "";
   // fleet/bootstrap status for this remote machine: bootstrapped+reachable shows a
   // live task count; reachable-but-not-installed offers a one-click Bootstrap; an
   // unreachable/erroring node says so. Read from the last /api/fleet snapshot.
@@ -477,7 +478,7 @@ function renderListHtml() {
       ${updateRow}
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
-  const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${selfUpdate}${newRepo}${menu}</div>`;
+  const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${selfUpdate}${newTask}${newRepo}${menu}</div>`;
   let content = "";
   if (isLocal) {
     const repoBlocks = state.repos.map(r => {
@@ -489,6 +490,9 @@ function renderListHtml() {
       const body = collapsed ? pend : (cards || `<div class="grp-empty">${t("repo.noTasks")}</div>`);
       return `<div class="grp${collapsed ? "" : " open"}">${repoGroupHead(r, true, collapsed, mine)}${body}</div>`;
     }).join("") || `<div class="muted mempty">${t("host.noRepos")}</div>`;
+    const directoryTasks = tasks.filter(tk => tk.kind === "directory" && tk.status !== "cleaned" && !isShadowedByPending(tk));
+    const directoryCards = pendingDirectoryCards(h.id).map(pendingCard).join("") + directoryTasks.map(tk => taskCard(tk, true)).join("");
+    const directoryBlock = directoryCards ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("task.directoryTasks")}</span></div>${directoryCards}</div>` : "";
     const shells = tasks.filter(tk => tk.kind === "local" && tk.status !== "cleaned" && !isShadowedByPending(tk));
     const shellCards = pendingShellCards(h.id).map(pendingCard).join("") + shells.map(tk => taskCard(tk, true)).join("");
     const shellBlock = `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("list.localGroup")}</span>
@@ -498,7 +502,7 @@ function renderListHtml() {
     const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
         <span class="grp-name">${t("list.archived")}</span><span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
         ${archivedOpen ? (archived.map(tk => taskCard(tk, true)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
-    content = repoBlocks + shellBlock + archBlock;
+    content = directoryBlock + repoBlocks + shellBlock + archBlock;
   } else if (fl?.ok) {
     const all = fl.tasks || [];
     const live = all.filter(tk => tk.status !== "cleaned");
@@ -530,7 +534,9 @@ function renderListHtml() {
     const archBlock = `<div class="grp${archivedOpen ? " open" : ""}"><div class="grp-head" onclick="toggleArchived()">
         <span class="grp-name">${t("list.archived")}</span><span class="muted">${archived.length ? `(${archived.length})` : ""}</span></div>
         ${archivedOpen ? (archived.map(tk => fleetCard(h.id, tk)).join("") || `<div class="grp-empty">${t("empty.archTitle")}</div>`) : ""}</div>`;
-    content = repoGroups + shellGroup + orphanGroup + archBlock;
+    const directoryTasks = live.filter(tk => tk.kind === "directory");
+    const directoryGroup = directoryTasks.length ? `<div class="grp open"><div class="grp-head static"><span class="grp-name">${t("task.directoryTasks")}</span></div>${directoryTasks.map(tk => fleetCard(h.id, tk)).join("")}</div>` : "";
+    content = directoryGroup + repoGroups + shellGroup + orphanGroup + archBlock;
   } else {
     const reason = fl?.reason === "notBootstrapped" ? "notBootstrapped" : (fl?.reason || "error");
     content = `<div class="grp open"><div class="grp-head static"><span class="grp-name">🛰 ${t("node.group")}</span></div><div class="grp-empty">⚠ ${t("host." + reason)}</div></div>`;

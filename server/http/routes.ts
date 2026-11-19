@@ -31,6 +31,8 @@ import {
 import { fleetTargets, type FleetTarget } from "../fleet/fleet.js";
 import { bootstrapMachine, validProfileName } from "../fleet/bootstrap.js";
 import { createLocalTask, createRepoTask, type RepoTaskEnv } from "../task/createtask.js";
+import { buildDirectoryEnv, createDirectoryTask, startDirectorySession } from "../task/directory.js";
+import { taskControlDir, taskCwd } from "../task/workspace.js";
 import { addTaskReference, type AddTaskReferenceResult } from "../task/addreference.js";
 import {
   listTaskReferences,
@@ -507,6 +509,7 @@ app.delete("/api/repos/:id", async (req, res) => {
 });
 
 // ---------- tasks ----------
+app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, home: os.homedir() }));
 app.get("/api/tasks", async (_req, res) => {
   const tasks = listOwnedTasks(db);
   const withLive = await Promise.all(
@@ -518,9 +521,11 @@ app.get("/api/tasks", async (_req, res) => {
       // it so the value survives once the worktree is gone (e.g. archived). It only
       // changes on /clear (a fresh conversation), so refreshing each poll keeps it
       // accurate; we fall back to the stored value when the worktree isn't there.
+      const hasDirectory = t.kind === "directory" && !!t.cwd && (await runner.exists(t.cwd).catch(() => false));
+      const control = taskControlDir(DATA_DIR, t);
       let claudeSession = t.claude_session ?? null;
-      if (hasWt && t.status !== "cleaned") {
-        const sid = (await runner.readText(path.join(t.worktree_path, ".claude/session-id")).catch(() => null))?.trim();
+      if ((hasWt || hasDirectory) && t.agent === "claude" && t.status !== "cleaned") {
+        const sid = (await runner.readText(path.join(control, ".claude/session-id")).catch(() => null))?.trim();
         if (sid && sid !== claudeSession) {
           db.prepare("UPDATE tasks SET claude_session=? WHERE id=?").run(sid, t.id);
           claudeSession = sid;
@@ -533,11 +538,12 @@ app.get("/api/tasks", async (_req, res) => {
         claude_session: claudeSession,
         alive: t.status === "cleaned" ? false : await hasSession(runner, t.session).catch(() => false),
         hasWorktree: hasWt,
+        hasDirectory,
         // yellow light: the session's hook touches <wt>/.claude/waiting when it
         // blocks on a permission prompt; runner.exists reads it back the same way
         // on this owning node's local filesystem. No worktree → never.
-        waiting: t.status !== "cleaned" && hasWt
-          && (await runner.exists(path.join(t.worktree_path, ".claude/waiting")).catch(() => false)),
+        waiting: t.status !== "cleaned" && (hasWt || hasDirectory)
+          && (await runner.exists(path.join(control, ".claude/waiting")).catch(() => false)),
       };
     })
   );
@@ -566,6 +572,19 @@ app.post("/api/tasks", async (req, res) => {
   const requestedHost = req.body?.host_id;
   if (requestedHost != null && Number(requestedHost) !== localHostId(db)) {
     return res.status(409).json({ error: "remote tasks must be created through the target node" });
+  }
+  if (!repo_id) {
+    if (references?.length) return res.status(400).json({ error: "请在仓库 Worktree 模式中添加参考仓库。" });
+    if (agent != null && !["claude", "codex", "kimi"].includes(agent)) return res.status(400).json({ error: "请选择有效的 Agent。" });
+    const kind = asAgentKind(agent);
+    const provider = kind === "claude" && provider_id ? getProvider.get(provider_id) as Provider | undefined : undefined;
+    if (provider_id && !provider) return res.status(400).json({ error: "模型后端不存在。" });
+    try {
+      return res.status(201).json(await createDirectoryTask(buildDirectoryEnv(db, NS, localRunner), {
+        cwd: req.body?.cwd, title, prompt, agent: kind, model: agent_model,
+        providerId: provider?.id, env: providerEnv(provider),
+      }));
+    } catch (error: any) { return res.status(400).json({ error: error.message }); }
   }
   if (!repo_id || !base_branch || !title) {
     return res.status(400).json({ error: tr(lang, "task.fieldsRequired") });
@@ -725,8 +744,9 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
   const lang = langFromReq(req);
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
-  if (!task.session || !task.worktree_path) return res.status(409).json({ error: tr(lang, "task.notResumable") });
-  if (!(await localRunner.exists(task.worktree_path).catch(() => false))) {
+  const cwd = taskCwd(task);
+  if (task.kind === "local" || !task.session || !cwd) return res.status(409).json({ error: tr(lang, "task.notResumable") });
+  if (!(await localRunner.exists(cwd).catch(() => false))) {
     return res.status(409).json({ error: tr(lang, "task.worktreeGone") });
   }
   const referencePaths = referenceWorktreePaths(db, task.id);
@@ -741,7 +761,10 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
     // re-injects its provider env; codex re-runs `codex resume --last` with its
     // recorded model. providerEnv is empty for a codex task (provider_id is NULL).
     const provider = task.provider_id ? (getProvider.get(task.provider_id) as Provider | undefined) : undefined;
-    if (!alreadyAlive) await startSession(localRunner, task.session, task.worktree_path, null, {
+    if (!alreadyAlive && task.kind === "directory") await startDirectorySession(localRunner, task, {
+      agent: asAgentKind(task.agent), model: task.agent_model, env: providerEnv(provider),
+    }, true);
+    else if (!alreadyAlive) await startSession(localRunner, task.session, task.worktree_path, null, {
       continue: true,
       env: providerEnv(provider),
       agent: asAgentKind(task.agent),
@@ -775,6 +798,7 @@ app.patch("/api/tasks/:id", (req, res) => {
 app.delete("/api/tasks/:id", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
+  if (task.kind === "directory" && task.status !== "cleaned") return res.status(409).json({ error: "请先停止任务，再删除记录。" });
   if (task.worktree_path && (await localRunner.exists(task.worktree_path).catch(() => false))) {
     return res.status(409).json({ error: tr(langFromReq(req), "task.worktreeExists") });
   }
@@ -852,8 +876,9 @@ app.get("/api/fleet", async (_req, res) => {
       {
         alive: task.status !== "cleaned" && await hasSession(localRunner, task.session).catch(() => false),
         hasWorktree: !!task.worktree_path && await localRunner.exists(task.worktree_path).catch(() => false),
-        waiting: task.status !== "cleaned" && !!task.worktree_path
-          && await localRunner.exists(path.join(task.worktree_path, ".claude/waiting")).catch(() => false),
+        hasDirectory: task.kind === "directory" && !!task.cwd && await localRunner.exists(task.cwd).catch(() => false),
+        waiting: task.status !== "cleaned" && !!taskControlDir(DATA_DIR, task)
+          && await localRunner.exists(path.join(taskControlDir(DATA_DIR, task), ".claude/waiting")).catch(() => false),
       },
     ] as const)))),
   ]);

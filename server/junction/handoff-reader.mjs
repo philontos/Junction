@@ -19,9 +19,9 @@ if (command === "info") {
   result = arg ? environment.groups[arg] : environmentSummary(environment);
 } else if (command === "check-environment") {
   // Pin checks to THIS handoff's worktree, never to a historical absolute path.
-  const cwd = path.resolve(directory, "../..");
-  result = await checkEnvironment(environment, { cwd, ...(arg ? { groups: arg.split(",") } : {}) });
   const manifest = read("manifest.json");
+  const cwd = manifest.working_directory || path.resolve(directory, "../..");
+  result = await checkEnvironment(environment, { cwd, ...(arg ? { groups: arg.split(",") } : {}) });
   result.context_id = manifest.context_id;
   result.revision_id = manifest.revision_id;
   result.check_id = crypto.randomUUID();

@@ -6,6 +6,7 @@ import type Database from "better-sqlite3";
 import type { Task } from "../core/db.js";
 import { getOwnedRepo, getOwnedTask } from "../core/ownership.js";
 import { listTaskReferences, removeTaskReferenceRows } from "./references.js";
+import { taskCwd } from "./workspace.js";
 
 type DB = Database.Database;
 
@@ -55,11 +56,11 @@ function messageOf(error: unknown): string {
 export async function resumeTask(env: ResumeTaskEnv, id: number): Promise<LifecycleResult> {
   const task = getOwnedTask(env.db, id);
   if (!task) return { ok: false, error: "notFound" };
-  if (!task.session || !task.worktree_path) return { ok: false, error: "notResumable" };
+  if (task.kind === "local" || !task.session || !taskCwd(task)) return { ok: false, error: "notResumable" };
 
   let hasWorktree = false;
   try {
-    hasWorktree = await env.exists(task.worktree_path);
+    hasWorktree = await env.exists(taskCwd(task));
   } catch {
     // A failed filesystem probe cannot safely be treated as a resumable task.
   }
@@ -123,6 +124,9 @@ export async function deleteTaskRecord(env: DeleteTaskEnv, id: number): Promise<
   }
 
   try {
+    if (task.kind === "directory" && task.status !== "cleaned") {
+      return { ok: false, error: "deleteFailed", message: "请先停止任务，再删除记录。" };
+    }
     if (task.worktree_path && (await env.exists(task.worktree_path))) {
       return { ok: false, error: "worktreeExists" };
     }

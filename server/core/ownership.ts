@@ -25,8 +25,8 @@ export function listOwnedTasks(db: DB): Task[] {
   if (hostId == null) return [];
   return db.prepare(
     "SELECT t.* FROM tasks t WHERE " +
-      "(t.kind='local' AND t.host_id=?) OR " +
-      "(t.kind!='local' AND t.repo_id IN (SELECT id FROM repos WHERE host_id=?)) " +
+      "(t.kind IN ('local','directory') AND t.host_id=?) OR " +
+      "(t.kind='repo' AND t.repo_id IN (SELECT id FROM repos WHERE host_id=?)) " +
       "ORDER BY t.id DESC",
   ).all(hostId, hostId) as Task[];
 }
@@ -36,8 +36,8 @@ export function getOwnedTask(db: DB, id: number | string): Task | undefined {
   if (hostId == null) return undefined;
   return db.prepare(
     "SELECT t.* FROM tasks t WHERE t.id=? AND (" +
-      "(t.kind='local' AND t.host_id=?) OR " +
-      "(t.kind!='local' AND t.repo_id IN (SELECT id FROM repos WHERE host_id=?)))",
+      "(t.kind IN ('local','directory') AND t.host_id=?) OR " +
+      "(t.kind='repo' AND t.repo_id IN (SELECT id FROM repos WHERE host_id=?)))",
   ).get(id, hostId, hostId) as Task | undefined;
 }
 
@@ -51,8 +51,8 @@ export function clearProviderFromOwnedTasks(db: DB, providerId: number | string)
   if (hostId == null) return 0;
   return db.prepare(
     "UPDATE tasks SET provider_id=NULL WHERE provider_id=? AND (" +
-      "(kind='local' AND host_id=?) OR " +
-      "(kind!='local' AND repo_id IN (SELECT id FROM repos WHERE host_id=?)))",
+      "(kind IN ('local','directory') AND host_id=?) OR " +
+      "(kind='repo' AND repo_id IN (SELECT id FROM repos WHERE host_id=?)))",
   ).run(providerId, hostId, hostId).changes;
 }
 
@@ -78,10 +78,10 @@ export function legacyOwnershipReport(db: DB): LegacyOwnershipReport {
   ).all(hostId) as LegacyOwnershipReport["remote_repos"];
   const remoteTasks = hostId == null ? [] : db.prepare(
     "SELECT t.id,t.kind,t.host_id,t.repo_id,t.title," +
-      "CASE WHEN t.kind='local' THEN t.host_id ELSE r.host_id END AS owner_host_id " +
+      "CASE WHEN t.kind IN ('local','directory') THEN t.host_id ELSE r.host_id END AS owner_host_id " +
       "FROM tasks t LEFT JOIN repos r ON r.id=t.repo_id " +
-      "WHERE (t.kind='local' AND t.host_id IS NOT NULL AND t.host_id!=?) " +
-      "OR (t.kind!='local' AND r.host_id IS NOT NULL AND r.host_id!=?) ORDER BY t.id",
+      "WHERE (t.kind IN ('local','directory') AND t.host_id IS NOT NULL AND t.host_id!=?) " +
+      "OR (t.kind='repo' AND r.host_id IS NOT NULL AND r.host_id!=?) ORDER BY t.id",
   ).all(hostId, hostId) as LegacyOwnershipReport["remote_tasks"];
   const remoteDataDirs = db.prepare(
     "SELECT id AS host_id,name AS host_name,target,data_dir FROM hosts " +
@@ -95,8 +95,8 @@ export function legacyOwnershipReport(db: DB): LegacyOwnershipReport {
     "SELECT t.id,t.kind,t.host_id,t.repo_id,t.title FROM tasks t " +
       "LEFT JOIN hosts th ON th.id=t.host_id " +
       "LEFT JOIN repos r ON r.id=t.repo_id LEFT JOIN hosts rh ON rh.id=r.host_id " +
-      "WHERE (t.kind='local' AND (t.host_id IS NULL OR th.id IS NULL)) " +
-      "OR (t.kind!='local' AND (r.id IS NULL OR r.host_id IS NULL OR rh.id IS NULL)) ORDER BY t.id",
+      "WHERE (t.kind IN ('local','directory') AND (t.host_id IS NULL OR th.id IS NULL)) " +
+      "OR (t.kind='repo' AND (r.id IS NULL OR r.host_id IS NULL OR rh.id IS NULL)) ORDER BY t.id",
   ).all() as LegacyOwnershipReport["orphan_tasks"];
   return {
     local_host_id: hostId,

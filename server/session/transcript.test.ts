@@ -11,7 +11,10 @@ import {
   parseCodexUserLine,
   parseKimiLine,
   readTranscript,
+  hasTaskBinding,
+  locateNativeJsonl,
 } from "./transcript.ts";
+import { taskMarker } from "../task/workspace.js";
 
 function task(agent: Task["agent"] = "kimi"): Task {
   return {
@@ -22,6 +25,34 @@ function task(agent: Task["agent"] = "kimi"): Task {
     claude_session: null, provider_id: null, agent, agent_model: null,
   };
 }
+
+test("directory transcript lookup never takes a different task's newer Codex rollout", async () => {
+  const directoryTask = { ...task("codex"), id: 9911, kind: "directory", cwd: "/shared", worktree_path: "" };
+  const marker = taskMarker(directoryTask);
+  const record = (role: string, text: string) => JSON.stringify({ type: "response_item", payload: { role, content: [{ text }] } });
+  assert.equal(hasTaskBinding(record("user", marker), marker), false);
+  assert.equal(hasTaskBinding(record("developer", marker), marker), true);
+  const contents: Record<string, string> = {
+    "/newer.jsonl": record("developer", "another task"),
+    "/copied.jsonl": record("user", marker),
+    "/own.jsonl": record("developer", marker),
+  };
+  const runner = { kind: "local", dataDir: "/node", exists: async () => true,
+    exec: async (cmd: string, args: string[]) => cmd === "sh" ? Object.keys(contents).join("\n") : contents[args.at(-1)!],
+  } as unknown as Runner;
+  assert.equal(await locateNativeJsonl(runner, directoryTask), "/own.jsonl");
+  delete contents["/own.jsonl"];
+  assert.equal(await locateNativeJsonl(runner, directoryTask), null, "no cwd fallback when its binding is missing");
+});
+
+test("directory Claude lookup uses its private hook and safely encodes spaces and punctuation", async () => {
+  const item = { ...task("claude"), kind: "directory", cwd: "/work/my app_v2", worktree_path: "", claude_session: "seed-id" };
+  const paths: string[] = [];
+  const runner = { kind: "local", dataDir: "/node", readText: async (p: string) => { paths.push(p); return "own-id"; } } as Runner;
+  const file = await locateNativeJsonl(runner, item);
+  assert.equal(file, path.join(os.homedir(), ".claude/projects/-work-my-app-v2/own-id.jsonl"));
+  assert.deepEqual(paths, ["/node/tasks/7/.claude/session-id"]);
+});
 
 test("Claude string messages preserve their semantic role", () => {
   assert.deepEqual(parseClaudeLine({

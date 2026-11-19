@@ -7,6 +7,8 @@ import { getRepo, getTask, getProvider, providerEnv, syncTaskManifest } from "..
 import { localRunner } from "../fleet/runner.js";
 import { buildRepoTaskEnv } from "../repo/repoenv.js";
 import { createRepoTask } from "../task/createtask.js";
+import { buildDirectoryEnv, createDirectoryTask, directoryCwd } from "../task/directory.js";
+import { taskControlDir, taskCwd } from "../task/workspace.js";
 import { locateNativeJsonl } from "../session/transcript.js";
 import { JunctionClient, JunctionError, readConfig, revisionPath } from "./client.js";
 import { WORKSPACE_EXTENSION, workspaceOf, publicRepoUrl, repoIdentity, writeHandoff, handoffPrompt } from "./handoff.js";
@@ -33,37 +35,40 @@ const git = (cwd: string, args: string[]) => localRunner.exec("git", args, { cwd
 async function taskSource(id: unknown) {
   if (!Number.isSafeInteger(Number(id)) || Number(id) < 1) throw new JunctionError(400, "任务 ID 无效。");
   const task = getTask.get(Number(id)) as Task | undefined;
-  if (!task || task.kind === "local") throw new JunctionError(404, "找不到本机仓库任务。");
+  if (!task || task.kind === "local") throw new JunctionError(404, "找不到本机 Agent 任务。");
   if (!["claude", "codex"].includes(task.agent)) throw new JunctionError(409, "当前仅支持 Claude Code 和 Codex JSONL。");
-  const repo = getRepo.get(task.repo_id) as Repo;
+  const repo = getRepo.get(task.repo_id) as Repo | undefined;
+  const cwd = taskCwd(task);
   const file = await locateNativeJsonl(localRunner, task);
   if (!file) throw new JunctionError(409, "尚未找到该任务的 JSONL；请先启动 Agent 并进行一次对话。");
   let stat;
   try { stat = await fs.stat(file); } catch { throw new JunctionError(409, "会话 JSONL 尚不存在。"); }
   if (!stat.isFile() || stat.size > 32 * 1024 * 1024 || !stat.size) throw new JunctionError(413, "JSONL 必须是 1 字节至 32 MiB 的文件。");
   const checks = await Promise.allSettled([
-    git(task.worktree_path, ["rev-parse", "HEAD"]),
-    git(task.worktree_path, ["rev-parse", "--abbrev-ref", "HEAD"]),
-    git(task.worktree_path, ["status", "--porcelain"]),
+    git(cwd, ["rev-parse", "HEAD"]),
+    git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    git(cwd, ["status", "--porcelain"]),
   ]);
   const values = checks.map(r => r.status === "fulfilled" ? r.value.trim() : null);
   const [commit, branch, dirty] = values;
+  const remoteUrl = repo?.git_url || (commit ? await git(cwd, ["remote", "get-url", "origin"]).then(value => value.trim()).catch(() => null) : null);
   const notes: { code: string; detail: string }[] = [];
   for (const [i, field] of ["commit", "branch", "dirty"].entries()) {
     if (values[i] === null) notes.push({ code: `${field}_unavailable`, detail: `无法读取当前 ${field}，已标记缺失。` });
   }
   if (dirty) notes.push({ code: "uncommitted_code_not_included", detail: "已记录未提交状态；代码改动不随 Context 上传。" });
   let derivedFrom;
-  try { const recorded = await fs.readFile(path.join(task.worktree_path, ".tdsp/context/manifest.json"), "utf8")
+  try { const recorded = await fs.readFile(path.join(taskControlDir(DATA_DIR, task), ".tdsp/context/manifest.json"), "utf8")
       .catch(() => fs.readFile(path.join(DATA_DIR, "tasks", String(task.id), "context.json"), "utf8"));
     const m = JSON.parse(recorded);
     derivedFrom = { context_id: m.context_id, revision_id: m.revision_id }; } catch { /* ordinary task */ }
   const capture = {
-    source: { node_id: NS, task_id: task.id }, repo_url: publicRepoUrl(repo.git_url), repo_name: repo.name,
+    source: { node_id: NS, task_id: task.id }, cwd, workspace_kind: task.kind,
+    repo_url: remoteUrl ? publicRepoUrl(remoteUrl) : null, repo_name: repo?.name ?? (remoteUrl ? path.basename(cwd) : null),
     branch, commit, dirty: dirty === null ? null : !!dirty,
     ...(derivedFrom ? { derived_from: derivedFrom } : {}),
   };
-  const workspace = commit && branch && dirty !== null ? capture : null;
+  const workspace = remoteUrl && commit && branch && dirty !== null ? capture : null;
   return { task, file, bytes: stat.size, workspace, capture, notes };
 }
 
@@ -154,7 +159,7 @@ export function registerJunctionRoutes(app: Express) {
       for (const item of src.notes) progress("annotation", item.detail);
       const extensions: Record<string, any> = src.workspace ? { [WORKSPACE_EXTENSION]: src.workspace } : { "switchyard.capture/1": { ...src.capture, notes: src.notes } };
       progress("environment", "正在记录工作环境与任务中使用过的工具…");
-      const captured = await collectEnvironment({ cwd: src.task.worktree_path, agent: src.task.agent, raw,
+      const captured = await collectEnvironment({ cwd: taskCwd(src.task), agent: src.task.agent, raw,
         workspaceExtension: src.workspace ? WORKSPACE_EXTENSION : "switchyard.capture/1" });
       extensions[ENVIRONMENT_EXTENSION] = await pinEnvironment(
         path.join(DATA_DIR, "tasks", String(src.task.id), "environment-snapshots"), raw, extensions, captured,
@@ -194,11 +199,41 @@ export function registerJunctionRoutes(app: Express) {
   app.post("/api/junction/continue", wrap(async (req, res) => {
     const b = req.body || {};
     const client = clientFor(req);
-    const repo = getRepo.get(Number(b.repo_id)) as Repo | undefined;
-    if (!repo?.mirror_path || repo.status !== "ready") throw new JunctionError(409, "请选择本机已就绪的仓库。");
-    if (!["claude", "codex"].includes(b.agent)) throw new JunctionError(400, "请选择 Claude Code 或 Codex。");
+    if (!["claude", "codex", "kimi"].includes(b.agent)) throw new JunctionError(400, "请选择有效的 Agent。");
+    const provider = b.agent === "claude" && b.provider_id ? getProvider.get(Number(b.provider_id)) as Provider | undefined : undefined;
+    if (b.provider_id && !provider) throw new JunctionError(400, "模型后端不存在。");
+    // Validate the local destination before downloading a potentially large history.
+    let cwd: string | undefined;
+    if (!b.repo_id) {
+      try { cwd = await directoryCwd(b.cwd); }
+      catch (e: any) { throw new JunctionError(400, e.message); }
+    }
     const snapshot = await client.snapshot(b.context_id, b.revision_id);
     if (snapshot.meta.revision.status === "failed") throw new JunctionError(409, "该 Context 解析失败，不能接续。");
+    if (cwd) {
+      const env = buildDirectoryEnv(db, NS, localRunner);
+      env.prepare = async task => {
+        const control = taskControlDir(DATA_DIR, task);
+        const manifest = writeHandoff(control, snapshot, client.config.url, cwd);
+        await fs.writeFile(path.join(control, "context.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 });
+        const prompt = handoffPrompt(str(b.prompt, 8000), path.join(control, ".tdsp/context"));
+        task.prompt = prompt;
+        db.prepare("UPDATE tasks SET prompt=? WHERE id=?").run(prompt, task.id);
+        syncTaskManifest(task.id);
+      };
+      const start = env.start;
+      env.start = (task, options) => start(task, { ...options, prompt: task.prompt });
+      try {
+        const result = await createDirectoryTask(env, { cwd,
+          title: str(b.title, 200).trim() || `接续：${snapshot.meta.title}`.slice(0, 200),
+          agent: b.agent, model: str(b.agent_model, 100) || null, providerId: provider?.id, env: providerEnv(provider),
+        });
+        res.status(201).json({ ...result, context_id: b.context_id, revision_id: b.revision_id });
+        return;
+      } catch (e: any) { throw new JunctionError(409, e.message); }
+    }
+    const repo = getRepo.get(Number(b.repo_id)) as Repo | undefined;
+    if (!repo?.mirror_path || repo.status !== "ready") throw new JunctionError(409, "请选择本机已就绪的仓库。");
     const w = workspaceOf(snapshot.normalized);
     const capturedRepo = snapshot.normalized.extensions?.["switchyard.capture/1"]?.repo_url;
     const sourceRepo = w?.repo_url || (typeof capturedRepo === "string" ? capturedRepo : null);
@@ -215,8 +250,6 @@ export function registerJunctionRoutes(app: Express) {
         catch { throw new JunctionError(409, "目标仓库没有此提交；请先推送来源分支并同步仓库，或回原设备继续。"); }
       }
     }
-    const provider = b.agent === "claude" && b.provider_id ? getProvider.get(Number(b.provider_id)) as Provider | undefined : undefined;
-    if (b.provider_id && !provider) throw new JunctionError(400, "模型后端不存在。");
     const env = buildRepoTaskEnv({ db, ns: NS, runner: localRunner, writeManifest: syncTaskManifest });
     const originalSetup = env.setupWorktree;
     env.setupWorktree = async args => {

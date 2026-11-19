@@ -20,9 +20,10 @@
  *                  (so the dispatcher can show it above the task; see below)
  */
 export function hookSettingsJson(worktreePath: string): string {
+  const quote = (value: string) => `"${value.replace(/[\\"$`]/g, char => `\\${char}`)}"`;
   const marker = `${worktreePath}/.claude/waiting`;
-  const wait = `touch "${marker}" >/dev/null 2>&1 || true`;
-  const clear = `rm -f "${marker}" >/dev/null 2>&1 || true`;
+  const wait = `touch ${quote(marker)} >/dev/null 2>&1 || true`;
+  const clear = `rm -f ${quote(marker)} >/dev/null 2>&1 || true`;
   // SessionStart's hook input arrives as JSON on stdin (no env var for it). Pull
   // session_id out with a pure-shell sed — robust whether the JSON is compact or
   // pretty-printed (the key and its value always share a line) — and write it to
@@ -32,7 +33,7 @@ export function hookSettingsJson(worktreePath: string): string {
   const sidFile = `${worktreePath}/.claude/session-id`;
   const captureSid =
     `s=$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' | head -n1); ` +
-    `[ -n "$s" ] && printf %s "$s" > "${sidFile}" 2>/dev/null; true`;
+    `[ -n "$s" ] && printf %s "$s" > ${quote(sidFile)} 2>/dev/null; true`;
   const hook = (command: string, matcher = "") =>
     [{ matcher, hooks: [{ type: "command", command }] }];
   return JSON.stringify(

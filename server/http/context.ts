@@ -31,7 +31,7 @@ export const getTask = db.prepare(
   "SELECT t.* FROM tasks t " +
     "LEFT JOIN hosts th ON th.id=t.host_id " +
     "LEFT JOIN repos r ON r.id=t.repo_id LEFT JOIN hosts rh ON rh.id=r.host_id " +
-    "WHERE t.id=? AND ((t.kind='local' AND th.kind='local') OR (t.kind!='local' AND rh.kind='local'))",
+    "WHERE t.id=? AND ((t.kind IN ('local','directory') AND th.kind='local') OR (t.kind='repo' AND rh.kind='local'))",
 );
 export const getHost = db.prepare("SELECT * FROM hosts WHERE id = ?");
 export const getProvider = db.prepare("SELECT * FROM providers WHERE id = ?");

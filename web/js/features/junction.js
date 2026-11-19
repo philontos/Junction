@@ -1,4 +1,5 @@
 import { $, api, nodePath } from "../core/dom.js";
+import { requireDirectoryTasks } from "../core/directory-tasks.js";
 import { state } from "../core/state.js";
 import { toast } from "../core/feedback.js";
 import { readShareStream } from "./junction-stream.js";
@@ -322,17 +323,16 @@ function showContinue(meta) {
   const target = $("jx-detail").querySelector(".jx-continuation"); target.replaceChildren();
   if (meta.revision.status === "failed") { target.append(note(L("记录解析失败，暂时无法接续。请查看详细信息。", "This record could not be parsed. Review the details before continuing."))); return; }
   const repos = state.repos.filter(r => r.status === "ready" && state.hostsById[r.host_id]?.kind === "local");
-  if (!repos.length) { target.append(note(L("请先在 Switchyard 的本机入口添加一个仓库。", "Add a repository on this machine first."))); return; }
   const w = meta.revision.normalized.extensions?.["switchyard.workspace/1"];
   const hint = w || meta.revision.normalized.extensions?.["switchyard.capture/1"];
   const matches = repos.filter(r => r.name === hint?.repo_name || r.git_url === hint?.repo_url);
   const match = matches.length === 1 ? matches[0] : null;
-  const repo = select([["", L("选择本机仓库", "Choose a local repository")], ...repos.map(r => [String(r.id), r.name])], "Repository");
-  if (match) repo.value = String(match.id);
-  repo.required = true;
-  let agent = meta.revision.provider;
+  const repo = select([["", L("工作目录", "Working directory")], ...repos.map(r => [String(r.id), `${r.name} · Worktree`])], "Workspace");
+  const cwd = textInput("~", "~/Projects"); cwd.maxLength = 4096;
+  const cwdField = field(L("工作目录（当前设备）", "Working directory (this device)"), cwd);
+  let agent = ["claude", "codex", "kimi"].includes(meta.revision.provider) ? meta.revision.provider : "claude";
   const agents = el("div", undefined, "agent-seg"); agents.setAttribute("role", "group"); agents.setAttribute("aria-label", "Agent");
-  for (const [value, label] of [["claude", "Claude Code"], ["codex", "Codex"]]) {
+  for (const [value, label] of [["claude", "Claude Code"], ["codex", "Codex"], ["kimi", "Kimi Code"]]) {
     const b = el("button", label, "agent-opt"); b.type = "button"; b.dataset.agent = value;
     b.classList.toggle("selected", value === agent); b.setAttribute("aria-pressed", String(value === agent));
     b.onclick = () => {
@@ -346,21 +346,24 @@ function showContinue(meta) {
   }
   const title = textInput(`${L("接续", "Continue")}: ${contextCopy(meta).title}`.slice(0, 200)); title.maxLength = 200; title.required = true;
   const branch = textInput(match?.default_branch || "main");
-  repo.onchange = () => { branch.value = repos.find(r => r.id === Number(repo.value))?.default_branch || "main"; };
+  const branchField = field(L("起始分支 · 新 Worktree", "Base branch · new Worktree"), branch);
+  branchField.hidden = true;
+  repo.onchange = () => {
+    cwdField.hidden = !!repo.value;
+    branchField.hidden = !repo.value || !!w;
+    branch.required = !!repo.value && !w;
+    branch.value = repos.find(r => r.id === Number(repo.value))?.default_branch || "main";
+  };
   const prompt = el("textarea"); prompt.rows = 2; prompt.maxLength = 8000; prompt.placeholder = L("接下来要做什么？留空则按 Context 继续。", "What should the agent do next? Leave blank to continue from the context.");
   const model = textInput("", L("默认模型", "Default model")); model.maxLength = 100;
   const form = el("form", undefined, "jx-form"); form.id = "jx-task-form";
   const fields = el("fieldset"); form.append(fields);
   const agentField = el("div", undefined, "jx-field"); agentField.append(el("span", "Agent"), agents);
-  fields.append(agentField, field(L("本机仓库", "Local repository"), repo), field(L("任务标题", "Task title"), title), field(L("补充要求（可选）", "Instructions (optional)"), prompt));
+  fields.append(agentField, field(L("工作位置", "Workspace"), repo), cwdField, branchField, field(L("任务标题", "Task title"), title), field(L("补充要求（可选）", "Instructions (optional)"), prompt));
   const options = el("details", undefined, "jx-section"); options.append(el("summary", L("更多设置", "More options")));
   options.append(field(L("模型", "Model"), model));
-  if (!w) {
-    branch.required = true;
-    fields.append(field(L("起始分支", "Base branch"), branch), note(L("来源代码版本未完整记录，将从本机所选分支继续。", "The source code version was not fully recorded. Continue from the selected local branch.")));
-  }
   fields.append(options);
-  if (w?.dirty) fields.append(el("p", L("将从已提交代码继续。来源的未提交修改未包含在 Context 中。", "Continue from committed code. Uncommitted source changes are not included."), "jx-warning"));
+  if (w?.dirty) fields.append(el("p", L("来源的未提交修改未包含在 Context 中。", "Uncommitted source changes are not included."), "jx-warning"));
   if (meta.revision.status !== "ready") fields.append(note(L("部分历史内容或关联无法确认，Agent 会先检查记录与当前代码。", "Some history or relationships could not be confirmed. The agent will check the records and current code first.")));
   const submit = el("button", L("创建任务", "Create task"), "primary"); submit.type = "submit"; submit.id = "jx-task-submit"; submit.setAttribute("form", form.id);
   $("jx-task-submit-slot").append(submit);
@@ -377,7 +380,9 @@ function showContinue(meta) {
     setBusy(true);
     let result;
     try {
+      if (!repo.value) await requireDirectoryTasks();
       result = await send("/continue", { context_id: meta.id, revision_id: meta.revision.id, repo_id: Number(repo.value), agent,
+        cwd: repo.value ? undefined : cwd.value.trim() || "~",
         title: title.value.trim(), base_branch: branch.value, prompt: prompt.value, agent_model: model.value, acknowledge: true });
     } catch (error) { setBusy(false); showError(error); return; }
     setBusy(false); closeJunction();
