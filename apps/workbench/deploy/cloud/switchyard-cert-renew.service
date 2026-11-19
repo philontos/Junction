@@ -1,0 +1,6 @@
+[Unit]
+Description=Renew Switchyard IP certificate
+After=network-online.target switchyard-nginx.service
+[Service]
+Type=oneshot
+ExecStart=/opt/switchyard-certbot/bin/certbot renew --quiet --config-dir /etc/switchyard-cloud/letsencrypt --work-dir /srv/switchyard-cloud/certbot --logs-dir /var/log/switchyard-certbot --deploy-hook "systemctl reload switchyard-nginx.service"

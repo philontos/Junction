@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#1a1613">
+  <title>Switchyard · 我的设备</title>
+  <script>try{var _t=localStorage.getItem("theme");document.documentElement.dataset.theme=_t==="light"?"light":"dark";if(_t==="light"){var _m=document.querySelector('meta[name="theme-color"]');if(_m)_m.content="#f5f0e8";}}catch(e){document.documentElement.dataset.theme="dark";}</script>
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/cloud/style.css">
+  <script src="/theme.js"></script>
+  <script type="module" src="/cloud/app.js"></script>
+</head>
+<body class="cloud-portal">
+  <header>
+    <a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true"><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true"></a>
+    <div class="header-actions"><div id="account" hidden><span id="username"></span><button id="logout" class="sec">退出</button></div><button id="theme-toggle" class="sec" type="button" aria-label="切换主题"></button></div>
+  </header>
+  <main>
+    <section id="auth" class="auth" hidden>
+      <h1 id="auth-title">登录 Switchyard</h1>
+      <p id="auth-description">连接你的设备，继续工作。</p>
+      <form id="auth-form">
+        <label id="user-label">账号<input id="user" name="username" autocomplete="username" required maxlength="64" placeholder="你的账号"></label>
+        <label>密码<input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256" placeholder="输入密码"></label>
+        <button id="submit" class="primary" type="submit">登录</button>
+      </form>
+      <p id="auth-switch" class="auth-switch" hidden><span id="auth-switch-label">还没有账号？</span><button id="auth-toggle" class="text" type="button">注册账号</button></p>
+    </section>
+    <section id="workspace" hidden>
+      <div class="heading"><div><h1>我的设备</h1><p>选择设备，进入工作台。</p></div><button id="install" class="primary">＋ 安装本机节点</button></div>
+      <div id="devices" class="devices"></div>
+      <section id="setup" class="setup" hidden>
+        <div class="setup-heading"><h2 id="setup-title">连接这台电脑</h2><button id="close-setup" class="text" aria-label="关闭安装面板">关闭</button></div>
+        <p id="setup-help">在本机终端执行一次。自动检测并安装缺失的 Node.js、Git、tmux 等工具，每一步验证通过后继续。</p>
+        <div class="command"><code id="command"></code><button id="copy">复制命令</button></div>
+        <div class="setup-status" role="status"><span class="dot waiting"></span><span id="setup-status">等待执行安装命令</span></div>
+        <progress id="setup-progress" max="6" value="0" aria-label="安装进度" hidden></progress>
+        <p id="setup-detail" class="note">请在 10 分钟内开始；开始后可在 24 小时内继续。</p>
+        <div class="setup-actions"><button id="keep-binding" class="sec" type="button" hidden>保留原账号</button><button id="switch-binding" class="primary" type="button" hidden>切换到当前账号</button><button id="retry-install" class="sec" type="button" hidden>重新生成命令</button><a id="setup-enter" class="enter" hidden>进入工作台 →</a></div>
+        <p id="setup-resume" class="note">中断后再次执行即可继续。系统授权在本机确认；Agent 安装和登录由你选择。</p>
+      </section>
+      <p class="footnote">任务在所选设备执行，共享 Context 保存在 Junction。</p>
+    </section>
+    <p id="error" class="error" role="alert" hidden></p>
+    <p id="cloud-loading" class="loading" role="status">正在连接工作台…</p>
+  </main>
+</body>
+</html>

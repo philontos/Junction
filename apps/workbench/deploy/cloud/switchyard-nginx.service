@@ -1,0 +1,14 @@
+[Unit]
+Description=Switchyard HTTPS entry
+After=network-online.target switchyard-cloud.service
+[Service]
+Type=forking
+PIDFile=/run/switchyard-nginx.pid
+ExecStartPre=/usr/sbin/nginx -t -c /etc/switchyard-cloud/nginx.conf
+ExecStart=/usr/sbin/nginx -c /etc/switchyard-cloud/nginx.conf
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/bin/kill -QUIT $MAINPID
+Restart=on-failure
+PrivateTmp=yes
+[Install]
+WantedBy=multi-user.target

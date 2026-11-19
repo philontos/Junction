@@ -1,0 +1,462 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import Database from "better-sqlite3";
+import { initSchema } from "../core/schema.ts";
+import { writeTaskManifestFromDb } from "./taskmanifest.ts";
+import {
+  createLocalTask,
+  createRepoTask,
+  stopTask,
+  type LocalTaskEnv,
+  type RepoTaskEnv,
+  type RepoRef,
+} from "./createtask.ts";
+
+const opts = { didMigrate: false, legacyDir: "/legacy", dataDir: "/data" };
+
+// bare in-memory db + a seeded running task, for the stopTask tests
+function seedDb() {
+  const db = new Database(":memory:");
+  initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
+  db.prepare("INSERT INTO repos (id,host_id,name,git_url,status) VALUES (1,1,'repo','git@example/repo','ready')").run();
+  return db;
+}
+function insertTask(db: Database.Database, title: string) {
+  const info = db
+    .prepare("INSERT INTO tasks (repo_id, base_branch, work_branch, title, worktree_path, session, status) VALUES (1,'m',?,?, '/wt/x', ?, 'running')")
+    .run(`feat/x-${title}`, title, `tdsp-1-r-${title}`);
+  return db.prepare("SELECT * FROM tasks WHERE id=?").get(Number(info.lastInsertRowid)) as { id: number; session: string };
+}
+
+function makeEnv(overrides: Partial<LocalTaskEnv> = {}) {
+  const db = new Database(":memory:");
+  initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-ct-"));
+  const started: { session: string; cwd: string }[] = [];
+  const env: LocalTaskEnv = {
+    db,
+    home: "/Users/phil",
+    ns: "abcd1234",
+    dataDir: dir,
+    cwdExists: async () => true,
+    startShell: async (session, cwd) => {
+      started.push({ session, cwd });
+    },
+    ...overrides,
+  };
+  return { env, started, dir, db };
+}
+
+test("createLocalTask inserts a running local task, starts a shell, and writes its manifest", async () => {
+  const { env, started, dir, db } = makeEnv();
+  try {
+    const r = await createLocalTask(env, { cwd: "~/work", title: "debug B" });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    const row = db.prepare("SELECT * FROM tasks WHERE id=?").get(r.id) as any;
+    assert.equal(row.kind, "local");
+    assert.equal(row.status, "running");
+    assert.equal(row.cwd, "/Users/phil/work", "~ expands against the machine's home");
+    assert.equal(row.title, "debug B");
+
+    assert.equal(started.length, 1, "the shell session is started exactly once");
+    assert.equal(started[0].cwd, "/Users/phil/work");
+    assert.match(started[0].session, /^tdsp-abcd1234-\d+-local-/, "session carries this node's ns");
+
+    // the manifest IS the edge-resident truth — written on the machine it runs on
+    const m = JSON.parse(fs.readFileSync(path.join(dir, "tasks", String(r.id), "task.json"), "utf8"));
+    assert.equal(m.task.title, "debug B");
+    assert.equal(m.task.session, started[0].session);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createLocalTask defaults a blank title to 'Local task #<id>'", async () => {
+  const { env, dir, db } = makeEnv();
+  try {
+    const r = await createLocalTask(env, { cwd: "/tmp", title: "" });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    const title = (db.prepare("SELECT title FROM tasks WHERE id=?").get(r.id) as { title: string }).title;
+    assert.equal(title, `Local task #${r.id}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createLocalTask rejects a missing cwd and leaves no row behind", async () => {
+  const { env, started, dir, db } = makeEnv({ cwdExists: async () => false });
+  try {
+    const r = await createLocalTask(env, { cwd: "/nope" });
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error, "cwdMissing");
+    assert.equal((db.prepare("SELECT count(*) c FROM tasks").get() as { c: number }).c, 0);
+    assert.equal(started.length, 0, "no shell is started for a rejected task");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createLocalTask marks the task errored (and manifests it) when the shell fails to start", async () => {
+  const { env, dir, db } = makeEnv({
+    startShell: async () => {
+      throw new Error("tmux: boom");
+    },
+  });
+  try {
+    const r = await createLocalTask(env, { cwd: "/tmp", title: "willfail" });
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error, "startFailed");
+    const row = db.prepare("SELECT status, error FROM tasks WHERE title='willfail'").get() as {
+      status: string;
+      error: string;
+    };
+    assert.equal(row.status, "error");
+    assert.match(row.error, /boom/);
+    // a failed task still gets a manifest so the node owns the record of the failure
+    const id = (db.prepare("SELECT id FROM tasks WHERE title='willfail'").get() as { id: number }).id;
+    assert.ok(fs.existsSync(path.join(dir, "tasks", String(id), "task.json")));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------- stopTask ----------
+// A node stops one of its own tasks: kill the tmux session, mark it cleaned, and
+// re-write the manifest so the durable record reflects the new state.
+test("stopTask kills the session, marks the task cleaned, and re-manifests it", async () => {
+  const db = seedDb();
+  const task = insertTask(db, "running-one");
+  const killed: string[] = [];
+  const manifested: number[] = [];
+  const r = await stopTask(
+    { db, killSession: async (s) => { killed.push(s); }, writeManifest: (id) => { manifested.push(id); } },
+    task.id,
+  );
+  assert.equal(r.ok, true);
+  assert.deepEqual(killed, [task.session], "the task's own session is killed");
+  assert.deepEqual(manifested, [task.id]);
+  assert.equal((db.prepare("SELECT status FROM tasks WHERE id=?").get(task.id) as { status: string }).status, "cleaned");
+});
+
+test("stopTask reports notFound for an unknown id and does nothing", async () => {
+  const db = seedDb();
+  let killed = 0;
+  const r = await stopTask({ db, killSession: async () => { killed++; }, writeManifest: () => {} }, 999);
+  assert.equal(r.ok, false);
+  if (r.ok) return;
+  assert.equal(r.error, "notFound");
+  assert.equal(killed, 0);
+});
+
+// ---------- createRepoTask ----------
+// The repo-task orchestration sinks to the owner: worktree+hooks+session
+// are prepared locally and the manifest is the record. The mechanical steps are
+// grouped behind setupWorktree (the prod env fills in the real git/putDir/hooks);
+// the core owns ordering, naming, opening-message, cleanup and manifest.
+const REPO: RepoRef = { id: 4, name: "switchyard", mirror_path: "/data/mirrors/4-switchyard.git" };
+const REFERENCE_REPO = { id: 8, name: "backend", mirror_path: "/data/mirrors/8-backend.git" };
+
+function makeRepoEnv(overrides: Partial<RepoTaskEnv> = {}) {
+  const db = new Database(":memory:");
+  initSchema(db, opts);
+  db.prepare("INSERT INTO hosts (id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
+  db.prepare(
+    "INSERT INTO repos (id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (4,1,'switchyard','git@example/switchyard','main',?,'ready')",
+  ).run(REPO.mirror_path);
+  db.prepare(
+    "INSERT INTO repos (id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (8,1,'backend','git@example/backend','develop',?,'ready')",
+  ).run(REFERENCE_REPO.mirror_path);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tdsp-cr-"));
+  const calls: string[] = [];
+  let setupArgs: any = null;
+  let startArgs: any = null;
+  const env: RepoTaskEnv = {
+    db,
+    ns: "abcd1234",
+    writeManifest: (id) => writeTaskManifestFromDb(dir, db, id),
+    setupWorktree: async (a) => {
+      calls.push("setup");
+      setupArgs = a;
+      return "a".repeat(40);
+    },
+    setupReference: async ({ mirror, worktree, requestedRef }) => {
+      calls.push(`ref:${mirror}:${worktree}:${requestedRef}`);
+      return "b".repeat(40);
+    },
+    startSession: async (session, worktree, opening, sessionOpts) => {
+      calls.push(`start:${opening ?? "∅"}`);
+      startArgs = { session, worktree, opening, opts: sessionOpts };
+    },
+    removeWorktree: async () => {
+      calls.push("remove");
+    },
+    removeReference: async (mirror, worktree) => {
+      calls.push(`remove-ref:${mirror}:${worktree}`);
+    },
+    removeReferenceRoots: async (taskId, taskWorktree) => {
+      calls.push(`remove-ref-roots:${taskId}:${taskWorktree}`);
+    },
+    ...overrides,
+  };
+  return { env, dir, db, calls, getSetup: () => setupArgs, getStart: () => startArgs };
+}
+
+test("createRepoTask inserts a running task, prepares the worktree, starts the session, writes manifest", async () => {
+  const { env, dir, db, calls, getSetup } = makeRepoEnv();
+  try {
+    const r = await createRepoTask(env, REPO, { baseBranch: "master", title: "fix login", prompt: "go" });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    const row = db.prepare("SELECT * FROM tasks WHERE id=?").get(r.id) as any;
+    assert.equal(row.kind, "repo");
+    assert.equal(row.status, "running");
+    assert.equal(row.repo_id, 4);
+    assert.equal(row.base_branch, "master");
+    assert.equal(row.base_commit, "a".repeat(40));
+    assert.equal(row.work_branch, `feat/${r.id}-fix-login`);
+    assert.equal(r.workBranch, `feat/${r.id}-fix-login`);
+    assert.equal(row.session, `tdsp-abcd1234-${r.id}-switchyard-fix-login`);
+
+    assert.deepEqual(calls, ["setup", "start:go"]);
+    const s = getSetup();
+    assert.equal(s.mirror, REPO.mirror_path);
+    assert.equal(s.baseBranch, "master");
+    assert.equal(s.workBranch, `feat/${r.id}-fix-login`);
+    assert.equal(s.worktree, path.resolve(`/data/worktrees/4-${r.id}`));
+
+    const m = JSON.parse(fs.readFileSync(path.join(dir, "tasks", String(r.id), "task.json"), "utf8"));
+    assert.equal(m.task.work_branch, `feat/${r.id}-fix-login`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createRepoTask materializes pinned task-local references and installs the manifest contract", async () => {
+  const { env, dir, db, calls, getStart } = makeRepoEnv();
+  try {
+    const r = await createRepoTask(env, REPO, {
+      baseBranch: "main",
+      title: "cross repo change",
+      prompt: "trace the API contract",
+      agent: "codex",
+      references: [{ repo_id: REFERENCE_REPO.id, ref: "develop", alias: "api" }],
+    });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+
+    const taskPath = path.resolve(`/data/worktrees/4-${r.id}`);
+    const refPath = path.join(taskPath, ".tdsp", "refs", "api");
+    const reference = db.prepare("SELECT * FROM task_references WHERE task_id=?").get(r.id) as any;
+    assert.equal(reference.repo_id, REFERENCE_REPO.id);
+    assert.equal(reference.requested_ref, "develop");
+    assert.equal(reference.resolved_commit, "b".repeat(40));
+    assert.equal(reference.worktree_path, refPath);
+    assert.ok(calls.includes(`ref:${REFERENCE_REPO.mirror_path}:${refPath}:develop`));
+
+    const started = getStart();
+    assert.equal(started.opts.addDirs, undefined, "task-local refs need no additional sandbox root");
+    assert.match(started.opts.workspaceInstructions, /\.tdsp\/refs\.json/);
+    assert.equal(started.opts.kimiAgentFile, path.join(taskPath, ".tdsp", "kimi-agent.md"));
+    assert.equal(started.opening, "trace the API contract");
+    assert.equal(
+      (db.prepare("SELECT prompt FROM tasks WHERE id=?").get(r.id) as { prompt: string }).prompt,
+      "trace the API contract",
+      "the stored user prompt is not replaced by launch-only workspace context",
+    );
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "tasks", String(r.id), "task.json"), "utf8"));
+    assert.equal(manifest.references[0].alias, "api");
+    assert.equal(manifest.references[0].resolved_commit, "b".repeat(40));
+    const workspace = JSON.parse(fs.readFileSync(path.join(dir, "tasks", String(r.id), "workspace.json"), "utf8"));
+    assert.equal(workspace.primary.mode, "editable");
+    assert.equal(workspace.references[0].path ?? workspace.references[0].worktree_path, refPath);
+    assert.equal(workspace.references[0].mode, "reference");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createRepoTask rejects a reference outside the owning node before creating a task", async () => {
+  const { env, dir, db, calls } = makeRepoEnv();
+  try {
+    const r = await createRepoTask(env, REPO, {
+      baseBranch: "main",
+      title: "bad ref",
+      references: [{ repo_id: 999, ref: "main", alias: "missing" }],
+    });
+    assert.deepEqual(r, {
+      ok: false,
+      error: "invalidReference",
+      message: "reference repository 999 was not found on this node",
+    });
+    assert.equal((db.prepare("SELECT count(*) AS c FROM tasks").get() as { c: number }).c, 0);
+    assert.deepEqual(calls, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createRepoTask rolls back a partially-created reference worktree", async () => {
+  let attemptedPath = "";
+  const { env, dir, db, calls } = makeRepoEnv({
+    setupReference: async ({ worktree }) => {
+      attemptedPath = worktree;
+      calls.push("ref-failed");
+      throw new Error("reference checkout failed");
+    },
+  });
+  try {
+    const r = await createRepoTask(env, REPO, {
+      baseBranch: "main",
+      title: "broken ref",
+      references: [{ repo_id: REFERENCE_REPO.id, ref: "develop", alias: "api" }],
+    });
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error, "dispatchFailed");
+    assert.deepEqual(calls, [
+      "setup",
+      "ref-failed",
+      `remove-ref:${REFERENCE_REPO.mirror_path}:${attemptedPath}`,
+      `remove-ref-roots:${r.id}:${path.resolve(`/data/worktrees/4-${r.id}`)}`,
+      "remove",
+    ]);
+    assert.equal((db.prepare("SELECT count(*) AS c FROM task_references").get() as { c: number }).c, 0);
+    assert.equal((db.prepare("SELECT status FROM tasks WHERE id=?").get(r.id) as { status: string }).status, "error");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createRepoTask without a prompt starts the session with a null opening", async () => {
+  const { env, dir, calls } = makeRepoEnv();
+  try {
+    await createRepoTask(env, REPO, { baseBranch: "m", title: "t" });
+    assert.ok(calls.includes("start:∅"), "null opening when there's nothing to say");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createRepoTask cleans up the worktree and marks error when setup fails", async () => {
+  const { env, dir, db, calls } = makeRepoEnv({
+    setupWorktree: async () => {
+      throw new Error("worktree add: boom");
+    },
+  });
+  try {
+    const r = await createRepoTask(env, REPO, { baseBranch: "m", title: "willfail" });
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error, "dispatchFailed");
+    assert.ok(calls.includes("remove"), "a partial dispatch must remove the worktree");
+    const row = db.prepare("SELECT status, error FROM tasks WHERE title='willfail'").get() as { status: string; error: string };
+    assert.equal(row.status, "error");
+    assert.match(row.error, /boom/);
+    const id = (db.prepare("SELECT id FROM tasks WHERE title='willfail'").get() as { id: number }).id;
+    assert.ok(fs.existsSync(path.join(dir, "tasks", String(id), "task.json")), "failed task is still manifested");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createRepoTask defaults agent to claude and agent_model to null", async () => {
+  const { env, dir, db } = makeRepoEnv();
+  try {
+    const r = await createRepoTask(env, REPO, { baseBranch: "m", title: "t", prompt: "go" });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    const row = db.prepare("SELECT agent, agent_model FROM tasks WHERE id=?").get(r.id) as any;
+    assert.equal(row.agent, "claude");
+    assert.equal(row.agent_model, null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// codex: the agent + its model are recorded (so resume can rebuild the same
+// launch) and threaded into setup + session.
+test("createRepoTask (codex) records agent+model and threads agent into setup/session", async () => {
+  let startOpts: any = null;
+  let setupArgs: any = null;
+  const { env, dir, db, calls } = makeRepoEnv({
+    setupWorktree: async (a) => { setupArgs = a; calls.push("setup"); return "a".repeat(40); },
+    startSession: async (_s, _w, opening, o) => { startOpts = o; calls.push(`start:${opening ?? "∅"}`); },
+  });
+  try {
+    const r = await createRepoTask(env, REPO, {
+      baseBranch: "m", title: "t", prompt: "build",
+      agent: "codex", model: "gpt-5.4",
+    });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    const row = db.prepare("SELECT agent, agent_model FROM tasks WHERE id=?").get(r.id) as any;
+    assert.equal(row.agent, "codex");
+    assert.equal(row.agent_model, "gpt-5.4");
+    assert.equal(setupArgs.agent, "codex", "setup is told which agent");
+    assert.ok(calls.includes("start:build"));
+    assert.equal(startOpts.agent, "codex", "session launches codex");
+    assert.equal(startOpts.model, "gpt-5.4");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createRepoTask (kimi) records agent+model and threads agent into setup/session", async () => {
+  let startOpts: any = null;
+  let setupArgs: any = null;
+  const { env, dir, db, calls } = makeRepoEnv({
+    setupWorktree: async (a) => { setupArgs = a; calls.push("setup"); return "a".repeat(40); },
+    startSession: async (_s, _w, opening, o) => { startOpts = o; calls.push(`start:${opening ?? "∅"}`); },
+  });
+  try {
+    const r = await createRepoTask(env, REPO, {
+      baseBranch: "m", title: "t", prompt: "build",
+      agent: "kimi", model: "kimi-code/kimi-for-coding",
+    });
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    const row = db.prepare("SELECT agent, agent_model FROM tasks WHERE id=?").get(r.id) as any;
+    assert.equal(row.agent, "kimi");
+    assert.equal(row.agent_model, "kimi-code/kimi-for-coding");
+    assert.equal(setupArgs.agent, "kimi", "setup is told which agent");
+    assert.ok(calls.includes("start:build"));
+    assert.equal(startOpts.agent, "kimi", "session launches kimi");
+    assert.equal(startOpts.model, "kimi-code/kimi-for-coding");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("createRepoTask cleans up when the session fails to start after the worktree was made", async () => {
+  const { env, dir, db, calls } = makeRepoEnv({
+    startSession: async () => {
+      throw new Error("tmux: no server");
+    },
+  });
+  try {
+    const r = await createRepoTask(env, REPO, { baseBranch: "m", title: "t" });
+    assert.equal(r.ok, false);
+    if (r.ok || r.error === "invalidReference") return;
+    assert.deepEqual(calls, [
+      "setup",
+      `remove-ref-roots:${r.id}:${path.resolve(`/data/worktrees/4-${r.id}`)}`,
+      "remove",
+    ], "worktree metadata and checkout are torn down");
+    const row = db.prepare("SELECT status FROM tasks WHERE title='t'").get() as { status: string };
+    assert.equal(row.status, "error");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
