@@ -8,6 +8,7 @@ from junction.models import PARSER_VERSION
 from .claude import parse_claude
 from .codex import parse_codex
 from .common import ParseState
+from .pi import parse_pi
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ ADAPTERS = {
     adapter.id: adapter for adapter in (
         Adapter("claude", "1", "claude-code.jsonl", parse_claude),
         Adapter("codex", "1", "codex-rollout.jsonl", parse_codex),
+        Adapter("pi", "1", "pi-session.jsonl", parse_pi),
     )
 }
 

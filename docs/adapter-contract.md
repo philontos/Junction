@@ -1,6 +1,6 @@
 # 原件、阅读投影与 Agent 适配器
 
-2026-11-17。实现对应 v0.2；目前正式安装的适配器只有 Claude Code 和 Codex。
+2026-11-19。目前已安装 Claude Code、Codex 和 Pi 适配器；统一协议仍为 junction.context/1。
 
 ## 长期保持的边界
 
@@ -24,14 +24,14 @@
 
 ## 用 Kimi / Pi 核对边界
 
-这里只审阅原生格式，不宣称已经完成适配器或真实任务交接。固定来源如下：
+Pi 已实现 `pi-session.jsonl` 适配器：保留 system 配置、消息、工具调用／结果、图片引用、模型与 usage、父关系及压缩／分支／context_edit 标记；未知记录可沿索引回查。Pi CLI 1.5.2 的实际 JSONL 已用本地模拟模型链路验证，真实模型任务接续仍需实际使用检验。Kimi 仍只有格式审阅。固定来源如下：
 
 | 来源 | 原生特点 | 对 Junction 的要求 |
 | --- | --- | --- |
-| [Pi 会话格式，1f6f319…](https://github.com/earendil-works/pi/blob/1f6f319bb28992a40b99c147fffb23b65a23129d/packages/coding-agent/docs/session-format.md) | id / parentId 构成树；model_change、usage、compaction、context_edit、custom 等不都是模型消息 | 保留原生记录与父关系；不能把文件顺序当作唯一活跃分支，也不能把 custom 状态伪装成用户消息。格式中的 model provider 与 Agent 来源分别处理 |
+| [Pi 会话格式，653f332…](https://github.com/earendil-works/pi/blob/653f332b6fe22e2e927dd3d553d20234a3de27f0/packages/coding-agent/docs/session-format.md) | id / parentId 构成树；model_change、usage、compaction、context_edit、custom 等不都是模型消息 | 保留原生记录与父关系；不能把文件顺序当作唯一活跃分支，也不能把 custom 状态伪装成用户消息。格式中的 model provider 与 Agent 来源分别处理 |
 | [Kimi Context，9ab1286…](https://github.com/MoonshotAI/kimi-cli/blob/9ab1286b8fe4e6bcd116949a27ce5e0ac3389c82/src/kimi_cli/soul/context.py) | 普通消息之外有 _system_prompt、_checkpoint、_usage；恢复和回退由 Context 自身解释，回退会轮转文件 | 特殊记录保留为元事件；仅上传当前文件不能推断所有旧历史仍存在。以后若支持多个文件，应显式携带来源清单，不能偷偷读取旁边的日志或假装已经合并 |
 
-这些差异支持“原生记录保真 + 有限统一语义”的取舍。现在不实现通用执行引擎、自动分支恢复或庞大事件分类表；真实接入时再提升对应适配器的识别范围。
+这些差异支持“原生记录保真 + 有限统一语义”的取舍。现在不实现通用执行引擎、自动分支恢复或庞大事件分类表；按实际格式变化提升对应适配器的识别范围。
 
 ## 演进约束
 

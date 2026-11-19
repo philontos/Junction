@@ -1,6 +1,6 @@
 # Junction
 
-保存、查询和共享 Agent 的历史上下文。v0.3 提供 HTTP 服务、CLI、设备凭证，以及 Claude Code / Codex 通用的交接 skill。
+保存、查询和共享 Agent 的历史上下文。提供 HTTP 服务、CLI、设备凭证，以及 Claude Code / Codex / Pi 的统一 Context 解析与交接。
 
 导入已有 JSONL，同时保存原始字节、标准化记录和自动整理的标题、描述、缺失标记；选择一个固定版本分享，接收方读取历史后，在自己的工作环境继续任务。Junction 不运行 Agent，也不管理仓库、worktree 或当前执行权限。
 
@@ -32,6 +32,7 @@ export JUNCTION_TOKEN_FILE="$PWD/.local/local.token"
 junction whoami
 junction import tests/fixtures/claude-handoff.jsonl --provider claude --shared
 junction import tests/fixtures/codex-handoff.jsonl --provider codex --shared
+junction import tests/fixtures/pi-handoff.jsonl --provider pi --shared
 junction list --shared
 ```
 
@@ -73,7 +74,7 @@ junction export CONTEXT --revision REVISION --output .local/received-context.jso
 
 v0.2 增加原生记录索引：保留每行的字节位置、长度、SHA-256 及其与消息的关系，未知记录和坏行也可回查。模型、用量、结束原因、生命周期等已识别信息进入标准化标记；工具参数同时保留解析值和原字符串。未解释字段、内嵌附件与不透明内容留在原件，不声称统一格式覆盖所有原生语义。
 
-`junction providers` 列出服务实际安装的适配器；目前为 `claude` / `codex`。具有原件权限时，可用 `junction record CONTEXT --revision REVISION --record r1` 分块读取原始行（base64，按字节偏移）。普通共享的 `records` 只包含索引，不自动开放原件。
+`junction providers` 列出服务实际安装的适配器；目前为 `claude` / `codex` / `pi`。具有原件权限时，可用 `junction record CONTEXT --revision REVISION --record r1` 分块读取原始行（base64，按字节偏移）。普通共享的 `records` 只包含索引，不自动开放原件。
 
 旧版本不自动重算或重新分享。同一来源再次导入时，新解析器生成新版本并复用原件。升级前备份数据；v0.1 CLI 的严格读取器不支持新增字段，请与服务一起升级。当前 CLI 会保留同一协议主版本的新增字段；未知主版本明确拒绝。
 
@@ -95,7 +96,7 @@ junction serve --data-dir .local/backup-001 --port 8768
 .venv/bin/ruff check src tests
 ```
 
-测试覆盖两种解析器、重复展示记录、工具配对、坏行与未来字段、共享隔离与撤销、版本分页、长内容导出、并发导入、重启及备份恢复。尚需用户使用实际代码任务完成 Claude Code ↔ Codex 双向交接；合成数据的服务验收不等同于 Agent 成功接续。
+测试覆盖三种解析器、重复展示记录、工具配对、坏行与未来字段、共享隔离与撤销、版本分页、长内容导出、并发导入、重启及备份恢复。尚需用户使用实际代码任务完成 Claude Code ↔ Codex 双向交接；合成数据的服务验收不等同于 Agent 成功接续。
 
 - [功能清单](docs/product/context-collaboration.md)
 - [本地联调与接入说明](docs/local-handoff.md)
