@@ -4,6 +4,7 @@ import { duringAutoFollow } from "./mobile.js";
 
 let switcher, panel, list, advanced, hostList, hooks;
 let devices = [], loading = false, failure = "", expired = false, pending;
+let deviceSignature = "";
 let storageKey = "", saved, canRemember = false, restoreCancelled = false, hostSignature = "";
 const text = key => t("workspace." + key);
 const localHost = () => Object.values(state.hostsById).find(h => h.kind === "local");
@@ -36,16 +37,23 @@ function chooseHost(id) {
 }
 
 function renderDevices() {
+  // Heartbeats and other server metadata must not replace an unchanged menu.
+  const view = devices.length ? "devices" : loading ? "loading" : failure ? "error" : "empty";
+  const signature = JSON.stringify([I18N.lang, switcher.dataset.deviceId, view,
+    view === "error" ? [failure, expired] : devices.map(d => [d.id, d.name, !!d.online])]);
+  if (signature === deviceSignature) return;
+  deviceSignature = signature;
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset.deviceId : null;
   list.replaceChildren();
-  list.setAttribute("aria-busy", String(loading));
-  if (loading) {
+  list.setAttribute("aria-busy", String(view === "loading"));
+  if (view === "loading") {
     const status = element("div", "cloud-device-message");
     status.setAttribute("role", "status");
     status.append(element("span", "spinner"), element("span", "", text("loading")));
     list.append(status);
     return;
   }
-  if (failure) {
+  if (view === "error") {
     const status = element("div", "cloud-device-message", failure);
     status.setAttribute("role", "status");
     const retry = element(expired ? "a" : "button", "cloud-menu-action", text(expired ? "expired" : "retry"));
@@ -76,20 +84,29 @@ function renderDevices() {
     };
     list.append(row);
   }
+  if (focused) {
+    const replacement = [...list.children].find(row => row.dataset.deviceId === focused && row.hasAttribute("href"));
+    (replacement || switcher.querySelector("summary")).focus({ preventScroll: true });
+  }
+  if (devices.length && switcher.open && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    list.animate([{ opacity: .5 }, { opacity: 1 }], { duration: 160, easing: "ease-out" });
+  }
 }
 
 async function refreshDevices(showLoading = false) {
   if (pending) return pending;
-  if (showLoading) { loading = true; renderDevices(); }
+  if (showLoading && !devices.length) { loading = true; renderDevices(); }
   pending = (async () => {
     try {
       const response = await fetch("/hub/devices", { signal: AbortSignal.timeout(10000) });
-      if (!response.ok) { expired = response.status === 401; throw new Error("devices unavailable"); }
+      if (!response.ok) { expired = response.status === 401 || response.status === 403; throw new Error("devices unavailable"); }
       const result = await response.json();
       if (!Array.isArray(result.items)) throw new Error("invalid devices");
       devices = result.items; failure = ""; expired = false;
     } catch {
-      devices = []; failure = text(expired ? "expired" : "failed");
+      // Keep usable navigation on transient failures, but clear it when access expires.
+      if (expired) devices = [];
+      failure = text(expired ? "expired" : "failed");
     } finally {
       loading = false; pending = null;
       renderDevices(); repaintCurrent();
