@@ -3,9 +3,10 @@ import { requireDirectoryTasks } from "../core/directory-tasks.js";
 import { state } from "../core/state.js";
 import { toast } from "../core/feedback.js";
 import { readShareStream } from "./junction-stream.js";
+import { createContextReader } from "./junction-reader.js";
 
 const L = (zh, en) => I18N.lang === "zh" ? zh : en;
-let hooks, status, listCursor, messageCursor, generation = 0, listRequest = 0, activeShare = null, shareDismissTimer;
+let hooks, status, listCursor, generation = 0, listRequest = 0, activeShare = null, shareDismissTimer;
 let selectedContext = null, launchingContext = false, connectingJunction = false;
 const call = (url, options = {}) => api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -56,6 +57,7 @@ function detailRoot(title = L("新建任务", "New task")) {
   $("junction-modal").setAttribute("aria-hidden", "true");
   clearError("jx-task-error");
   $("jx-task-submit-slot").replaceChildren();
+  $("jx-task-navigation").replaceChildren(); $("jx-task-navigation").hidden = true;
   const d = $("jx-detail"); d.replaceChildren(); return d;
 }
 export function closeJunction() { if (!closeContextDialog(false)) return; $("junction-modal").hidden = true; generation++; }
@@ -225,35 +227,36 @@ function openDetail(meta) {
   d.append(source);
   d.append(el("div", undefined, "jx-continuation"));
   showContinue(meta);
-  const history = el("details", undefined, "jx-section");
-  history.append(el("summary", `${L("查看历史记录", "View history")} · ${r.message_count}`));
-  const msgs = el("div"); msgs.id = "jx-messages"; msgs.append(note(L("读取中…", "Loading…"))); history.append(msgs);
-  const more = button(L("继续读取", "Load more"), () => loadMessages(meta, true)); more.id = "jx-message-more"; more.hidden = true; history.append(more);
-  const contextInfo = el("details", undefined, "jx-section jx-context-info");
-  contextInfo.append(el("summary", L("查看 Context 详情", "View context details")), versionList(meta), history); d.append(contextInfo);
-  const details = el("details", undefined, "jx-section");
-  details.append(el("summary", L("详细信息与导出", "Details and export")), el("code", `${cid} / ${rid}`, "jx-ids"));
-  details.append(note(`${new Date(r.created_at).toLocaleString()} · ${r.turn_count} ${L("轮对话", "turns")}`));
+  $("jx-task-modal").dataset.view = "context";
+  const reader = createContextReader(meta, { request: path => call(base(meta) + path), valid: () => epoch === generation });
+  reader.element.hidden = true; d.append(reader.element);
+  const navigation = $("jx-task-navigation"); navigation.hidden = false;
+  const continuation = d.querySelector(".jx-continuation"), submit = $("jx-task-submit");
+  const proceed = button(L("继续此任务", "Continue this task"), () => setMode("task"), "primary"); proceed.hidden = true;
+  $("jx-task-submit-slot").append(proceed);
+  const modeButtons = {}, positions = { task: 0, reader: 0 }; let currentMode = "task";
+  function setMode(mode) {
+    if (launchingContext) return;
+    positions[currentMode] = d.scrollTop; currentMode = mode;
+    continuation.hidden = mode !== "task"; reader.element.hidden = mode !== "reader";
+    if (submit) submit.hidden = mode !== "task";
+    proceed.hidden = mode !== "reader";
+    $("jx-task-heading").textContent = mode === "reader" ? L("Context 预览", "Context preview") : L("新建任务", "New task");
+    for (const [key, b] of Object.entries(modeButtons)) b.setAttribute("aria-pressed", String(key === mode));
+    d.scrollTop = positions[mode];
+    if (mode === "reader") reader.activate();
+  }
+  for (const [key, label] of [["task", L("继续任务", "Continue task")], ["reader", L("浏览 Context", "Browse context")]]) {
+    const b = button(label, () => setMode(key), ""); b.setAttribute("aria-pressed", String(key === "task")); modeButtons[key] = b; navigation.append(b);
+  }
+  const details = el("section", undefined, "jx-context-information");
+  details.append(el("h3", L("记录信息", "Record information")));
+  details.append(note(`${new Date(r.created_at).toLocaleString()} · v${r.number} · ${agentName(r.provider)}`));
   const overview = r.normalized.extensions?.["junction.overview/1"];
-  if (overview) details.append(el("p", overview.description, "jx-note jx-description"));
+  if (overview?.description) details.append(el("p", overview.description, "jx-note jx-description"));
   const capture = r.normalized.extensions?.["switchyard.capture/1"];
   if (capture?.notes) for (const item of capture.notes) details.append(note(item.detail));
   if (w) details.append(note(`${L("代码版本", "Commit")}: ${w.commit}`));
-  const environment = r.normalized.extensions?.["junction.environment/1"];
-  const environmentDetails = el("details", undefined, "jx-section");
-  environmentDetails.append(el("summary", L("来源环境", "Source environment")));
-  if (environment) {
-    environmentDetails.append(note(L("记录分享时的环境线索；接续 Agent 会按需检查当前设备。", "Captured environment evidence; the receiving agent checks the current device as needed.")));
-    const names = { system: L("系统", "System"), workspace: L("工作区", "Workspace"), runtimes: L("运行时", "Runtimes"), dependencies: L("依赖文件", "Dependency files"), agent: "Agent", tools: L("工具", "Tools"), skills: "Skills", variables: L("变量名称", "Variable names"), services: L("服务", "Services"), resources: L("文件资源", "Resources"), access: L("权限需求", "Access") };
-    const coverage = { collected: L("已记录", "Recorded"), partial: L("部分记录", "Partial"), not_collected: L("未采集", "Not collected"), not_applicable: L("不适用", "Not applicable") };
-    for (const [key, value] of Object.entries(environment.groups || {})) {
-      const row = el("details");
-      const count = value.items?.length || 0;
-      row.append(el("summary", `${names[key] || key} · ${coverage[value.coverage] || value.coverage}${count ? ` · ${count}` : ""}`), el("pre", JSON.stringify(value, null, 2)));
-      environmentDetails.append(row);
-    }
-  } else environmentDetails.append(note(L("此版本未记录环境清单。接续时由 Agent 检查本机环境。", "This version has no environment manifest. The receiving agent checks locally.")));
-  contextInfo.append(environmentDetails);
   details.append(note(L("保留原始记录和标准化历史。工具、附件和权限由当前设备提供。", "Original and normalized records are retained. Tools, attachments and permissions come from the current device.")));
   const actions = el("div", undefined, "jx-actions");
   actions.append(button(L("下载 Context", "Export context"), async () => {
@@ -276,48 +279,26 @@ function openDetail(meta) {
       }
     }));
   }
-  details.append(actions); contextInfo.append(details);
-  let loaded = false, loading = false;
-  contextInfo.ontoggle = async () => {
-    if (!contextInfo.open || loaded || loading) return;
-    loading = true;
-    try {
-      await loadMessages(meta);
-      if (epoch !== generation) return;
-      if (r.diagnostic_count) {
-        const diagnostics = await call(base(meta) + "/diagnostics?limit=100");
-        if (epoch !== generation) return;
-        const info = el("details"); info.append(el("summary", `${L("解析说明", "Parsing notes")} (${r.diagnostic_count})`), el("pre", JSON.stringify(diagnostics.items, null, 2)));
-        details.append(info);
-      }
-      loaded = true;
-    } catch (e) { if (epoch === generation) showError(e); }
-    finally { loading = false; }
-  };
-}
-async function loadMessages(meta, more = false) {
-  const epoch = generation;
-  const q = new URLSearchParams({ limit: "15", view: "trace" }); if (more && messageCursor) q.set("cursor", messageCursor);
-  const page = await call(base(meta) + `/messages?${q}`);
-  if (epoch !== generation) return;
-  const target = $("jx-messages"); if (!more) target.replaceChildren();
-  for (const m of page.items) {
-    const box = el("details", undefined, "jx-message");
-    const content = m.content_truncated ? m.content_preview : m.content?.map(b => b.text || (b.kind === "tool_call" ? `${b.name} (${b.call_id})` : b.kind)).join("\n");
-    box.append(el("summary", `${m.role} · ${m.id} · ${String(content || "").slice(0, 160)}`));
-    const pre = el("pre", m.content_truncated ? L("展开后加载完整内容…", "Open to load the complete content…") : JSON.stringify(m.content, null, 2)); box.append(pre);
-    box.ontoggle = async () => {
-      if (!box.open || !m.content_truncated) return;
-      box.ontoggle = null;
+  details.append(actions);
+  reader.info.append(details, versionList(meta));
+  const identity = el("details", undefined, "jx-section");
+  identity.append(el("summary", L("记录标识", "Record identifiers")), el("code", `${cid} / ${rid}`, "jx-ids")); reader.info.append(identity);
+  if (r.diagnostic_count) {
+    const diagnostics = el("details", undefined, "jx-section");
+    diagnostics.append(el("summary", `${L("解析说明", "Parsing notes")} · ${r.diagnostic_count}`)); reader.info.append(diagnostics);
+    let loaded = false, loading = false;
+    diagnostics.ontoggle = async () => {
+      if (!diagnostics.open || loaded || loading) return;
+      loading = true;
       try {
-        let offset = 0, text = "";
-        do { const chunk = await call(base(meta) + `/messages/${m.id}/content?offset=${offset}`); text += chunk.text; offset = chunk.next_offset; } while (offset !== null);
-        pre.textContent = JSON.stringify(JSON.parse(text), null, 2);
-      } catch(e) { pre.textContent = e.message; }
+        const page = await call(base(meta) + "/diagnostics?limit=100");
+        if (epoch !== generation) return;
+        for (const item of page.items) diagnostics.append(note(item.detail));
+        loaded = true;
+      } catch (e) { if (epoch === generation) showError(e); }
+      finally { loading = false; }
     };
-    target.append(box);
   }
-  messageCursor = page.next_cursor; $("jx-message-more").hidden = !messageCursor;
 }
 function showContinue(meta) {
   const target = $("jx-detail").querySelector(".jx-continuation"); target.replaceChildren();
@@ -455,6 +436,7 @@ export function initJunction(callbacks) {
   const taskModal = el("div"); taskModal.id = "jx-task-modal"; taskModal.hidden = true;
   taskModal.innerHTML = `<section class="jx-shell jx-task-shell" role="dialog" aria-modal="true" aria-labelledby="jx-task-heading" tabindex="-1">
     <div class="jx-head"><h2 id="jx-task-heading"></h2><span class="jx-spacer"></span><button id="jx-task-close" class="sec" type="button">×</button></div>
+    <nav id="jx-task-navigation" class="jx-mode-navigation" aria-label="Context" hidden></nav>
     <p id="jx-task-error" class="jx-warning" role="alert" hidden></p>
     <div id="jx-detail"></div>
     <div class="dlg-actions jx-task-actions"><button id="jx-task-cancel" class="sec" type="button"></button><div id="jx-task-submit-slot"></div></div>
