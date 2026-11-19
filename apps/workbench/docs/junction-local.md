@@ -1,5 +1,7 @@
 # Switchyard × Junction 本机联调
 
+统一仓库的日常开发直接在根目录执行 `npm run setup`、`npm run dev`，见[快速开始](../../../README.md#本地开发)。以下说明手动连接独立 Context 服务的方式；使用云端门户安装的节点由网关管理连接。
+
 Switchyard 继续管理机器、仓库、worktree 和 Agent 终端。Junction 独立保存 JSONL 原件、标准化会话、版本和共享列表。浏览器通过 Switchyard 服务端访问 Junction；连接时输入的凭证仅保存在服务端私有文件中，后续不会返回给浏览器。
 
 ## 连接云端服务
@@ -10,14 +12,14 @@ Switchyard 继续管理机器、仓库、worktree 和 Agent 终端。Junction �
 
 新凭证单独保存为权限 600 的文件。旧配置备份在配置目录的 `.junction-credentials/*.previous.json`；旧令牌文件保留，供进行中的请求和手动回退使用。换服务时不会把旧服务的其他账号令牌发给新服务。确认无需回退后可清理旧文件。
 
-每台节点独立安装 Switchyard，不复制另一台设备的整个数据目录或 `controller-id`。设备只是凭证身份与执行位置，一个用户可以有多台设备。云端部署、设备撤销和备份操作见 Junction 仓库的 `docs/deployment.md`。
+每台节点独立安装 Switchyard，不复制另一台设备的整个数据目录或 `controller-id`。设备只是凭证身份与执行位置，一个用户可以有多台设备。云端部署、设备撤销和备份操作见 [Context 部署](../../../services/junction/docs/deployment.md)。
 
 ## 运行
 
-Junction 仓库中：
+统一仓库根目录中：
 
 ```sh
-.venv/bin/junction serve --data-dir .local/data --hosts 127.0.0.1,10.10.0.3 --port 8767
+.venv/bin/junction serve --data-dir .local/data --host 127.0.0.1 --port 8767
 ```
 
 先用 Junction 的 `user-add` 为本机生成令牌文件。Switchyard 端创建一个仅本机可读的配置文件：
@@ -34,13 +36,13 @@ Junction 仓库中：
 
 `accounts[].id` 是本机配置别名，Web 使用默认账号。各台机器配置自己的凭证并连接同一个 Junction，即可读取共享列表；界面无需选择接收人或切换账号。设备访问权限仍由 Switchyard 所在环境决定。
 
-Switchyard 中执行：
+统一仓库根目录中执行：
 
 ```sh
 npm ci
 TASK_DISPATCHER_DATA_DIR=/private/path/switchyard-junction-data \
 SWITCHYARD_JUNCTION_CONFIG=/private/path/junction.json \
-HOSTS=127.0.0.1,10.10.0.3 PORT=4502 npm start
+HOSTS=127.0.0.1 PORT=4502 npm start
 ```
 
 数据目录独立于现有 Switchyard，完整保留原有功能，但不会复制原实例的任务、设备或登录授权。机器必须拥有配置的绑定地址；默认不要监听公网。Junction 令牌仅从服务端文件读取，支持服务配置变更后按请求重新读取。
@@ -130,11 +132,12 @@ node .tdsp/context/read.mjs check-environment system,runtimes,dependencies
 ## 验证
 
 ```sh
-npm test
-npx tsc --noEmit --allowImportingTsExtensions
+npm run test:targeted
+npm run test:context
+npm run typecheck
 ```
 
-Junction 仓库独立执行 `pytest` 和 `ruff check src tests`。本地验收数据、令牌、启动脚本、截图和样例仓库放在 Git 忽略的 `.local/`，不提交真实日志。
+在统一仓库根目录运行上述局部检查；不要在有真实任务的设备运行历史全量 workbench 测试。本地验收数据、令牌、启动脚本、截图和样例仓库放在 Git 忽略的 `.local/`，不提交真实日志。
 
 ## 普通目录任务
 

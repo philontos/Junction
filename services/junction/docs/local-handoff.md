@@ -73,10 +73,10 @@ junction unpublish "$CONTEXT" --revision "$REVISION"
 
 ## Bind to a private network
 
-On a machine that owns `10.10.0.3`, bind only loopback and the private network address:
+Set `JUNCTION_PRIVATE_IP` to an address owned by this machine, then bind only loopback and that private network address:
 
 ```sh
-junction serve --data-dir .local/data --hosts 127.0.0.1,10.10.0.3 --port 8767
+junction serve --data-dir .local/data --hosts "127.0.0.1,${JUNCTION_PRIVATE_IP:?Set this machine's private IP}" --port 8767
 ```
 
 All requested sockets are bound before serving. If any bind fails, startup fails and closes those already acquired. Data endpoints still require bearer authentication. `--host` remains supported for a single address.
