@@ -9,7 +9,12 @@ const output = path.join(root, 'dist'); fs.mkdirSync(output, { recursive: true }
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'junction-build-'));
 const run = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
 const files = [...new Set(run(['ls-files', '-z', '--cached', '--others', '--exclude-standard']).split('\0'))].filter(p => p && fs.existsSync(path.join(root, p)));
-const copy = (source, target) => { fs.mkdirSync(path.dirname(target), { recursive: true }); fs.cpSync(path.join(root, source), target, { verbatimSymlinks: true }); };
+const copy = (source, target) => {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const input = path.join(root, source);
+  if (fs.lstatSync(input).isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(input), target);
+  else fs.copyFileSync(input, target);
+};
 const hashes = {};
 try {
   const node = path.join(stage, 'node'), context = path.join(stage, 'context'); fs.mkdirSync(node); fs.mkdirSync(context);
