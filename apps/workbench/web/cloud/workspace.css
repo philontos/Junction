@@ -1,4 +1,5 @@
 body.cloud-workspace #onboarding-btn,
+body.cloud-workspace #onboarding-modal,
 body.cloud-workspace #m-rail { display: none !important; }
 body.cloud-workspace .wrap { grid-template-columns: 300px minmax(0, 1fr); }
 .workspace-transport { font-size: 11px; color: var(--muted); white-space: nowrap; }

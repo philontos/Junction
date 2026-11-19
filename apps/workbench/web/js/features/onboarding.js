@@ -7,6 +7,8 @@ let onboarding = null;
 let onboardingBusy = false;
 let phoneArrival = false;
 let refreshTimer = null;
+// Local direct access has no node URL prefix, but still belongs to Junction.
+const managedWorkspace = () => !!nodeBase() || !!document.querySelector('meta[name="switchyard-cloud-origin"]');
 
 const esc = (value) => String(value ?? "").replace(
   /[&<>"']/g,
@@ -244,6 +246,7 @@ export function repaintOnboarding() {
 }
 
 export async function refreshOnboarding() {
+  if (managedWorkspace()) return null;
   try {
     onboarding = await api("/api/onboarding/status");
     repaintOnboarding();
@@ -324,6 +327,7 @@ export function openDiscoveryFromOnboarding() {
 }
 
 export async function openOnboardingModal() {
+  if (managedWorkspace()) return;
   $("onboarding-modal").style.display = "flex";
   await refreshOnboarding();
 }
@@ -350,7 +354,7 @@ async function mobileCheckin() {
 export async function initOnboarding() {
   // Cloud nodes already have an authenticated outbound connection. The VPN
   // onboarding is for direct/private access and is not a cloud prerequisite.
-  if (nodeBase()) { $("onboarding-btn").style.display = "none"; return; }
+  if (managedWorkspace()) { $("onboarding-btn").style.display = "none"; return; }
   const params = new URLSearchParams(location.search);
   phoneArrival = params.get("onboarding") === "mobile" && isMobileBrowser();
   // Read the live state first. Besides rendering the wizard, this safely
