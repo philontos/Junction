@@ -3,7 +3,8 @@
 // repoGroupHead from repos.js and taskCard from tasks.js), the register-machine
 // modal, and delete. Shells (local + remote) live in the per-machine Shells group
 // (rendered here, created via addLocalTask in tasks.js).
-import { $, api } from "../core/dom.js";
+import { $, api, nodeBase } from "../core/dom.js";
+import { refreshCloudHosts } from "./cloud-workspace.js";
 import { hideLoading, showLoading, toast } from "../core/feedback.js";
 import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
@@ -306,6 +307,7 @@ export function rerender() {
   }
   renderRail(hosts, blockedHosts());
   renderList();   // paints selection itself (every render path does)
+  refreshCloudHosts();
 }
 // Machines with a task blocked on a permission prompt (alive + waiting). This is
 // how the per-task yellow ("needs you") gets pulled up to the machine's rail dot.
@@ -336,7 +338,7 @@ function renderRail(hosts, blocked) {
 // duringAutoFollow: on mobile, tapping a machine chip must stay on the LIST view.
 // followHostTask re-attaches the dock to that machine's last task (to keep it
 // warm), which would otherwise trip the list→terminal jump — so suppress it here.
-export function selectHost(id) { state.activeHostId = id; menuHostId = null; rerender(); duringAutoFollow(() => followHostTask(id)); }
+export function selectHost(id, { follow = true } = {}) { state.activeHostId = id; menuHostId = null; rerender(); if(follow)duringAutoFollow(() => followHostTask(id)); }
 
 // On a user-initiated machine switch, point the dock at THIS machine's task so
 // col3 never keeps showing the previous machine's session. Preference order,
@@ -478,7 +480,9 @@ function renderListHtml() {
       ${updateRow}
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
-  const header = `<div class="mh"><span class="mh-ic">${isLocal ? "🖥" : "▦"}</span><span class="mh-name">${isLocal ? t("host.local") : h.name}</span>${gear}${selfUpdate}${newTask}${newRepo}${menu}</div>`;
+  const cloud=!!nodeBase();
+  const title=isLocal ? t(cloud ? "workspace.tasks" : "host.local") : cloud ? `SSH · ${h.name}` : h.name;
+  const header = `<div class="mh">${cloud && isLocal ? "" : `<span class="mh-ic">${isLocal ? "🖥" : "▦"}</span>`}<span class="mh-name" title="${esc(title)}">${esc(title)}</span>${gear}${selfUpdate}${newTask}${newRepo}${menu}</div>`;
   let content = "";
   if (isLocal) {
     const repoBlocks = state.repos.map(r => {

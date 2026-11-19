@@ -162,7 +162,8 @@ export function createGateway(config: GatewayConfig) {
     const prefix='/nodes/'+device.id;
     let html=fs.readFileSync(path.join(config.root,'web/index.html'),'utf8');
     html=html.replace('<head>',`<head><meta name="switchyard-base" content="${prefix}"><link rel="stylesheet" href="/cloud/workspace.css">`);
-    html=html.replace('<span style="flex:1"></span>',`<span style="flex:1"></span><a href="/" class="sec cloud-device-link" title="${escape(device.name)} · 切换设备"><span class="cloud-device-name">${escape(device.name)} · 切换设备</span><span class="cloud-device-short">设备</span></a>`);
+    html=html.replace('<body>','<body class="cloud-workspace">');
+    html=html.replace('<span style="flex:1"></span>',`<span style="flex:1"></span><details id="cloud-device-switcher" class="cloud-switcher" data-device-id="${device.id}" data-device-name="${escape(device.name)}" data-user-id="${escape(u.id)}"><summary class="cloud-current" aria-label="切换设备"><span class="cloud-dot" id="cloud-current-dot"></span><span class="cloud-current-name">${escape(device.name)}</span><span id="cloud-current-ssh" hidden></span><span class="cloud-caret" aria-hidden="true"></span></summary></details>`);
     res.type('html').send(html);
   });
   app.get('/', (_req,res) => res.sendFile(path.join(config.root,'web/cloud/index.html')));

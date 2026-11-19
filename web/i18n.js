@@ -29,6 +29,21 @@
     zh: {
       // top-level nav / layout
       "task.dispatch": "＋ 派发任务",
+      "workspace.tasks": "任务",
+      "workspace.switch": "切换设备",
+      "workspace.online": "在线",
+      "workspace.offline": "离线",
+      "workspace.unknown": "连接状态暂不可用",
+      "workspace.current": "当前设备",
+      "workspace.back": "返回当前设备",
+      "workspace.manage": "管理设备",
+      "workspace.advanced": "高级 · SSH 连接",
+      "workspace.sshNote": "通过当前设备连接，使用它的 SSH 配置。",
+      "workspace.addSsh": "添加 SSH 连接",
+      "workspace.loading": "正在读取设备…",
+      "workspace.failed": "设备列表暂不可用",
+      "workspace.retry": "重试",
+      "workspace.expired": "登录已过期，请重新登录",
 
       // terminal dock
       "term.notConnected": "未连接",
@@ -397,6 +412,21 @@
     },
     en: {
       "task.dispatch": "＋ Dispatch task",
+      "workspace.tasks": "Tasks",
+      "workspace.switch": "Switch device",
+      "workspace.online": "Online",
+      "workspace.offline": "Offline",
+      "workspace.unknown": "Connection status unavailable",
+      "workspace.current": "Current device",
+      "workspace.back": "Back to current device",
+      "workspace.manage": "Manage devices",
+      "workspace.advanced": "Advanced · SSH connections",
+      "workspace.sshNote": "Connect through this device using its SSH configuration.",
+      "workspace.addSsh": "Add SSH connection",
+      "workspace.loading": "Loading devices…",
+      "workspace.failed": "Devices are temporarily unavailable",
+      "workspace.retry": "Retry",
+      "workspace.expired": "Your session expired. Sign in again",
 
       "term.notConnected": "Not connected",
       "term.disconnected": "[disconnected]",

@@ -6,6 +6,7 @@
 //   3. run the boot sequence (init terminal + selects, first data load);
 //   4. register global listeners (modal backdrop / Esc) and pollers.
 import { initJunction, closeJunction, junctionIsOpen } from "./features/junction.js";
+import { initCloudWorkspace, repaintCloudWorkspace, restoreCloudWorkspace } from "./features/cloud-workspace.js";
 import { $ } from "./core/dom.js";
 import { toast } from "./core/feedback.js";
 import { closeDialog } from "./core/dialog.js";
@@ -106,6 +107,7 @@ I18N.onChange = () => {
   repaintCodeView();
   repaintRepoDetails();
   repaintOnboarding();
+  repaintCloudWorkspace();
   loadRepos();
   loadHosts();
   loadTasks();
@@ -118,6 +120,7 @@ I18N.init();         // resolve locale from localStorage / browser before first 
 I18N.applyStatic();  // fill all data-i18n / data-i18n-ph markup
 renderSwitcher();
 renderThemeToggle();
+initCloudWorkspace({ selectHost, allTasks, connect, connectNode });
 
 function dismissBoot() { const b = $("boot"); if (b) b.classList.add("done"); }
 setCodeViewOpener(openTaskCode);
@@ -152,13 +155,16 @@ csMount("h-kind").setOptions([{ value: "ssh", label: "ssh" }, { value: "mosh", l
 $("t-provider").dataset.ph = t("provider.default");   // model-backend picker
 csMount("t-provider", onProviderChange);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
-Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).then(() => { dismissBoot(); syncReadWaiting(); });
+const firstFleet=loadFleet();
+Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).then(() => {
+  dismissBoot(); syncReadWaiting();
+  restoreCloudWorkspace(firstFleet).catch(e => console.warn("workspace restore failed", e));
+});
 initJunction({ allTasks, loadTasks, connect, loadFleet, connectNode });
 initOnboarding();             // independent: slow VPN/DNS checks never block the local dashboard
 setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
 setInterval(async () => { await loadTasks(); syncReadWaiting(); }, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots
-loadFleet();                     // initial cross-node fleet snapshot
 setInterval(loadFleet, 15000);  // refresh each node's live task count (slower — it ssh's out)
 // Close ordinary modals on backdrop click. The dispatch form is intentionally
 // excluded: an accidental click in the wide desktop scrim must not discard it;
