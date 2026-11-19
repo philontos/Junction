@@ -1,6 +1,6 @@
 # 云端网页与本机节点
 
-用户打开云端 HTTPS 网页，登录后复制一次安装命令；本机节点上线后，点击设备卡片进入原有 Switchyard 工作台。新建任务、终端、Git/worktree 和 Agent 都在所选设备运行。共享和接续 Context 仍使用 Junction。
+用户打开云端 HTTPS 网页，注册或登录后复制一次安装命令；本机节点上线后，点击设备卡片进入原有 Switchyard 工作台。新建任务、终端、Git/worktree 和 Agent 都在所选设备运行。共享和接续 Context 仍使用 Junction。
 
 ## 边界
 
@@ -10,7 +10,25 @@
 - 网关检查用户、设备归属和请求来源；网页登录凭据不传到节点。节点令牌只适用于网关，Junction 的用户令牌留在云端。
 - 网关可以看到转发的请求和终端内容；连接采用 TLS。只有主动分享的 Context 由 Junction 持久化，网关不存终端正文。
 - 断线显示离线并自动重连，不重放失败的任务创建请求。本机 tmux 任务继续保留。机器关机后，任务执行也会停止。
-- 第一版支持 macOS、Linux 节点；macOS 已有实际安装链路。Windows 安装器、自动升级、公开注册和团队共享设备暂不包含。
+- 第一版支持 macOS、Linux 节点；macOS 已有实际安装链路。Windows 安装器、自动升级和团队共享设备暂不包含。
+
+## 注册与身份
+
+注册只填账号、密码，成功后自动登录。账号为 3–32 位字母、数字、点、下划线或短横线，以字母或数字开头，大小写不区分；密码为 12–256 个字符。注册和登录均限流，密码只保存加盐 scrypt 哈希。
+
+新账号使用固定 UUID，登录名与内部 ID 分离；旧账号保留原 ID、密码、设备和会话。注册同时通过 Junction 的创建专用内部接口建立同 ID 的用户，账号名用于 Context 作者展示。设备只能由所属用户操作；Context 继续遵循 Junction 已有的公开或授权规则。本机 Agent、SSH 密钥和执行权限不由注册迁移或授予。
+
+Junction 初始化成功前不发放会话；网络中断后使用相同账号和密码重试，会复用已预留的 ID 和凭证。已完成注册但响应丢失时，直接登录即可。用户的 Junction 凭证留在云端，浏览器和节点不会收到它。
+
+公开注册默认关闭。配置 `SWITCHYARD_REGISTRATION_OPEN=true` 和 `SWITCHYARD_JUNCTION_PROVISIONING_TOKEN_FILE=/etc/switchyard-cloud/provisioning.token` 后开启；关闭只影响新注册，现有登录和设备继续使用。Junction 需部署支持身份创建的版本，并配置 `JUNCTION_PROVISIONING_TOKEN_FILE` 指向同一内容的专用凭证文件（32 随机字节的 base64url，共 43 字符）。凭证只供两个云端服务读取，不可使用已有用户令牌代替。内部接口不能轮换、覆盖或接管已有身份，且不通过公网网关代理。
+
+第一版不要求邮箱或手机号。忘记密码由管理员生成一次性设置链接：
+
+```sh
+node --import tsx server/cloud/admin.ts reset-password USER /private/output-file
+```
+
+仍使用下文的 `/#setup=<设置码>`；密码重设后旧网页登录会话失效，用户 ID、Context 和设备保持不变。
 
 ## 本机安装
 
@@ -39,7 +57,8 @@
 | 路径 | 用途 |
 | --- | --- |
 | `/srv/switchyard-cloud/current` | 指向只读发布目录 |
-| `/srv/switchyard-cloud/data` | 网关 SQLite，schema 1 |
+| `/srv/switchyard-cloud/data` | 网关 SQLite，schema 3 |
+| `/srv/switchyard-cloud/data/user-credentials` | 自助注册用户的独立 Junction 凭证，0600 |
 | `/srv/switchyard-cloud/credentials` | 每个用户的 Junction 令牌，0600 |
 | `/srv/switchyard-cloud/downloads/node.tar.gz` | 与 `.sha256` 成对发布的节点安装包 |
 | `/srv/switchyard-cloud/downloads/bundles/<sha256>.tar.gz` | 不可变安装包，先上传并校验，再更新当前 `.sha256` 指针 |
@@ -53,6 +72,9 @@ SWITCHYARD_CLOUD_ORIGIN=https://<公网 IP 或域名>
 SWITCHYARD_CLOUD_DATA=/srv/switchyard-cloud/data
 SWITCHYARD_JUNCTION_PORT=8767
 SWITCHYARD_NODE_BUNDLE=/srv/switchyard-cloud/downloads/node.tar.gz
+SWITCHYARD_REGISTRATION_OPEN=false
+# 开启注册时配置：
+# SWITCHYARD_JUNCTION_PROVISIONING_TOKEN_FILE=/etc/switchyard-cloud/provisioning.token
 PORT=8780
 ```
 
@@ -73,6 +95,8 @@ node --import tsx server/cloud/admin.ts activate USER /srv/switchyard-cloud/cred
 节点协议为 `switchyard-tunnel/1`。控制连接只接收连接请求和心跳；每次 HTTP/终端会话建立独立 WSS 字节流，节点只能转发到本进程固定的回环端口。保留 HTTP/WebSocket 原有消息格式和流控，不引入任务执行 RPC，也不修改 Context 标准。
 
 `server/cloud/cloud.test.ts` 覆盖登录/绑定的单次使用和过期、设备归属、撤销、大请求、流式进度、终端、断线不重放、重连及本机访问限制。前端继续使用现有组件，只给 API 和终端 URL 加设备前缀。
+
+`server/cloud/registration.test.ts` 覆盖旧账号迁移、注册身份初始化与重试、跨用户隔离、限流、注册开关和密码重设。
 
 `server/cloud/installer.test.ts` 覆盖 schema 1→2 保留身份数据、安装认领与重试、凭证恢复、断点下载与校验、仅补装缺失工具、安装后复查和并发锁；`web/cloud/install-progress.test.mjs` 验证成功判定与失败恢复提示。安装器会显示真实阶段，进度条表示完成了多少阶段，不估计剩余时间。
 

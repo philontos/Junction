@@ -20,7 +20,7 @@ function textInput(value = "", placeholder = "") { const input = el("input"); in
 function note(text) { return el("p", text, "jx-note"); }
 const agentNames = new Map([["claude", "Claude Code"], ["codex", "Codex"], ["kimi", "Kimi"], ["pi", "Pi"]]);
 const agentName = provider => agentNames.get(provider) || provider || "Agent";
-const contextOwner = meta => meta.owner_id || L("未记录", "Not recorded");
+const contextOwner = meta => meta.owner_name || meta.owner_id || L("未记录", "Not recorded");
 function contextCopy(meta) {
   const overview = meta.revision.normalized?.extensions?.["junction.overview/1"];
   return { title: overview?.title || meta.title, summary: overview?.summary || "" };

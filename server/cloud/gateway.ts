@@ -8,8 +8,9 @@ import { WebSocketServer } from 'ws';
 import { CloudError, CloudStore, digest } from './store.js';
 import { TunnelBroker } from './tunnel.js';
 import { fail, proxyHttp, proxyUpgrade } from './proxy.js';
+import { junctionProvisioner } from './registration.js';
 
-export interface GatewayConfig { root: string; data: string; origin: string; junctionPort: number; bundle?: string }
+export interface GatewayConfig { root: string; data: string; origin: string; junctionPort: number; bundle?: string; registrationTokenFile?: string }
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const bearer = (authorization = '') => /^Bearer ([A-Za-z0-9_-]{43})$/.exec(authorization)?.[1] || '';
 const cookie = (header = '') => /(?:^|;\s*)sw_session=([A-Za-z0-9_-]{43})(?:;|$)/.exec(header)?.[1] || '';
@@ -17,6 +18,7 @@ const escape = (text: string) => text.replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 
 export function createGateway(config: GatewayConfig) {
   const origin = new URL(config.origin).origin, secure = origin.startsWith('https:');
+  const provision = config.registrationTokenFile ? junctionProvisioner(config.junctionPort,config.registrationTokenFile) : null;
   const store = new CloudStore(config.data), broker = new TunnelBroker();
   const app = express(); app.disable('x-powered-by');
   const server = createServer({ maxHeaderSize: 32 * 1024 }, app);
@@ -56,15 +58,27 @@ export function createGateway(config: GatewayConfig) {
   });
   app.get('/healthz', (_req,res) => res.json({status:'ok',service:'switchyard-cloud',protocol:'switchyard-tunnel/1'}));
   app.use('/hub', express.json({limit:'8kb'}));
+  app.post('/hub/register', async (req,res) => {
+    try {
+      csrf(req);
+      if (!provision) throw new CloudError(403,'暂未开放注册。');
+      rate('register:'+clientIp(req),5); rate('register-total',100);
+      if (typeof req.body?.user !== 'string' || typeof req.body?.password !== 'string') throw new CloudError(400,'请填写账号和密码。');
+      const account = store.reserveRegistration(req.body.user,req.body.password);
+      await provision(account);
+      const result = store.completeRegistration(account.id);
+      session(res,result.token); res.status(201).json({user_id:result.user_id,username:result.username});
+    } catch (error) { fail(res,error instanceof CloudError ? error : new CloudError(503,'注册暂时不可用，请稍后重试。')); }
+  });
   app.post('/hub/login', (req,res) => {
-    csrf(req); rate('login:'+clientIp(req)); rate('login-user:'+String(req.body.user).slice(0,64),30);
-    const result=store.login(String(req.body.user || ''),String(req.body.password || '')); session(res,result.token); res.json({user_id:result.user_id});
+    csrf(req); rate('login:'+clientIp(req)); rate('login-user:'+String(req.body.user).trim().toLowerCase().slice(0,64),30); rate('login-total',200);
+    const result=store.login(String(req.body.user || ''),String(req.body.password || '')); session(res,result.token); res.json({user_id:result.user_id,username:result.username});
   });
   app.post('/hub/activate', (req,res) => {
     csrf(req); rate('activate:'+clientIp(req));
-    const result=store.activate(String(req.body.code || ''),String(req.body.password || '')); session(res,result.token); res.json({user_id:result.user_id});
+    const result=store.activate(String(req.body.code || ''),String(req.body.password || '')); session(res,result.token); res.json({user_id:result.user_id,username:result.username});
   });
-  app.get('/hub/session', (req,res) => { const u=store.session(cookie(req.headers.cookie));res.json({user_id:u?.id || null}); });
+  app.get('/hub/session', (req,res) => { const u=store.session(cookie(req.headers.cookie));res.json({user_id:u?.id || null,username:u?.username || null,registration_open:!!provision}); });
   app.post('/hub/logout', (req,res) => {
     csrf(req); const token=cookie(req.headers.cookie); store.logout(token);
     for (const [socket,binding] of terminals) if(digest(binding.session)===digest(token)) socket.destroy();

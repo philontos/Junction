@@ -13,8 +13,11 @@ renderThemeToggle();
 const setupCode = new URLSearchParams(location.hash.slice(1)).get('setup');
 if (location.hash) history.replaceState(null, '', location.pathname);
 let signedIn = false, installationId = '', installationKey = '', lastDevices = '', refreshing = false;
+let registrationOpen = false, authMode = setupCode ? 'activate' : 'login';
 async function api(route, body, method = 'POST') {
-  const response = await fetch('/hub/' + route, body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let response;
+  try { response = await fetch('/hub/' + route, {signal:AbortSignal.timeout(15000), ...(body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })}); }
+  catch { throw new Error('网络连接失败，请检查网络后重试。'); }
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || '请求失败，请稍后再试。');
   return result;
@@ -22,16 +25,24 @@ async function api(route, body, method = 'POST') {
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function auth() {
   signedIn = false; $('auth').hidden = false; $('workspace').hidden = true; $('account').hidden = true;
-  if (setupCode) {
-    $('auth-title').textContent = '设置你的登录密码';
-    $('auth-description').textContent = '设置后，即可安装节点并进入工作台。';
-    $('user-label').hidden = true; $('user').required = false;
-    $('password').minLength = 12; $('password').autocomplete = 'new-password'; $('password').placeholder = '至少 12 个字符';
-    $('submit').textContent = '设置并进入';
-  }
+  const activating=authMode==='activate', registering=authMode==='register';
+  $('auth-title').textContent=activating ? '设置你的登录密码' : registering ? '创建 Switchyard 账号' : '登录 Switchyard';
+  $('auth-description').textContent=activating ? '设置后，即可安装节点并进入工作台。' : registering ? '连接自己的设备，共享工作 Context。' : '连接你的设备，继续工作。';
+  $('user-label').hidden=activating; $('user').required=!activating;
+  $('user').maxLength=registering ? 32 : 64; $('user').minLength=registering ? 3 : 1;
+  $('user').autocapitalize='none'; $('user').spellcheck=false;
+  if(registering)$('user').pattern='[A-Za-z0-9][A-Za-z0-9_.\\-]{2,31}';else $('user').removeAttribute('pattern');
+  $('user').placeholder=registering ? '3–32 位字母、数字或 . _ -' : '你的账号';
+  $('password').minLength=authMode==='login' ? 1 : 12;
+  $('password').autocomplete=authMode==='login' ? 'current-password' : 'new-password';
+  $('password').placeholder=authMode==='login' ? '输入密码' : '至少 12 个字符';
+  $('submit').textContent=activating ? '设置并进入' : registering ? '注册并进入' : '登录';
+  $('auth-switch').hidden=activating || !registrationOpen;
+  $('auth-switch-label').textContent=registering ? '已有账号？' : '还没有账号？';
+  $('auth-toggle').textContent=registering ? '返回登录' : '注册账号';
 }
-async function workspace(user) {
-  signedIn = true; $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; $('username').textContent = user;
+async function workspace(user, username = user) {
+  signedIn = true; $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; $('username').textContent = username;
   installationKey='switchyard-install:'+user;
   try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
   await refresh();
@@ -84,12 +95,15 @@ async function refresh() {
   } finally { refreshing=false; }
 }
 $('auth-form').onsubmit = async event => {
-  event.preventDefault(); error(); $('submit').disabled = true;
+  event.preventDefault(); error(); $('submit').disabled = true; $('auth-toggle').disabled=true;
+  const label=$('submit').textContent;
+  $('submit').textContent=authMode==='register' ? '正在创建账号…' : '正在登录…'; $('auth-form').setAttribute('aria-busy','true');
   try {
-    const result = await api(setupCode ? 'activate' : 'login', setupCode ? { code: setupCode, password: $('password').value } : { user: $('user').value.trim(), password: $('password').value });
-    $('password').value = ''; await workspace(result.user_id);
-  } catch (e) { error(e.message); } finally { $('submit').disabled = false; }
+    const result = await api(authMode, authMode==='activate' ? { code: setupCode, password: $('password').value } : { user: $('user').value.trim(), password: $('password').value });
+    $('password').value = ''; await workspace(result.user_id,result.username);
+  } catch (e) { error(e.message); } finally { $('submit').disabled = false; $('auth-toggle').disabled=false; $('submit').textContent=label; $('auth-form').removeAttribute('aria-busy'); }
 };
+$('auth-toggle').onclick = () => { authMode=authMode==='login' ? 'register' : 'login'; $('password').value=''; error(); auth(); $('user').focus(); };
 $('logout').onclick = async () => { try { await api('logout', {}); try { sessionStorage.removeItem(installationKey); } catch {} location.href = '/'; } catch (e) { error(e.message); } };
 $('install').onclick = async () => {
   error(); $('install').disabled = true;
@@ -110,7 +124,7 @@ $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText($('command').textContent); $('copy').textContent = '已复制'; setTimeout(() => { $('copy').textContent = '复制命令'; }, 1500); }
   catch { error('请选中命令复制到本机终端。'); }
 };
-try { const current = await api('session'); if (setupCode || !current.user_id) auth(); else await workspace(current.user_id); }
+try { const current = await api('session'); registrationOpen=current.registration_open===true; if (setupCode || !current.user_id) auth(); else await workspace(current.user_id,current.username); }
 catch (e) { auth(); error(e.message); }
 finally { $('cloud-loading').hidden = true; }
 setInterval(() => { if (signedIn && !document.hidden) refresh().catch(e => error(e.message)); }, 5000);

@@ -70,7 +70,7 @@ test('schema 1 upgrades without changing users, sessions or device credentials',
   const device=store.enroll(store.pair('alice'),'aaaaaaaa','Laptop');
   store.db.exec('DROP TABLE installations; PRAGMA user_version=1');store.db.close();
   store=new CloudStore(dir);t.after(()=>store.db.close());
-  assert.equal(store.db.pragma('user_version',{simple:true}),2);
+  assert.equal(store.db.pragma('user_version',{simple:true}),3);
   assert.equal(store.session(session.token)?.id,'alice');
   assert.equal(store.deviceByToken(device.device_token)?.id,device.device_id);
   assert.ok(store.claimInstallation(store.pair('alice'),'aaaaaaaa'));
