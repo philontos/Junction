@@ -25,11 +25,14 @@ from .parsers.registry import get_adapter
 MAX_IMPORT_BYTES = 32 * 1024 * 1024
 MAX_INLINE_CHARS = 4096
 MAX_CHUNK_CHARS = 16384
-DB_VERSION = 6
+DB_VERSION = 7
 
 DDL = """
 CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_profiles (
+ user_id TEXT PRIMARY KEY REFERENCES users(id), display_name TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS device_credentials (
  user_id TEXT NOT NULL REFERENCES users(id), device_id TEXT NOT NULL, label TEXT NOT NULL,
@@ -193,7 +196,7 @@ class Store:
         db = sqlite3.connect(self.db_path, timeout=15, isolation_level=None)
         try:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, 4, 5, DB_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, 6, DB_VERSION):
                 raise RuntimeError(f"Unsupported database version {version}; refusing to modify it.")
             db.execute("PRAGMA journal_mode=WAL")
             # SQLite table rebuilds require FK enforcement off before BEGIN. Validate before commit.
@@ -247,6 +250,28 @@ class Store:
                 db.execute("UPDATE users SET token_hash=? WHERE id=?", (digest(token.encode()), user))
             else:
                 db.execute("INSERT INTO users VALUES (?,?,?)", (user, digest(token.encode()), now()))
+
+    def provision_user(self, user: str, token: str, display_name: str):
+        """Idempotent creation, never credential rotation or account linking."""
+        if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", user):
+            raise Problem(400, "invalid_user", "Provisioned identities require a UUID v4.")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+            raise Problem(400, "invalid_token", "Invalid user credential.")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,31}", display_name):
+            raise Problem(400, "invalid_name", "Invalid account name.")
+        token_hash = digest(token.encode())
+        with self.connection(write=True) as db:
+            row = db.execute("SELECT token_hash FROM users WHERE id=?", (user,)).fetchone()
+            profile = db.execute("SELECT display_name FROM user_profiles WHERE user_id=?", (user,)).fetchone()
+            if row:
+                if not secrets.compare_digest(row[0], token_hash) or not profile or profile[0] != display_name:
+                    raise Problem(409, "identity_conflict", "Existing identity cannot be replaced.")
+            else:
+                if db.execute("SELECT 1 FROM users WHERE token_hash=?", (token_hash,)).fetchone():
+                    raise Problem(409, "identity_conflict", "Credential already belongs to an identity.")
+                db.execute("INSERT INTO users VALUES (?,?,?)", (user, token_hash, now()))
+                db.execute("INSERT INTO user_profiles VALUES (?,?)", (user, display_name))
+        return {"user_id": user}
 
     def add_device(self, user: str, device: str, token: str, *, label: str | None = None, rotate: bool = False):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", device):
@@ -600,7 +625,8 @@ class Store:
         args = (position, limit + 1) if shared_only else (position, user, user, limit + 1)
         with self.connection() as db:
             rows = db.execute(
-                f"""SELECT c.rowid AS position,c.* FROM contexts c WHERE c.rowid<? AND
+                f"""SELECT c.rowid AS position,c.*,COALESCE(u.display_name,c.owner_id) AS owner_name
+                FROM contexts c LEFT JOIN user_profiles u ON u.user_id=c.owner_id WHERE c.rowid<? AND
                 {visibility} ORDER BY c.rowid DESC LIMIT ?""", args,
             ).fetchall()
             items = [
@@ -608,6 +634,7 @@ class Store:
                     "id": c["id"],
                     "title": c["title"],
                     "owner_id": c["owner_id"],
+                    "owner_name": c["owner_name"],
                     "created_at": c["created_at"],
                     "revision": self._revision(db, self._visible(db, user, c["id"], shared_only=shared_only)),
                 }
@@ -621,7 +648,9 @@ class Store:
     def get_context(self, user, context_id, revision_id=None):
         with self.connection() as db:
             revision = self._visible(db, user, context_id, revision_id)
-            ctx = db.execute("SELECT * FROM contexts WHERE id=?", (context_id,)).fetchone()
+            ctx = db.execute("SELECT c.*,COALESCE(u.display_name,c.owner_id) AS owner_name "
+                             "FROM contexts c LEFT JOIN user_profiles u ON u.user_id=c.owner_id WHERE c.id=?",
+                             (context_id,)).fetchone()
             return {
                 **dict(ctx),
                 "revision": self._revision(db, revision),

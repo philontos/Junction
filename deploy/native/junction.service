@@ -10,6 +10,7 @@ User=junction
 Group=junction
 WorkingDirectory=/srv/junction
 Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/junction/junction.env
 ExecStart=/srv/junction/current/.venv/bin/junction serve --data-dir /srv/junction/data --host 127.0.0.1 --port 8767
 Restart=on-failure
 RestartSec=3

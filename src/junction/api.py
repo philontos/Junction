@@ -1,5 +1,8 @@
 import asyncio
 import logging
+import os
+import re
+import secrets
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,6 +30,11 @@ class GrantRequest(Model):
     include_raw: bool = Field(default=False, strict=True)
 
 
+class ProvisionUserRequest(Model):
+    token: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$", strict=True)
+    display_name: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]{2,31}$", strict=True)
+
+
 def current_identity(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> dict:
     if credentials is None:
         raise Problem(401, "unauthorized", "A valid bearer token is required.")
@@ -38,6 +46,13 @@ def current_user(identity: dict = Depends(current_identity)) -> str:
 
 
 def create_app(data_dir: str | Path) -> FastAPI:
+    # Optional, separate creation-only service credential; ordinary user tokens
+    # cannot call this endpoint. The public gateway does not proxy /internal.
+    token_file = os.environ.get("JUNCTION_PROVISIONING_TOKEN_FILE")
+    provisioning_token = Path(token_file).read_text().strip() if token_file else None
+    if provisioning_token is not None and not re.fullmatch(r"[A-Za-z0-9_-]{43}", provisioning_token):
+        raise ValueError("Invalid provisioning credential file.")
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = Store(data_dir)
@@ -85,6 +100,17 @@ def create_app(data_dir: str | Path) -> FastAPI:
         with app.state.store.connection() as db:
             db.execute("SELECT 1").fetchone()
         return {"status": "ok", "version": __version__}
+
+    def provisioner(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)):
+        if provisioning_token is None:
+            raise Problem(404, "not_found", "Not found.")
+        supplied = credentials.credentials if credentials else ""
+        if not secrets.compare_digest(supplied.encode(), provisioning_token.encode()):
+            raise Problem(401, "unauthorized", "Invalid service credential.")
+
+    @app.put("/internal/users/{user_id}", dependencies=[Depends(provisioner)], include_in_schema=False)
+    def provision_user(user_id: str, payload: ProvisionUserRequest):
+        return app.state.store.provision_user(user_id, payload.token, payload.display_name)
 
     @app.get("/v1/schema", tags=["service"])
     def schema():

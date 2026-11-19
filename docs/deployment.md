@@ -4,6 +4,16 @@ Junction 单实例保存原始 JSONL、标准化 Context、版本与共享关系
 
 首版是一个协作空间：所有持有效凭证的用户都能读取已共享的标准化 Context，原件仍按现有授权读取。用户可以有多个设备凭证；设备之间不继承本机权限。
 
+## 网关自助注册接入
+
+网页登录、密码和会话由 Switchyard 网关管理。Junction 只保存稳定用户 ID、可选展示名，以及 Context 归属，不保存网页登录密码。
+
+默认不开放身份创建接口。需要网关自动创建用户时，在 `/etc/junction/junction.env` 配置 `JUNCTION_PROVISIONING_TOKEN_FILE=/etc/junction/provisioning.token`，文件内容为独立生成的 32 字节随机值的 base64url（43 字符），仅对应服务账号可读；网关使用同值的专用凭证。禁止与用户令牌共用。
+
+网关调用 `PUT /internal/users/{UUID}`，请求体为 `{"token":"用户专属令牌","display_name":"账号名"}`，通过服务凭证认证。相同 ID、令牌和展示名可以幂等重试，不能覆盖既有身份、轮换令牌或修改作者。该接口不通过公网网关代理，Junction 继续仅监听回环地址。普通用户令牌不能创建身份，服务凭证也不能读取 Context。
+
+schema 7 新增 `user_profiles` 展示信息；Context 返回可选的 `owner_name`，权限判断始终使用 `owner_id`。旧账号、归档、设备凭证与版本均保留，缺少展示名时使用原 ID。部署前备份 Junction 与网关；恢复时同时恢复双方数据库和网关用户凭证。
+
 ## 部署目录
 
 ```
