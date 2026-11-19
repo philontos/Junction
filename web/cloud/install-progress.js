@@ -16,8 +16,14 @@ const issues = {
 export function installationView(record, now = Date.now()) {
   const index=Math.max(0,steps.indexOf(record.step));
   const complete=record.status==='succeeded' && record.online && !!record.device_id;
+  if(record.issue==='account_changed')return {title:record.online?'账号已切换 · 设备在线':'账号已切换 · 等待设备上线',detail:'已复用原有节点，任务、工作目录和工具均保留。之前共享的 Context 仍属于原账号。',tone:record.online?'online':'waiting',progress:6,retry:false,complete};
   if(complete)return {title:'安装完成 · 设备在线',detail:'本机服务和云端连接均已验证，可以开始工作。',tone:'online',progress:6,retry:false,complete:true};
+  if(record.issue==='account_kept')return {title:'已保留原账号绑定',detail:'可登录原账号继续使用这台设备。当前账号下的其他设备也可直接进入。',tone:'waiting',progress:index,retry:false,complete:false};
   if(record.expires<=now)return {title:'安装命令已过期',detail:'重新生成命令即可继续，本机已完成的下载和安装会保留。',tone:'failed',progress:index,retry:true,complete:false};
+  if(record.issue==='account'){
+    const conflict=record.account_conflict;
+    return {title:conflict?`${conflict.device_name} 已绑定 ${conflict.from_username}`:'设备绑定需要重新确认',detail:conflict?`可保留原绑定，或切换到 ${conflict.to_username}。切换后原账号无法再访问此设备；本机任务和文件保留，已共享 Context 的归属不变。`:'绑定信息已变化，请重新生成并执行安装命令。',tone:'waiting',progress:index,retry:!conflict,complete:false};
+  }
   if(record.status==='pending')return {title:'等待在本机执行命令',detail:'请在 10 分钟内开始；开始后可在 24 小时内继续。',tone:'waiting',progress:0,retry:false,complete:false};
   if(record.status==='succeeded')return {title:'安装已完成 · 等待设备重新上线',detail:'请确认设备已开机并联网，节点会自动重连。',tone:'waiting',progress:6,retry:false,complete:false};
   const failed=['failed','paused'].includes(record.status);

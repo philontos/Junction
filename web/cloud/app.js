@@ -14,6 +14,7 @@ const setupCode = new URLSearchParams(location.hash.slice(1)).get('setup');
 if (location.hash) history.replaceState(null, '', location.pathname);
 let signedIn = false, installationId = '', installationKey = '', lastDevices = '', refreshing = false;
 let registrationOpen = false, authMode = setupCode ? 'activate' : 'login';
+let decidingBinding = '';
 async function api(route, body, method = 'POST') {
   let response;
   try { response = await fetch('/hub/' + route, {signal:AbortSignal.timeout(15000), ...(body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })}); }
@@ -53,10 +54,20 @@ function renderInstallation(record) {
   $('setup-status').textContent=view.title;
   $('setup-status').previousElementSibling.className='dot '+view.tone;
   $('setup-detail').textContent=view.detail;
-  $('setup-progress').hidden=record.status==='pending';
+  $('setup-progress').hidden=record.status==='pending' || record.issue.startsWith('account');
   $('setup-progress').value=view.progress;
   if(!$('command').textContent)$('command').parentElement.hidden=true;
-  $('retry-install').hidden=!(view.retry || (!$('command').textContent && !view.complete));
+  const conflict=record.account_conflict;
+  $('setup-title').textContent=conflict?'确认设备归属':'连接这台电脑';
+  $('setup-resume').hidden=record.issue.startsWith('account') || view.complete;
+  $('keep-binding').hidden=$('switch-binding').hidden=!conflict;
+  $('keep-binding').textContent=decidingBinding==='keep-account'?'正在保留…':'保留原账号';
+  $('switch-binding').textContent=decidingBinding==='rebind'?'正在切换…':conflict?`切换到 ${conflict.to_username}`:'切换到当前账号';
+  $('keep-binding').disabled=$('switch-binding').disabled=!!decidingBinding;
+  $('retry-install').hidden=conflict || record.issue==='account_kept' || !(view.retry || (!$('command').textContent && !view.complete));
+  if(conflict || record.issue==='account_kept' || record.issue==='account_changed'){
+    $('command').parentElement.hidden=true; $('setup-help').hidden=true;
+  }
   $('setup-enter').hidden=!view.complete;
   if(view.complete){
     $('setup-enter').href='/workspace/'+encodeURIComponent(record.device_id)+'/';
@@ -69,8 +80,9 @@ async function refresh() {
   if (!signedIn || refreshing) return;
   refreshing=true;
   try {
-  const [{items}, installation] = await Promise.all([api('devices'),installationId ? api('installations/'+installationId) : null]);
-  if(installation)renderInstallation(installation);
+  const id=installationId;
+  const [{items}, installation] = await Promise.all([api('devices'),id ? api('installations/'+id) : null]);
+  if(installation && installationId===id)renderInstallation(installation);
   const signature = JSON.stringify(items);
   if (signature === lastDevices) return;
   lastDevices = signature; $('devices').replaceChildren();
@@ -119,6 +131,23 @@ $('install').onclick = async () => {
   } catch (e) { error(e.message); } finally { $('install').disabled = false; }
 };
 $('retry-install').onclick = () => $('install').click();
+async function decideBinding(action) {
+  if(decidingBinding || !installationId)return;
+  const labels=[$('keep-binding').textContent,$('switch-binding').textContent];
+  decidingBinding=action;error();
+  $('keep-binding').disabled=$('switch-binding').disabled=$('install').disabled=$('close-setup').disabled=true;
+  $(action==='rebind'?'switch-binding':'keep-binding').textContent=action==='rebind'?'正在切换…':'正在保留…';
+  const id=installationId;
+  try {await api('installations/'+id+'/'+action,{});}
+  catch(e){error(e.message);}
+  finally {
+    decidingBinding='';$('keep-binding').textContent=labels[0];$('switch-binding').textContent=labels[1];
+    $('keep-binding').disabled=$('switch-binding').disabled=$('install').disabled=$('close-setup').disabled=false;
+    await refresh().catch(e=>error(e.message));
+  }
+}
+$('keep-binding').onclick=()=>decideBinding('keep-account');
+$('switch-binding').onclick=()=>decideBinding('rebind');
 $('close-setup').onclick = () => { $('setup').hidden = true; installationId=''; try { sessionStorage.removeItem(installationKey); } catch {} };
 $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText($('command').textContent); $('copy').textContent = '已复制'; setTimeout(() => { $('copy').textContent = '复制命令'; }, 1500); }

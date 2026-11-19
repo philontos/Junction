@@ -58,10 +58,50 @@ test('installation claim is device-bound, extends only once, survives restart an
   assert.equal(store.devices('alice').length,1);
   assert.equal(store.installation(digest(reinstall),'alice')?.device_id,enrolled.device_id);
   const foreign=store.pair('bob');store.claimInstallation(foreign,'aaaaaaaa');
-  assert.throws(()=>store.attachInstallation(foreign,store.deviceByToken(credential)!),/不匹配/);
+  assert.throws(()=>store.attachInstallation(foreign,store.deviceByToken(credential)!),/已绑定其他账号/);
+  assert.equal(store.installation(digest(foreign),'bob')?.issue,'account');
+  store.installationProgress(foreign,'aaaaaaaa','start','failed','service');
+  assert.equal(store.installation(digest(foreign),'bob')?.issue,'account');
+  assert.equal(store.deviceByToken(credential)?.user_id,'alice');
   store.db.prepare('UPDATE installations SET expires=0 WHERE id=?').run(digest(reinstall));
   assert.throws(()=>store.claimInstallation(reinstall,'aaaaaaaa'),/过期/);
   assert.throws(()=>store.installationProgress(reinstall,'aaaaaaaa','start','running','none'),/过期/);
+});
+
+test('account switch preserves the node and requires fresh proof plus the target account decision',t=>{
+  const store=new CloudStore(temp(t));t.after(()=>store.db.close());
+  for(const user of ['alice','bob'])store.activate(store.activation(user,'/private/'+user+'.token'),'installer-test-password');
+  const device=store.enroll(store.pair('alice'),'aaaaaaaa','Laptop');
+  const credential=()=>store.deviceByToken(device.device_token)!;
+  const code=store.pair('bob'),id=digest(code),claim=store.claimInstallation(code,'aaaaaaaa');
+  assert.throws(()=>store.rebindInstallation(id,'bob'),/绑定信息/);
+  assert.equal(store.recordAccountConflict(claim,credential()),true);
+  assert.equal(store.accountConflict(id,'bob')?.from_username,'alice');
+  assert.equal(store.accountConflict(id,'alice'),undefined);
+  assert.throws(()=>store.rebindInstallation(id,'alice'),/不存在/);
+  store.keepInstallationAccount(id,'bob');
+  assert.equal(credential().user_id,'alice');assert.throws(()=>store.rebindInstallation(id,'bob'),/绑定信息/);
+  store.keepInstallationAccount(id,'bob');
+  assert.throws(()=>store.attachInstallation(code,credential()),/已处理/);
+  assert.equal(store.installation(id,'bob')?.issue,'account_kept');
+  assert.throws(()=>store.claimInstallation(code,'aaaaaaaa'),/已处理/);
+  const next=store.pair('bob'),nextId=digest(next);
+  store.recordAccountConflict(store.claimInstallation(next,'aaaaaaaa'),credential());
+  // A different instance cannot register a proof for this device.
+  const wrong=store.pair('bob');
+  assert.throws(()=>store.recordAccountConflict(store.claimInstallation(wrong,'bbbbbbbb'),credential()),/不匹配/);
+  assert.deepEqual(store.rebindInstallation(nextId,'bob'),{device_id:device.device_id,changed:true});
+  assert.equal(credential().user_id,'bob');assert.equal(credential().instance_id,'aaaaaaaa');
+  assert.equal(store.device(device.device_id,'alice'),undefined);
+  assert.deepEqual(store.rebindInstallation(nextId,'bob'),{device_id:device.device_id,changed:false});
+  assert.throws(()=>store.keepInstallationAccount(nextId,'bob'),/绑定信息/);
+  store.installationProgress(next,'aaaaaaaa','start','failed','service');
+  assert.equal(store.installation(nextId,'bob')?.issue,'account_changed');
+  const back=store.pair('alice'),backId=digest(back);
+  store.recordAccountConflict(store.claimInstallation(back,'aaaaaaaa'),credential());
+  store.revoke(device.device_id,'bob');
+  assert.equal(store.accountConflict(backId,'alice'),undefined);
+  assert.throws(()=>store.rebindInstallation(backId,'alice'),/绑定信息/);
 });
 
 test('schema 1 upgrades without changing users, sessions or device credentials',t=>{
@@ -145,4 +185,15 @@ test('installer rejects concurrent execution and recovers a stale process lock',
   assert.notEqual(shell(dir,'lock_install').status,0);
   fs.writeFileSync(path.join(dir,'lock/pid'),'2147483647');
   assert.equal(shell(dir,'lock_install; cleanup').status,0);assert.equal(fs.existsSync(path.join(dir,'lock')),false);
+});
+test('existing-account conflict stops in preflight before downloads and keeps credentials out of output',t=>{
+  const dir=temp(t),bin=path.join(dir,'bin');fs.mkdirSync(bin);
+  fs.mkdirSync(path.join(dir,'data'));fs.writeFileSync(path.join(dir,'data/controller-id'),'aaaaaaaa\n');
+  const token='a'.repeat(43);fs.writeFileSync(path.join(dir,'device.token'),token+'\n');
+  executable(path.join(bin,'curl'),`while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then printf '{"error":"account conflict"}' > "$2"; shift; fi; shift; done; printf 412`);
+  const result=shell(dir,`install_runtime() { echo unexpected-download; exit 99; }; main ${'b'.repeat(24)}`,{PATH:bin+':'+process.env.PATH,SWITCHYARD_NODE_HOME:dir});
+  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/回到网页/);
+  assert.doesNotMatch(result.stdout,/unexpected-download/);assert.ok(!result.stdout.includes(token));
+  assert.equal(fs.readFileSync(path.join(dir,'device.token'),'utf8'),token+'\n');
+  assert.equal(fs.existsSync(path.join(dir,'install/node-headers')),false);
 });

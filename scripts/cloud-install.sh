@@ -24,8 +24,9 @@ post() {
   local route="$1" body="$2" status
   printf '%s' "$body" > "$INSTALL_DIR/request.json"
   status=$(curl --silent --show-error --connect-timeout 10 --max-time 25 --retry 2 --retry-delay 1 \
-    --proto '=https' --tlsv1.2 -H 'Content-Type: application/json' --data-binary "@$INSTALL_DIR/request.json" \
+    --proto '=https' --tlsv1.2 -H 'Content-Type: application/json' -H "@$INSTALL_DIR/node-headers" --data-binary "@$INSTALL_DIR/request.json" \
     -o "$INSTALL_DIR/response.json" -w '%{http_code}' "$SWITCHYARD_ORIGIN/hub/$route") || return 1
+  POST_STATUS="$status"
   [[ "$status" =~ ^2[0-9][0-9]$ ]] || return 1
 }
 report() {
@@ -38,6 +39,7 @@ checkpoint() {
 }
 step() { STEP="$1"; ISSUE="$2"; STAGE_TITLE="$4"; checkpoint running; printf '\n[%s/6] %s\n' "$3" "$4"; report running; }
 cleanup() {
+  rm -f "$INSTALL_DIR/node-headers"
   if [[ "$LOCKED" == 1 ]]; then rm -f "$INSTALL_DIR/lock/pid"; rmdir "$INSTALL_DIR/lock" 2>/dev/null || true; fi
 }
 failed() {
@@ -240,6 +242,14 @@ main() {
   chmod 700 "$NODE_HOME" "$INSTALL_DIR"
   lock_install || return 1
   trap cleanup EXIT
+  # Prove the existing node identity before downloading/installing anything.
+  # The header stays in a private file, never in curl's command-line arguments.
+  : > "$INSTALL_DIR/node-headers"
+  if [[ -f "$NODE_HOME/device.token" ]]; then
+    local credential=''
+    IFS= read -r credential < "$NODE_HOME/device.token" || true
+    if [[ "$credential" =~ ^[A-Za-z0-9_-]{43}$ ]]; then printf 'Authorization: Bearer %s\n' "$credential" > "$INSTALL_DIR/node-headers"; fi
+  fi
   exec > >(tee -a "$INSTALL_DIR/install.log") 2>&1
   trap failed ERR
   trap paused INT TERM
@@ -251,6 +261,11 @@ main() {
   say '自动检测、补装并验证；中断后再次执行同一命令即可继续。'
   ISSUE=binding
   if ! post installations/claim "{\"code\":\"$PAIR_CODE\",\"instance_id\":\"$INSTANCE\"}"; then
+    if [[ "${POST_STATUS:-}" == 412 ]]; then
+      say '需要确认设备绑定：请回到网页选择保留原账号，或切换到当前账号。原节点仍可使用，无需卸载重装。'
+      checkpoint waiting
+      return 0
+    fi
     say '无法启动安装：请检查网络，或在网页重新生成命令。已安装内容会保留。' >&2; return 1
   fi
   CLAIMED=1

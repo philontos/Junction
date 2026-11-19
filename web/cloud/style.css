@@ -46,7 +46,7 @@
 .cloud-portal #setup-progress::-webkit-progress-bar { background: var(--surface-2); }
 .cloud-portal #setup-progress::-webkit-progress-value { background: var(--accent); }
 .cloud-portal #setup-progress::-moz-progress-bar { background: var(--accent); }
-.cloud-portal .setup-actions { display: flex; gap: 8px; margin-top: 12px; }
+.cloud-portal .setup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .cloud-portal .setup-actions:has(> [hidden]):not(:has(> :not([hidden]))) { display: none; }
 .cloud-portal .note, .cloud-portal .footnote { font-size: 11px; color: var(--faint); }
 .cloud-portal .note { margin-bottom: 0; }

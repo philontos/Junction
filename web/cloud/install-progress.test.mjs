@@ -15,3 +15,13 @@ test('expired, stalled, interrupted and authorization states have actionable rec
   const permission=installationView({...run,status:'waiting',issue:'permission'},1000);
   assert.match(permission.detail,/本机管理员/);assert.equal(permission.retry,false);
 });
+test('account conflict asks for an explicit choice; an offline switch never claims the node is ready',()=>{
+  const conflict={device_id:'old',device_name:'Laptop',from_username:'phil',to_username:'wangyuhao'};
+  const view=installationView({...run,status:'waiting',issue:'account',account_conflict:conflict},1000);
+  assert.match(view.title,/已绑定 phil/);assert.match(view.detail,/切换到 wangyuhao/);assert.equal(view.retry,false);
+  assert.equal(view.complete,false);
+  const changed={...run,status:'succeeded',issue:'account_changed',device_id:'old'};
+  assert.equal(installationView(changed,1000).complete,false);
+  assert.equal(installationView({...changed,online:true},1000).complete,true);
+  assert.match(installationView({...run,issue:'account_kept'},1000).title,/已保留/);
+});

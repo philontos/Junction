@@ -8,7 +8,7 @@ export const digest = (value: string) => crypto.createHash('sha256').update(valu
 export interface CloudUser { id: string; username: string; password: string | null; junction_token_file: string; provisioned: number }
 export interface CloudDevice { id: string; user_id: string; instance_id: string; name: string; created_at: number; revoked_at: number | null }
 export const installSteps = ['check','runtime','tools','download','dependencies','start','complete'] as const;
-export const installIssues = ['none','network','permission','tools','download','integrity','dependencies','binding','service','interrupted','unsupported','unknown'] as const;
+export const installIssues = ['none','network','permission','tools','download','integrity','dependencies','binding','account','account_kept','account_changed','service','interrupted','unsupported','unknown'] as const;
 export interface CloudInstallation { id: string; user_id: string; instance_id: string | null; device_id: string | null; step: string; status: string; issue: string; updated_at: number; expires: number }
 export class CloudError extends Error { constructor(public status: number, message: string) { super(message); } }
 
@@ -45,6 +45,8 @@ export class CloudStore {
         instance_id TEXT, device_id TEXT REFERENCES devices(id), step TEXT NOT NULL, status TEXT NOT NULL,
         issue TEXT NOT NULL, updated_at INTEGER NOT NULL, expires INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS installation_user ON installations(user_id,updated_at);
+      CREATE TABLE IF NOT EXISTS installation_bindings(installation_id TEXT PRIMARY KEY REFERENCES installations(id),
+        device_id TEXT NOT NULL REFERENCES devices(id), previous_user_id TEXT NOT NULL REFERENCES users(id), token_hash TEXT NOT NULL);
     `);
     this.db.transaction(() => {
       const columns = this.db.prepare('PRAGMA table_info(users)').all() as {name:string}[];
@@ -131,6 +133,7 @@ export class CloudStore {
     const token = crypto.randomBytes(12).toString('hex');
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM pairings WHERE expires<=?').run(Date.now());
+      this.db.prepare('DELETE FROM installation_bindings WHERE installation_id IN (SELECT id FROM installations WHERE expires<?)').run(Date.now()-7*86400_000);
       this.db.prepare('DELETE FROM installations WHERE expires<?').run(Date.now()-7*86400_000);
       const expires=Date.now()+10*60_000;
       this.db.prepare('INSERT INTO pairings VALUES (?,?,?)').run(digest(token), user, expires);
@@ -146,6 +149,7 @@ export class CloudStore {
     return this.db.transaction(() => {
       const row=this.db.prepare('SELECT * FROM installations WHERE id=? AND expires>?').get(digest(code),Date.now()) as CloudInstallation | undefined;
       if(!row)throw new CloudError(401,'安装码已过期，请在网页生成新命令；已安装内容会保留。');
+      if(['account_kept','account_changed'].includes(row.issue))throw new CloudError(409,'账号绑定已处理，请从设备列表进入；如需重新安装，请生成新命令。');
       if(row.instance_id && row.instance_id!==instance)throw new CloudError(409,'安装码已由另一台设备使用，请生成新命令。');
       // A code must START within ten minutes. Claiming binds it to one local
       // installation and allows a fixed 24-hour recovery window, never sliding.
@@ -161,9 +165,63 @@ export class CloudStore {
     if(!installSteps.includes(step as any) || !['running','waiting','failed','paused','succeeded'].includes(status) || !installIssues.includes(issue as any)) throw new CloudError(400,'安装状态无效。');
     const row=this.db.prepare('SELECT * FROM installations WHERE id=? AND instance_id=? AND expires>?').get(digest(code),instance,Date.now()) as CloudInstallation | undefined;
     if(!row)throw new CloudError(401,'安装记录已过期，请重新生成安装命令。');
+    // Old installers report a generic startup failure after the authenticated
+    // account check. Preserve the precise conflict/decision shown by the portal.
+    if(row.issue==='account_kept' || row.issue==='account_changed')return;
+    if(row.issue==='account' && ['failed','paused'].includes(status) && issue==='service')issue='account';
     this.db.prepare('UPDATE installations SET step=?,status=?,issue=?,updated_at=? WHERE id=?').run(step,status,issue,Date.now(),row.id);
   }
+  recordAccountConflict(row: CloudInstallation, device: CloudDevice) {
+    return this.db.transaction(() => {
+      const live=this.db.prepare('SELECT * FROM devices WHERE id=? AND user_id=? AND revoked_at IS NULL').get(device.id,device.user_id) as (CloudDevice & {token_hash:string}) | undefined;
+      const current=this.installation(row.id,row.user_id);
+      if(!live || !current || current.expires<=Date.now() || current.instance_id!==live.instance_id)throw new CloudError(403,'安装记录与当前设备不匹配。');
+      if(live.user_id===current.user_id)return false;
+      if(['account_kept','account_changed'].includes(current.issue))throw new CloudError(409,'账号绑定已处理，请生成新的安装命令。');
+      this.db.prepare('INSERT INTO installation_bindings VALUES (?,?,?,?) ON CONFLICT(installation_id) DO UPDATE SET device_id=excluded.device_id,previous_user_id=excluded.previous_user_id,token_hash=excluded.token_hash').run(row.id,live.id,live.user_id,live.token_hash);
+      this.db.prepare("UPDATE installations SET status='waiting',issue='account',updated_at=? WHERE id=?").run(Date.now(),row.id);
+      return true;
+    })();
+  }
+  accountConflict(id:string,user:string) {
+    return this.db.prepare(`SELECT d.id AS device_id,d.name AS device_name,old.username AS from_username,target.username AS to_username
+      FROM installation_bindings b JOIN installations i ON i.id=b.installation_id
+      JOIN devices d ON d.id=b.device_id JOIN users old ON old.id=d.user_id JOIN users target ON target.id=i.user_id
+      WHERE i.id=? AND i.user_id=? AND i.expires>? AND i.issue='account' AND d.revoked_at IS NULL
+        AND d.user_id=b.previous_user_id AND d.token_hash=b.token_hash AND d.instance_id=i.instance_id`).get(id,user,Date.now()) as {device_id:string;device_name:string;from_username:string;to_username:string} | undefined;
+  }
+  keepInstallationAccount(id:string,user:string) {
+    this.db.transaction(() => {
+      const row=this.installation(id,user);
+      if(!row)throw new CloudError(404,'安装记录不存在。');
+      if(row.issue==='account_kept')return;
+      if(!this.accountConflict(id,user))throw new CloudError(409,'绑定信息已变化或确认已过期，请重新生成并执行安装命令。');
+      this.db.prepare('DELETE FROM installation_bindings WHERE installation_id=?').run(id);
+      this.db.prepare("UPDATE installations SET status='paused',issue='account_kept',updated_at=? WHERE id=? AND issue='account'").run(Date.now(),id);
+      this.db.prepare('DELETE FROM pairings WHERE hash=?').run(id);
+    })();
+  }
+  rebindInstallation(id:string,user:string) {
+    return this.db.transaction(() => {
+      const row=this.installation(id,user);
+      if(!row)throw new CloudError(404,'安装记录不存在。');
+      if(row.issue==='account_changed' && row.device_id && this.device(row.device_id,user))return {device_id:row.device_id,changed:false};
+      const conflict=this.accountConflict(id,user);
+      if(!conflict)throw new CloudError(409,'绑定信息已变化或确认已过期，请重新生成并执行安装命令。');
+      if(this.db.prepare('SELECT 1 FROM devices WHERE user_id=? AND instance_id=? AND revoked_at IS NULL AND id<>?').get(user,row.instance_id,conflict.device_id))throw new CloudError(409,'当前账号已有这台设备，请从设备列表进入。');
+      // The node credential belongs to the installed node, never to the web
+      // browser. Keep it and the device ID so running tasks/connection survive;
+      // every browser request is authorized against the new owner immediately.
+      this.db.prepare('UPDATE devices SET user_id=? WHERE id=?').run(user,conflict.device_id);
+      this.db.prepare("UPDATE installations SET device_id=?,step='complete',status='succeeded',issue='account_changed',updated_at=? WHERE id=?").run(conflict.device_id,Date.now(),id);
+      this.db.prepare('DELETE FROM installation_bindings WHERE installation_id=?').run(id);
+      this.db.prepare('DELETE FROM pairings WHERE hash=?').run(id);
+      return {device_id:conflict.device_id,changed:true};
+    })();
+  }
   attachInstallation(code: string, device: CloudDevice) {
+    const candidate=this.db.prepare('SELECT * FROM installations WHERE id=?').get(digest(code)) as CloudInstallation | undefined;
+    if(candidate && this.recordAccountConflict(candidate,device))throw new CloudError(409,'这台设备已绑定其他账号，请回到网页选择保留原绑定或切换账号。');
     return this.db.transaction(() => {
       const row=this.installation(digest(code),device.user_id);
       if(!row || row.instance_id!==device.instance_id || row.expires<=Date.now())throw new CloudError(403,'安装记录与当前设备不匹配。');

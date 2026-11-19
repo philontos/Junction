@@ -138,4 +138,24 @@ test('gateway relays HTTP, progress and terminal to the owned, URL-pinned node; 
   const closed=once(remaining,'close');
   assert.equal((await request('/hub/logout',session,{})).status,200);await closed;
   assert.equal((await request('/nodes/'+nb.device_id+'/api/test',session)).status,401);
+
+  // Preflight authenticates the installed node before offering a target-account
+  // choice. Switching preserves its tunnel but closes the old owner's terminal.
+  const source=gateway.store.login('alice','test-long-password');
+  const pairingB=gateway.store.pair('bob');
+  const preflight=await fetch(url+'/hub/installations/claim',{method:'POST',headers:{Authorization:'Bearer '+nb.device_token,'Content-Type':'application/json'},body:JSON.stringify({code:pairingB,instance_id:'bbbbbbbb'})});
+  assert.equal(preflight.status,412);
+  const bindingId=crypto.createHash('sha256').update(pairingB).digest('hex');
+  const conflict=await (await request('/hub/installations/'+bindingId,other.token)).json() as any;
+  assert.equal(conflict.account_conflict.from_username,'alice');assert.equal(conflict.account_conflict.to_username,'bob');
+  assert.equal((await request('/hub/installations/'+bindingId+'/rebind',source.token,{})).status,404);
+  assert.equal((await request('/hub/installations/'+bindingId+'/rebind',other.token,{},false)).status,403);
+  const original=new WebSocket(url.replace('http','ws')+'/nodes/'+nb.device_id+'/pty?session=test',{headers:{Cookie:'sw_session='+source.token,Origin:origin}});
+  t.after(()=>original.terminate());await once(original,'open');const detached=once(original,'close');
+  assert.equal((await request('/hub/installations/'+bindingId+'/rebind',other.token,{})).status,200);await detached;
+  assert.equal((await request('/nodes/'+nb.device_id+'/api/test',source.token)).status,404);
+  assert.equal((await request('/nodes/'+nb.device_id+'/api/test',other.token)).status,200);
+  assert.equal((await request('/hub/installations/'+bindingId+'/rebind',other.token,{})).status,200);
+  const nodeIdentity=await fetch(url+'/hub/node',{headers:{Authorization:'Bearer '+nb.device_token}});
+  assert.equal((await nodeIdentity.json() as any).user_id,'bob');
 });

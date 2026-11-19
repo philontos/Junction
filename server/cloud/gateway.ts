@@ -90,11 +90,21 @@ export function createGateway(config: GatewayConfig) {
     const row=store.installation(req.params.id,user(req).id);if(!row)throw new CloudError(404,'安装记录不存在。');
     const device=row.device_id && store.device(row.device_id,row.user_id);
     res.json({id:row.id,step:row.step,status:row.status,issue:row.issue,updated_at:row.updated_at,expires:row.expires,
-      device_id:device ? device.id : null,online:!!device && broker.nodes.has(device.id)});
+      device_id:device ? device.id : null,online:!!device && broker.nodes.has(device.id),account_conflict:store.accountConflict(row.id,row.user_id) || null});
+  });
+  app.post('/hub/installations/:id/keep-account', (req,res) => {
+    csrf(req);store.keepInstallationAccount(req.params.id,user(req).id);res.json({ok:true});
+  });
+  app.post('/hub/installations/:id/rebind', (req,res) => {
+    csrf(req);const result=store.rebindInstallation(req.params.id,user(req).id);
+    if(result.changed)for(const [socket,binding] of terminals)if(binding.device===result.device_id)socket.destroy();
+    res.json({device_id:result.device_id,online:broker.nodes.has(result.device_id)});
   });
   app.post('/hub/installations/claim', (req,res) => {
     rate('install-claim:'+clientIp(req),120);
     const row=store.claimInstallation(String(req.body.code || ''),String(req.body.instance_id || ''));
+    const device=store.deviceByToken(bearer(req.headers.authorization));
+    if(device && store.recordAccountConflict(row,device))throw new CloudError(412,'这台设备已绑定其他账号，请回到网页选择保留原绑定或切换账号。');
     res.json({id:row.id,expires:row.expires});
   });
   app.post('/hub/installations/progress', (req,res) => {

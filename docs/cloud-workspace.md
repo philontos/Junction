@@ -34,6 +34,8 @@ node --import tsx server/cloud/admin.ts reset-password USER /private/output-file
 
 网页「安装本机节点」生成命令，用户在终端执行一次。安装器自动完成六步：系统检查 → Node.js/npm → Git/tmux/zsh 与编译工具 → 下载校验 → 组件运行验证 → 绑定、启动与云端连接验证。Agent CLI 和认证仍由用户自行选择和安装。
 
+已有节点会在下载前携带本机设备凭证核对账号。同一账号可复用已有配置和安装缓存；不同账号会暂停安装，网页显示原账号、目标账号，并提供“保留原账号”和“切换到当前账号”。换绑需要有效的本机凭证、匹配的安装码和目标账号的明确选择；设备绑定被撤销、凭证或归属已变化、安装码过期时必须重新检测。换绑复用设备 ID、节点凭证和本机任务，不要求卸载；原账号的网页终端会断开，后续请求不再有设备访问权，旧 Context 归属不迁移。离线设备换绑后仍显示等待上线。仅远程操作已有设备无需安装本机节点。
+
 已可用的 Node.js 22/24 与工具会被复用。缺少或不兼容的 Node.js 使用官方 v24.22.3 二进制，按系统/CPU 校验固定 SHA-256，安装在节点自己的 `runtime/` 下，不修改系统 Node.js 或 shell 配置。macOS 通过 Homebrew 补装缺失工具；缺少 Homebrew 时使用其官方安装器。Apple 命令行工具由系统安装弹窗引导，安装器等待并复查。Debian/Ubuntu 使用 apt-get，Fedora/RHEL 系列使用 dnf。需要系统安装权限时提示用户在本机授权，不保存或上传密码。Linux 后台运行需要可用的用户级 systemd。
 
 下载入口需要 curl、tar 及一种 SHA-256 工具（shasum、sha256sum 或 openssl）；macOS 自带这些基础工具。极简 Linux 如果连 curl 都没有，需要先通过系统包管理器安装 curl 和 CA 证书。自动安装覆盖 macOS、使用 glibc 的 Linux x64/arm64；其他系统会明确提示。安装器只补装缺失依赖，不做全系统升级。

@@ -43,7 +43,9 @@ async function progress(status:string,step='start',attempts=3) {
 if (fs.existsSync(configFile)) {
   config = JSON.parse(fs.readFileSync(configFile,'utf8'));
   if (config.server !== origin) throw new Error('现有节点属于另一个云服务。');
-  if(!await identity(config.device_token))config=undefined;
+  const current=await identity(config.device_token);
+  if(!current)config=undefined;
+  else {config={...config,...current};save(configFile,JSON.stringify(config,null,2)+'\n');}
 }
 if (!config) {
   // Persist a random credential BEFORE enrolling. If the response is lost,
