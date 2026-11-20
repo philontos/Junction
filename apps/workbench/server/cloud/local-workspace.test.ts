@@ -38,7 +38,8 @@ test('local workbench: cloud ownership, one-use login, direct HTTP/PTY, offline 
   const localPort = await listenLocalWorkspace(local.server, path.join(dir, 'local-port')); t.after(() => local.close());
   assert.equal(fs.readFileSync(path.join(dir, 'local-port'), 'utf8'), String(localPort));
   const localUrl = 'http://127.0.0.1:' + localPort;
-  const tunnel = startNodeTunnel(cloud, device.device_token, backendPort, () => {}, local.issue, local.origin()); t.after(() => tunnel.close());
+  const loopback = Object.entries(os.networkInterfaces()).find(([, addresses]) => addresses?.some(a => a.family === 'IPv4' && a.address === '127.0.0.1'))?.[0];
+  const tunnel = startNodeTunnel(cloud, device.device_token, backendPort, () => {}, local.issue, local.origin(), loopback); t.after(() => tunnel.close());
   await until(() => gateway.broker.localOrigin(device.device_id) === localUrl);
   const owned = await (await fetch(cloud + '/hub/devices', { headers: { Cookie: 'sw_session=' + alice.token } })).json() as any;
   assert.equal(owned.items[0].local_origin, localUrl);

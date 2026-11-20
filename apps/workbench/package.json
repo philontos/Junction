@@ -13,12 +13,13 @@
   },
   "dependencies": {
     "@highlightjs/cdn-assets": "11.11.1",
+    "@junction/agent-adapters": "*",
     "better-sqlite3": "^11.8.1",
     "express": "^4.21.2",
     "node-pty": "^1.0.0",
     "qrcode": "^1.5.4",
-    "ws": "^8.18.0",
-    "@junction/agent-adapters": "*"
+    "undici": "7.30.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

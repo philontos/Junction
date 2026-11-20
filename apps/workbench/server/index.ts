@@ -14,6 +14,9 @@ import { createApp } from "./http/app.js";
 import { attachWs } from "./http/ws.js";
 import { listOwnedTasks } from "./core/ownership.js";
 import { restoreKeepAwake } from "./onboarding/power.js";
+import { configureCloudNetworkFromEnv } from "./cloud/network.js";
+
+configureCloudNetworkFromEnv();
 
 // ensure child processes (git/tmux/pty) find Homebrew/usr-local binaries
 // regardless of how the server was launched (a stripped PATH otherwise breaks

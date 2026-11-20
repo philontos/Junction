@@ -6,20 +6,29 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import WebSocket, { createWebSocketStream } from 'ws';
 import { createLocalWorkspace, listenLocalWorkspace, type LocalAccessRequest, type LocalAccessResult } from './local-workspace.js';
+import { cloudSocketOptions, configureCloudNetwork } from './network.js';
 
-export function startNodeTunnel(server: string, token: string, port: number, onState = (_state: string) => {}, localAccess?: (request: LocalAccessRequest) => LocalAccessResult, localOrigin?: string) {
+export function startNodeTunnel(server: string, token: string, port: number, onState = (_state: string, _error?: string) => {}, localAccess?: (request: LocalAccessRequest) => LocalAccessResult, localOrigin?: string, outboundInterface = '') {
   const origin=new URL(server);
   if (origin.protocol !== 'https:' && !(origin.protocol === 'http:' && ['127.0.0.1','localhost'].includes(origin.hostname))) throw new Error('HTTPS required');
   const base=origin.origin.replace(/^http/,'ws');
   let stopped=false,control:WebSocket|undefined,retry:NodeJS.Timeout|undefined,delay=1000;
   const streams=new Set<WebSocket>();
+  const errorCode = (error: any) => /^[A-Z][A-Z0-9_]{1,63}$/.test(error?.code || '') ? error.code : /timed out/i.test(error?.message || '') ? 'CONNECT_TIMEOUT' : 'CONNECTION_FAILED';
+  const reconnect = () => {
+    if (!stopped) { retry=setTimeout(connect,delay+Math.random()*500);delay=Math.min(delay*2,30000); }
+  };
   function connect() {
     if(stopped)return;
-    const ws=control=new WebSocket(base+'/relay/control',{headers:{Authorization:'Bearer '+token},handshakeTimeout:15000,maxPayload:8192,perMessageDeflate:false});
+    let socketOptions;
+    try { socketOptions=cloudSocketOptions(outboundInterface); }
+    catch (error) { onState('offline',errorCode(error)); reconnect(); return; }
+    const ws=control=new WebSocket(base+'/relay/control',{...socketOptions,headers:{Authorization:'Bearer '+token},handshakeTimeout:15000,maxPayload:8192,perMessageDeflate:false});
+    let lastError: string | undefined;
     let heartbeat=Date.now();
     const watch=setInterval(()=>{if(Date.now()-heartbeat>65000)ws.terminate();},15000);watch.unref();
     ws.on('ping',()=>{heartbeat=Date.now();});
-    ws.on('error',()=>{});
+    ws.on('error',error=>{lastError=errorCode(error);});
     ws.on('message',raw=>{
       let m:any;try{m=JSON.parse(raw.toString());}catch{ws.close(1008,'Invalid protocol');return;}
       if(m.type==='ready' && m.protocol==='switchyard-tunnel/1'){
@@ -33,7 +42,9 @@ export function startNodeTunnel(server: string, token: string, port: number, onS
         return;
       }
       if(m.type!=='connect' || !/^[0-9a-f-]{36}$/.test(m.id) || streams.size>=48){ws.close(1008,'Invalid stream request');return;}
-      const channel=new WebSocket(base+'/relay/stream?id='+m.id,{headers:{Authorization:'Bearer '+token},handshakeTimeout:15000,maxPayload:1024*1024,perMessageDeflate:false});
+      let channel: WebSocket;
+      try { channel=new WebSocket(base+'/relay/stream?id='+m.id,{...cloudSocketOptions(outboundInterface),headers:{Authorization:'Bearer '+token},handshakeTimeout:15000,maxPayload:1024*1024,perMessageDeflate:false}); }
+      catch { return; } // A temporarily missing interface must not crash the node.
       streams.add(channel);channel.on('error',()=>{});channel.on('close',()=>streams.delete(channel));
       channel.on('open',()=>{
         // The cloud can only reach this process's fixed loopback Switchyard,
@@ -46,8 +57,8 @@ export function startNodeTunnel(server: string, token: string, port: number, onS
       });
     });
     ws.on('close',()=>{
-      clearInterval(watch);for(const stream of streams)stream.terminate();streams.clear();onState('offline');
-      if(!stopped){retry=setTimeout(connect,delay+Math.random()*500);delay=Math.min(delay*2,30000);}
+      clearInterval(watch);for(const stream of streams)stream.terminate();streams.clear();
+      if (!stopped) { onState('offline',lastError); reconnect(); }
     });
   }
   connect();
@@ -57,6 +68,10 @@ export function startNodeTunnel(server: string, token: string, port: number, onS
 async function daemon(configPath:string) {
   const config=JSON.parse(fs.readFileSync(configPath,'utf8'));
   const dir=path.dirname(configPath), lock=path.join(dir,'daemon.lock');
+  const networkFile=path.join(dir,'network.json');
+  const network=fs.existsSync(networkFile) ? JSON.parse(fs.readFileSync(networkFile,'utf8')) : {};
+  const outboundInterface=typeof network.outbound_interface==='string' ? network.outbound_interface.trim() : '';
+  if (outboundInterface) configureCloudNetwork(config.server,outboundInterface);
   if(fs.existsSync(lock)){
     const pid=Number(fs.readFileSync(lock,'utf8'));
     if(Number.isSafeInteger(pid)&&pid>0){try{process.kill(pid,0);throw new Error('Node already running');}catch(e:any){if(e.code!=='ESRCH')throw e;}}
@@ -68,7 +83,8 @@ async function daemon(configPath:string) {
   const port=(listener.address() as net.AddressInfo).port;await new Promise<void>(resolve=>listener.close(()=>resolve()));
   const child=spawn(process.execPath,['--import','tsx','server/index.ts'],{cwd:root,stdio:['ignore','inherit','inherit'],env:{...process.env,
     HOST:'127.0.0.1',HOSTS:'127.0.0.1',PORT:String(port),TASK_DISPATCHER_DATA_DIR:path.join(dir,'data'),SWITCHYARD_CLOUD_MANAGED:'1',
-    SWITCHYARD_JUNCTION_CONFIG:path.join(dir,'junction.json')}});
+    SWITCHYARD_JUNCTION_CONFIG:path.join(dir,'junction.json'),
+    SWITCHYARD_CLOUD_NETWORK_ORIGIN:config.server,SWITCHYARD_CLOUD_NETWORK_INTERFACE:outboundInterface}});
   let stopping=false,tunnel:ReturnType<typeof startNodeTunnel>|undefined,local:ReturnType<typeof createLocalWorkspace>|undefined;
   const stop=()=>{if(stopping)return;stopping=true;tunnel?.close();local?.close();child.kill('SIGTERM');};
   process.on('SIGTERM',stop);process.on('SIGINT',stop);
@@ -87,13 +103,13 @@ async function daemon(configPath:string) {
     localPort=await listenLocalWorkspace(local.server,path.join(dir,'local-workspace-port'));
   }catch(error){local?.close();local=undefined;console.error('Local workspace unavailable:',(error as Error).message);}
   const startedAt=Date.now();
-  const runtime=(state:string)=>{
+  const runtime=(state:string,error?:string)=>{
     const file=path.join(dir,'runtime.json'),temporary=file+'.'+process.pid;
-    fs.writeFileSync(temporary,JSON.stringify({port,local_port:localPort,pid:process.pid,device_id:config.device_id,root,state,started_at:startedAt,updated_at:Date.now()}),{mode:0o600});
+    fs.writeFileSync(temporary,JSON.stringify({port,local_port:localPort,pid:process.pid,device_id:config.device_id,root,state,error,started_at:startedAt,updated_at:Date.now()}),{mode:0o600});
     fs.renameSync(temporary,file);
   };
   runtime('connecting');
-  tunnel=startNodeTunnel(config.server,config.device_token,port,state=>{runtime(state);console.log(new Date().toISOString()+' node '+state);},local ? request=>local!.issue(request) : undefined,local?.origin());
+  tunnel=startNodeTunnel(config.server,config.device_token,port,(state,error)=>{runtime(state,error);console.log(new Date().toISOString()+' node '+state+(error?' '+error:''));},local ? request=>local!.issue(request) : undefined,local?.origin(),outboundInterface);
 }
 if(process.argv[1] && fs.realpathSync(process.argv[1])===fileURLToPath(import.meta.url)) {
   const file=process.argv[2];if(!file)throw new Error('Usage: node.ts CONFIG');

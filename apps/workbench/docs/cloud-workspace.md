@@ -114,6 +114,8 @@ node --import tsx server/cloud/admin.ts activate USER /srv/switchyard-cloud/cred
 
 节点协议为 `switchyard-tunnel/1`。控制连接只接收连接请求和心跳；每次 HTTP/终端会话建立独立 WSS 字节流，节点只能转发到本进程固定的回环端口。保留 HTTP/WebSocket 原有消息格式和流控，不引入任务执行 RPC，也不修改 Context 标准。
 
+节点云端常连接与本机工作区独立：进入本机工作区不会断开云端连接，同账号其他设备仍可远程访问。节点默认使用系统网络。如果已确认 VPN 路由导致该云端地址连接失败，可在节点私有配置目录增加 `network.json`：`{"outbound_interface":"en0"}`（填写实际网卡名）。该设置只影响此节点到配置的 Junction 地址的 HTTPS、控制连接和数据流，不修改系统路由、VPN、其他请求或 TLS 验证。每次新连接重新读取网卡地址；网卡暂时不可用时重试并记录 `EADDRNOTAVAIL`，本机任务继续运行。删除此文件并重启节点可恢复系统默认出口。
+
 `server/cloud/cloud.test.ts` 覆盖登录/绑定的单次使用和过期、设备归属、撤销、大请求、流式进度、终端、断线不重放、重连及本机访问限制。前端继续使用现有组件，只给 API 和终端 URL 加设备前缀。
 
 `server/cloud/registration.test.ts` 覆盖旧账号迁移、注册身份初始化与重试、跨用户隔离、限流、注册开关和密码重设。
