@@ -74,6 +74,7 @@ export function buildRepoTaskEnv(opts: RepoEnvOpts): RepoTaskEnv {
   return {
     db: opts.db,
     ns: opts.ns,
+    workspaceRoot: opts.runner.workspaceRoot,
     writeManifest: opts.writeManifest,
     setupWorktree: setupWorktreeOn(opts.runner, opts.ns),
     setupReference: ({ mirror, worktree, requestedRef }) =>

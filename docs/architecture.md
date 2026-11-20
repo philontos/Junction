@@ -16,23 +16,26 @@ The Node adapter package depends on structural task/runner interfaces. The Pytho
 
 The gateway renders the workbench's web assets, but never launches Agents. Existing workbench import paths delegate to the shared modules. This compatibility layer is intentional and contains no duplicated provider implementation.
 
-Public contracts retain their existing versions: `junction.context/1`, optional environment metadata, and `switchyard-tunnel/1`. Directory changes do not alter Context IDs, database schemas, device IDs or local data locations. Local workbench support is negotiated as `local-workspace/1`, so old nodes can still use remote relay.
+Public contracts retain their existing versions: `junction.context/1`, optional environment metadata, and `switchyard-tunnel/1`. The monorepo move did not alter Context IDs, database schemas, device IDs or existing data locations. Local workbench support is negotiated as `local-workspace/1`, so old nodes can still use remote relay.
 
 The merge contains both original Git histories. `git log --all` exposes their commits; `git log --follow -- <file>` tracks moved files. New development happens in Junction; the old Switchyard checkout is retained for rollback/reference and is not the ongoing source of release builds.
 
 ## Task workspaces and Context lifecycle
 
-The node allocates execution directories; Junction owns shared Context identities and revisions. Each node keeps a stable data root independent of release installations:
+The node allocates execution directories; Junction owns shared Context identities and revisions. Private node data and visible working files have separate roots, both independent of release installations:
 
 ```text
 <node data>/
   mirrors/<repo-id>-<name>.git              shared Git objects
-  workspaces/tasks/<task-id>/              independent directory task output
-  workspaces/repos/<repo-id>-<name>/<task-id>/  repository task worktree
   tasks/<task-id>/                         durable task metadata
     task.json, workspace.json              identity, workspace and reference paths
     context.json                          pinned handoff provenance, when present
+~/Junction/workspaces/<node-instance>/
+  tasks/<task-id>/                         independent directory task output
+  repos/<repo-id>-<name>/<task-id>/         repository task worktree
 ```
+
+Node configuration may override the workspace root with `workspace_root`; standalone services use `JUNCTION_WORKSPACE_ROOT`. Isolated dev/test profiles retain their own work files under the profile data root. Root changes affect new tasks only. Repository fetch/checkout is bounded; an unavailable remote does not silently turn into a missing-branch error or an outdated tracking-branch checkout. Explicit local branches and pinned Context commits remain valid starting points. Per-repository `core.sshCommand` is honored so local network/identity configuration can be applied without altering global routing or transferring it through Context.
 
 Creation without `cwd` defaults to a managed workspace. `cwd_mode: existing` requires an explicit existing directory; legacy requests with an explicit `cwd` retain that behavior. `GET /api/tasks/options` advertises `managed_workspaces` and the destination node's layout. A new UI must check that capability before sending a managed request to an older node. Once assigned, the absolute path in the task record is authoritative; resume never recomputes it, and upgrades never relocate old tasks.
 

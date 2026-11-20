@@ -531,7 +531,7 @@ app.delete("/api/repos/:id", async (req, res) => {
 });
 
 // ---------- tasks ----------
-app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, managed_workspaces: true, workspace: workspaceLayout(DATA_DIR), agents: agentCatalog(), home: os.homedir() }));
+app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, managed_workspaces: true, workspace: workspaceLayout(DATA_DIR, localRunner.workspaceRoot), agents: agentCatalog(), home: os.homedir() }));
 app.get("/api/tasks", async (_req, res) => {
   const tasks = listOwnedTasks(db);
   const withLive = await Promise.all(

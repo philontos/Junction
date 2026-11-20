@@ -71,6 +71,15 @@ test("automatic tasks allocate separate workspaces before preparing or starting 
   assert.deepEqual(fs.readdirSync(f.cwd), ["keep.txt"], "home directory is not used implicitly");
 });
 
+test("visible work output stays separate from private task metadata", async t => {
+  const f = fixture(t);
+  f.env.workspaceRoot = path.join(f.root, "Junction", "workspaces", "test");
+  const result = await createDirectoryTask(f.env, { agent: "codex" });
+  assert.equal(result.cwd, fs.realpathSync(path.join(f.env.workspaceRoot, "tasks", String(result.id))));
+  assert.ok(fs.existsSync(path.join(f.dataDir, "tasks", String(result.id), "task.json")));
+  assert.equal(fs.existsSync(path.join(f.dataDir, "workspaces")), false);
+});
+
 test("ambiguous or missing directory selections are rejected without allocating a task", async t => {
   const f = fixture(t);
   await assert.rejects(createDirectoryTask(f.env, { agent: "codex", cwdMode: "existing" }), /请填写/);

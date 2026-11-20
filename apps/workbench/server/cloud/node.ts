@@ -84,6 +84,7 @@ async function daemon(configPath:string) {
   const child=spawn(process.execPath,['--import','tsx','server/index.ts'],{cwd:root,stdio:['ignore','inherit','inherit'],env:{...process.env,
     HOST:'127.0.0.1',HOSTS:'127.0.0.1',PORT:String(port),TASK_DISPATCHER_DATA_DIR:path.join(dir,'data'),SWITCHYARD_CLOUD_MANAGED:'1',
     SWITCHYARD_JUNCTION_CONFIG:path.join(dir,'junction.json'),
+    ...(typeof config.workspace_root === 'string' ? {JUNCTION_WORKSPACE_ROOT:config.workspace_root} : {}),
     SWITCHYARD_CLOUD_NETWORK_ORIGIN:config.server,SWITCHYARD_CLOUD_NETWORK_INTERFACE:outboundInterface}});
   let stopping=false,tunnel:ReturnType<typeof startNodeTunnel>|undefined,local:ReturnType<typeof createLocalWorkspace>|undefined;
   const stop=()=>{if(stopping)return;stopping=true;tunnel?.close();local?.close();child.kill('SIGTERM');};

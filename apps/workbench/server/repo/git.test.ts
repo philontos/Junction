@@ -78,6 +78,33 @@ test("fetchBranch writes the remote-tracking ref, never the checked-out local he
   assert.equal(fetch!.opts.env.GIT_TERMINAL_PROMPT, "0");
 });
 
+test("repository SSH routing is respected instead of replaced by node defaults", async () => {
+  const command = "ssh -B example-interface -o BatchMode=yes";
+  const { runner, calls } = fakeRunner(args => args[0] === "config" ? command : "");
+  await fetchBranch(runner, "/m.git", "main");
+  assert.equal(calls.find(c => c.args[0] === "fetch")!.opts.env.GIT_SSH_COMMAND, command);
+});
+
+test("a failed cold fetch reports its real error without attempting worktree creation", async () => {
+  const { runner, calls } = fakeRunner(args => {
+    if (args[0] === "fetch") throw Object.assign(new Error("Timeout, server github.example not responding"), { code: 128 });
+    if (args[0] === "show-ref") throw Object.assign(new Error("missing local branch"), { code: 1 });
+    return "";
+  });
+  await assert.rejects(addWorktreeFromBranch(runner, "/m.git", "/work/task", "feat/task", "main"), /无法拉取分支 main.*Timeout, server github.example not responding/);
+  assert.ok(!calls.some(c => c.args[0] === "worktree"));
+  assert.ok(!calls.some(c => c.args.includes("refs/remotes/origin/main")), "must not silently use a stale remote tracking ref");
+  assert.ok(calls.find(c => c.args[0] === "fetch")!.opts.signal instanceof AbortSignal, "fetch and child helpers have a deadline");
+});
+
+test("Context commit handoffs use the pinned local commit without fetching a branch named after its SHA", async () => {
+  const commit = "a".repeat(40);
+  const { runner, calls } = fakeRunner(args => args[0] === "rev-parse" ? commit : "");
+  await addWorktreeFromBranch(runner, "/m.git", "/work/task", "feat/task", commit);
+  assert.ok(!calls.some(c => c.args[0] === "fetch"));
+  assert.equal(calls.find(c => c.args[0] === "worktree")!.args.at(-1), commit);
+});
+
 test("reference snapshots bound every Git phase on the owner node", async () => {
   const commit = "a".repeat(40);
   const { runner, calls } = fakeRunner((args) => args[0] === "rev-parse" ? commit : "");
@@ -169,6 +196,18 @@ test("can create a task whose base branch is already checked out in another work
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("first task fetches an empty mirror and checks out into a visible workspace", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sw-git-first-"));
+  try {
+    const { mirror, seed } = await scaffold(root);
+    const destination = path.join(root, "Junction", "workspaces", "node", "repos", "fixture", "1");
+    await addWorktreeFromBranch(localRunner, mirror, destination, "feat/first-task", "main");
+    assert.equal(await headOf(destination), "feat/first-task");
+    assert.equal((await git(destination, "rev-parse", "HEAD")).trim(), (await git(seed, "rev-parse", "main")).trim());
+    assert.equal(fs.readFileSync(path.join(destination, "a.txt"), "utf8"), "a");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test("falls back to the local head when the base branch is not on origin (unpushed)", async () => {

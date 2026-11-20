@@ -32,6 +32,7 @@ export interface DirectoryEnv {
   db: Database.Database;
   ns: string;
   dataDir: string;
+  workspaceRoot?: string;
   home?: string;
   // Exposed for isolated integration tests and for pinning a Junction handoff
   // before the first agent process starts.
@@ -83,7 +84,7 @@ export async function createDirectoryTask(env: DirectoryEnv, options: DirectoryO
   ).run(owner, title, options.prompt || null, destination.cwd || "", destination.mode, options.agent, options.model || null, options.providerId || null, sid);
   const id = Number(result.lastInsertRowid);
   const session = `tdsp-${env.ns}-${id}-directory`;
-  let cwd = destination.cwd || managedTaskDirectory(env.dataDir, id);
+  let cwd = destination.cwd || managedTaskDirectory(env.dataDir, id, env.workspaceRoot);
   env.db.prepare("UPDATE tasks SET session=?,cwd=?,title=? WHERE id=?").run(session, cwd, title || `${options.agent} · #${id}`, id);
   const task = env.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task;
   const manifest = () => writeTaskManifestFromDb(env.dataDir, env.db, id);
@@ -151,6 +152,6 @@ export async function startDirectorySession(runner: Runner, task: Task, options:
 }
 
 export function buildDirectoryEnv(db: Database.Database, ns: string, runner: Runner): DirectoryEnv {
-  return { db, ns, dataDir: runner.dataDir, start: (task, options) => startDirectorySession(runner, task, options),
+  return { db, ns, dataDir: runner.dataDir, workspaceRoot: runner.workspaceRoot, start: (task, options) => startDirectorySession(runner, task, options),
     stop: session => killSession(runner, session) };
 }

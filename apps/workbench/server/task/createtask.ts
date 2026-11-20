@@ -120,6 +120,7 @@ export interface RepoRef {
 export interface RepoTaskEnv {
   db: DB;
   ns: string;
+  workspaceRoot?: string;
   // Persist the task's durable record. Both the CLI verb and HTTP route execute
   // on the owner and inject their node-local manifest writer.
   writeManifest(id: number): void | Promise<void>;
@@ -210,7 +211,7 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
   const id = Number(info.lastInsertRowid);
   const s = slug(opts.title);
   const workBranch = `feat/${id}-${s}`;
-  const worktree = repositoryTaskDirectory(path.resolve(path.dirname(repo.mirror_path), ".."), repo.id, repo.name, id);
+  const worktree = repositoryTaskDirectory(path.resolve(path.dirname(repo.mirror_path), ".."), repo.id, repo.name, id, env.workspaceRoot);
   const referenceRoot = referenceRootPath(worktree);
   const session = `tdsp-${env.ns}-${id}-${slug(repo.name)}-${s}`;
   const materialized: Array<{

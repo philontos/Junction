@@ -35,15 +35,17 @@ npm run dev
 
 新建任务默认自动分配目录，只需选择 Agent 并描述任务。选择仓库时自动创建独立 Worktree；也可以选择“指定已有目录”。从共享 Context 接续时，若本机已添加同一仓库，默认创建它的新 Worktree；否则使用独立工作区，由 Agent 核对和准备所需代码。不会沿用来源设备的绝对路径。
 
-每个节点的数据目录下统一组织新工作区：
+新工作区放在可见的 `~/Junction/workspaces/<节点标识>/`，与 `.switchyard` 中的凭据、数据库和安装包分开。节点标识用于隔离同一台电脑上的不同节点实例：
 
 ```text
-workspaces/
+~/Junction/workspaces/<节点标识>/
   tasks/<任务 ID>/                       普通 Agent 任务
   repos/<仓库 ID>-<仓库名>/<任务 ID>/      仓库任务的 Worktree
 ```
 
 参考仓库仍位于任务内的 `.tdsp/refs/<别名>/`。旧任务保持原路径；恢复任务使用已记录目录。普通任务的目录在归档或删除任务记录后保留，仓库任务沿用原有的显式 Worktree 清理流程。节点升级不移动工作区。
+
+需要自定义位置时，可在节点私有 `node.json` 设置 `workspace_root` 并重启节点，或为独立运行的服务设置 `JUNCTION_WORKSPACE_ROOT`。仅影响新任务。`npm run dev` 的工作区仍放在隔离的 `.local/dev/` 中。
 
 工作区是执行环境，Context 是可共享资产：共享上传会话快照和环境描述，不上传工作目录；同一任务继续共享归入同一 Context，内容变化时生成新版本。从 Context 接续会创建独立任务，固定来源 Context 与版本；再次共享记录 `derived_from`，不会覆盖原 Context。任务清单和交接来源保存在节点的 `tasks/<任务 ID>/`；接续用的固定版本历史副本放在任务控制目录的 `.tdsp/context/`，与 Agent 自己生成的会话分开。
 

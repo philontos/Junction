@@ -45,6 +45,21 @@ export function resolveNamespace(baseDir: string): string {
 }
 export const NS = resolveNamespace(BASE_DATA_DIR);
 export const DATA_DIR = path.join(BASE_DATA_DIR, NS);
+
+// User work belongs in a visible, stable directory, separate from credentials,
+// databases and replaceable releases. Each node instance has its own namespace.
+// An explicitly isolated dev/test profile stays inside its own data directory.
+export function resolveWorkspaceRoot(dataDir: string, env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
+  const configured = env.JUNCTION_WORKSPACE_ROOT?.trim();
+  if (configured) {
+    const expanded = configured === "~" ? home : configured.startsWith("~/") ? path.join(home, configured.slice(2)) : configured;
+    if (!path.isAbsolute(expanded) || expanded.includes("\0")) throw new Error("JUNCTION_WORKSPACE_ROOT 必须是绝对路径或 ~/ 开头的路径。");
+    return path.resolve(expanded);
+  }
+  if (env.TASK_DISPATCHER_DATA_DIR?.trim() && env.SWITCHYARD_CLOUD_MANAGED !== "1") return path.join(dataDir, "workspaces");
+  return path.join(home, "Junction", "workspaces", path.basename(dataDir));
+}
+export const WORKSPACE_ROOT = resolveWorkspaceRoot(DATA_DIR);
 export const DB_PATH = path.join(DATA_DIR, "dispatcher.db");
 export const MANIFEST_PATH = path.join(DATA_DIR, "repos.json");
 

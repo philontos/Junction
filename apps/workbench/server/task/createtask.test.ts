@@ -287,6 +287,17 @@ test("createRepoTask materializes pinned task-local references and installs the 
   }
 });
 
+test("repository worktrees use the configured workspace root while metadata remains private", async () => {
+  const { env, dir, getSetup } = makeRepoEnv({ workspaceRoot: "/home/user/Junction/workspaces/node" });
+  try {
+    const result = await createRepoTask(env, REPO, { baseBranch: "main", title: "visible workspace" });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(getSetup().worktree, `/home/user/Junction/workspaces/node/repos/4-switchyard/${result.id}`);
+    assert.ok(fs.existsSync(path.join(dir, "tasks", String(result.id), "task.json")));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("createRepoTask rejects a reference outside the owning node before creating a task", async () => {
   const { env, dir, db, calls } = makeRepoEnv();
   try {

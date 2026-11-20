@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { DATA_DIR } from "../core/paths.js";
+import { DATA_DIR, WORKSPACE_ROOT } from "../core/paths.js";
 import { Host } from "../core/db.js";
 import { sshIdentityPaths } from "../network/ssh-identity.js";
 
@@ -34,6 +34,7 @@ export interface CommandRunner {
 export interface Runner extends CommandRunner {
   /** This local instance's namespaced data directory. */
   dataDir: string;
+  workspaceRoot?: string;
   mkdirp(dir: string): Promise<void>;
   exists(p: string): Promise<boolean>;
   /** Read a local text file; null if it is missing. */
@@ -96,6 +97,7 @@ function cancellableExec(file: string, args: string[], opts: ExecOpts): Promise<
 export class LocalRunner implements Runner {
   kind = "local" as const;
   dataDir = DATA_DIR;
+  workspaceRoot = WORKSPACE_ROOT;
 
   async exec(file: string, args: string[], opts: ExecOpts = {}): Promise<string> {
     // Git can spawn SSH/curl/credential helpers. Killing only the parent leaves

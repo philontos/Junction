@@ -6,6 +6,7 @@ import { Runner } from "../fleet/runner.js";
 // operations have no SSH transport deadline). Keep it inside the controller's
 // 120s remote-node deadline so a useful domain error can still make it back.
 export const REFERENCE_GIT_TIMEOUT_MS = 90_000;
+export const TASK_GIT_TIMEOUT_MS = 90_000;
 
 export function canonicalGitUrl(value: string): string {
   return String(value || "").trim().replace(/\/+$/, "").replace(/\.git$/i, "");
@@ -21,11 +22,25 @@ async function git(
   timeoutMs?: number,
   signal?: AbortSignal,
 ): Promise<string> {
+  // A bounded Git command must also stop its SSH/credential helper children.
+  const boundedSignal = signal ?? (timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined);
+  let sshCommand = process.env.GIT_SSH_COMMAND;
+  if (!sshCommand && cwd) {
+    // Preserve repository/user routing and identity settings. Overriding
+    // core.sshCommand made a working terminal configuration fail in the node.
+    sshCommand = await runner.exec("git", ["config", "--get", "core.sshCommand"], {
+      cwd, timeoutMs, signal: boundedSignal,
+    }).then(value => value.trim()).catch(error => {
+      boundedSignal?.throwIfAborted();
+      if (error?.code === 1) return ""; // unset
+      throw error;
+    });
+  }
   return runner.exec("git", args, {
     cwd: cwd ?? undefined,
     // extras only — the Runner merges these over the (local or remote) base env.
     env: {
-      GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ||
+      GIT_SSH_COMMAND: sshCommand ||
         "ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3",
       GIT_TERMINAL_PROMPT: "0",
       GCM_INTERACTIVE: "Never",
@@ -36,7 +51,7 @@ async function git(
       ...extraEnv,
     },
     timeoutMs,
-    signal,
+    signal: boundedSignal,
   });
 }
 
@@ -126,13 +141,14 @@ export async function listBranches(runner: Runner, mirror: string): Promise<stri
  * whenever the base was itself a live task's branch. Tracking refs are never
  * checked out, so this is always safe.
  */
-export async function fetchBranch(runner: Runner, mirror: string, branch: string, timeoutMs?: number) {
+export async function fetchBranch(runner: Runner, mirror: string, branch: string, timeoutMs?: number, signal?: AbortSignal) {
   await git(
     runner,
     mirror,
     ["fetch", "--filter=blob:none", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
     {},
     timeoutMs,
+    signal,
   );
 }
 
@@ -146,32 +162,57 @@ export async function fetchMirror(runner: Runner, mirror: string, gitUrl: string
 }
 
 /** True if `ref` (a full refname) resolves in the mirror. */
-async function refExists(runner: Runner, mirror: string, ref: string): Promise<boolean> {
-  return git(runner, mirror, ["show-ref", "--verify", "--quiet", ref]).then(() => true).catch(() => false);
+async function refExists(runner: Runner, mirror: string, ref: string, signal?: AbortSignal): Promise<boolean> {
+  return git(runner, mirror, ["show-ref", "--verify", "--quiet", ref], {}, undefined, signal).then(() => true).catch(error => {
+    signal?.throwIfAborted();
+    if (error?.code === 1) return false;
+    throw error;
+  });
 }
 
 /** Low-level: create `workBranch` from `startPoint` and check it out at `dest`. */
-export async function addWorktree(runner: Runner, mirror: string, dest: string, workBranch: string, startPoint: string) {
+export async function addWorktree(runner: Runner, mirror: string, dest: string, workBranch: string, startPoint: string, signal?: AbortSignal) {
   await runner.mkdirp(path.dirname(dest));
-  await git(runner, mirror, ["worktree", "add", "-b", workBranch, dest, startPoint]);
+  await git(runner, mirror, ["worktree", "add", "-b", workBranch, dest, startPoint], {}, undefined, signal);
+}
+
+function taskGitError(stage: string, error: any): Error {
+  const detail = error?.name === "TimeoutError"
+    ? `等待超过 ${TASK_GIT_TIMEOUT_MS / 1000} 秒`
+    : String(error?.stderr || error?.message || error).trim().replace(/(https?:\/\/)[^\s/]+@/g, "$1[redacted]@").slice(-1200);
+  return new Error(`${stage}：${detail}\n请检查此设备到仓库的网络连接和 Git 认证后重试。`, { cause: error });
 }
 
 /**
  * Create a task's worktree from `baseBranch`. Refreshes the base's tracking ref
- * (best-effort — a purely-local base has no origin counterpart), then branches
- * the new work branch off `origin/<base>` when it exists, else off the local head
- * `<base>` (so you can fork another task's unpushed work). The base is only ever a
+ * then branches from the fetched commit. Only a verified local branch can be
+ * used when fetch fails (so you can fork another task's unpushed work). An old
+ * tracking ref must not silently hide a network/authentication failure. The base is only ever a
  * START POINT — never checked out or modified — so any number of tasks can spring
  * from the same branch, even one a live task currently has checked out.
  */
 export async function addWorktreeFromBranch(
   runner: Runner, mirror: string, dest: string, workBranch: string, baseBranch: string,
 ) {
-  await fetchBranch(runner, mirror, baseBranch).catch(() => {});
-  const startPoint = (await refExists(runner, mirror, `refs/remotes/origin/${baseBranch}`))
-    ? `origin/${baseBranch}`
-    : baseBranch;
-  await addWorktree(runner, mirror, dest, workBranch, startPoint);
+  const signal = AbortSignal.timeout(TASK_GIT_TIMEOUT_MS);
+  let startRef = baseBranch;
+  if (!/^[0-9a-f]{40,64}$/i.test(baseBranch)) {
+    try {
+      await fetchBranch(runner, mirror, baseBranch, undefined, signal);
+      startRef = `refs/remotes/origin/${baseBranch}`;
+    } catch (error) {
+      if (signal.aborted || !(await refExists(runner, mirror, `refs/heads/${baseBranch}`, signal))) {
+        throw taskGitError(`无法拉取分支 ${baseBranch}`, error);
+      }
+      startRef = `refs/heads/${baseBranch}`;
+    }
+  }
+  try {
+    // Pin before checkout so another fetch cannot move this task's base.
+    const commit = (await git(runner, mirror, ["rev-parse", "--verify", "--end-of-options", `${startRef}^{commit}`], {}, undefined, signal)).trim();
+    if (!/^[0-9a-f]{40,64}$/i.test(commit)) throw new Error("起始提交不存在或无效。");
+    await addWorktree(runner, mirror, dest, workBranch, commit, signal);
+  } catch (error) { throw taskGitError("无法创建工作区", error); }
 }
 
 /** Create a reference-only checkout for another repository. The selected branch
