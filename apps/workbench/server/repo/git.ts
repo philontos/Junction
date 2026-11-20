@@ -19,6 +19,7 @@ async function git(
   args: string[],
   extraEnv: Record<string, string> = {},
   timeoutMs?: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   return runner.exec("git", args, {
     cwd: cwd ?? undefined,
@@ -35,6 +36,7 @@ async function git(
       ...extraEnv,
     },
     timeoutMs,
+    signal,
   });
 }
 
@@ -63,12 +65,13 @@ export function mirrorPath(dataDir: string, repoId: number, name: string): strin
  * bare repo, point it at origin, and validate connectivity via ls-remote.
  * Objects for a branch are only fetched later, at dispatch time.
  */
-export async function initMirror(runner: Runner, gitUrl: string, token: string | null, dest: string) {
+export async function initMirror(runner: Runner, gitUrl: string, token: string | null, dest: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   await runner.mkdirp(path.dirname(dest));
   if (await runner.exists(dest)) await runner.rmrf(dest);
-  await git(runner, null, ["init", "--bare", dest]);
-  await git(runner, dest, ["remote", "add", "origin", authUrl(gitUrl, token)]);
-  return readRemoteBranches(runner, dest); // throws on bad url/auth/host
+  await git(runner, null, ["init", "--bare", dest], {}, undefined, signal);
+  await git(runner, dest, ["remote", "add", "origin", authUrl(gitUrl, token)], {}, undefined, signal);
+  return readRemoteBranches(runner, dest, signal); // throws on bad url/auth/host
 }
 
 export interface RemoteBranches {
@@ -77,8 +80,8 @@ export interface RemoteBranches {
 }
 
 /** Read HEAD and branch names together, without fetching any objects. */
-export async function readRemoteBranches(runner: Runner, mirror: string): Promise<RemoteBranches> {
-  const out = await git(runner, mirror, ["ls-remote", "--symref", "origin", "HEAD", "refs/heads/*"]);
+export async function readRemoteBranches(runner: Runner, mirror: string, signal?: AbortSignal): Promise<RemoteBranches> {
+  const out = await git(runner, mirror, ["ls-remote", "--symref", "origin", "HEAD", "refs/heads/*"], {}, undefined, signal);
   const branches: string[] = [];
   let defaultBranch: string | null = null;
   for (const line of out.split(/\r?\n/)) {

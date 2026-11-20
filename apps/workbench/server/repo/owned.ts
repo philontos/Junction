@@ -7,6 +7,7 @@ import { fetchMirror, initMirror, listBranches, mirrorPath, removeWorktree, sele
 import { listTaskReferences, removeTaskReferenceRows } from "../task/references.js";
 
 type DB = Database.Database;
+export const REPO_REGISTRATION_TIMEOUT_MS = 30_000;
 
 export interface OwnedRepoInput {
   name?: string | null;
@@ -17,7 +18,7 @@ export interface OwnedRepoInput {
 
 export type OwnedRepoResult =
   | { ok: true; id: number; existing: boolean; retrying: boolean; status: "ready" }
-  | { ok: false; error: "fieldsRequired" | "notFound" | "notReady" | "hasLiveTasks" | "operationFailed"; message?: string; liveCount?: number };
+  | { ok: false; error: "fieldsRequired" | "notFound" | "notReady" | "hasLiveTasks" | "operationFailed" | "cancelled" | "timedOut"; message?: string; liveCount?: number };
 
 export type OwnedRepoFailure = Extract<OwnedRepoResult, { ok: false }>;
 
@@ -42,17 +43,19 @@ function requireOwnerRunner(env: OwnedRepoEnv): OwnedRepoFailure | null {
 }
 
 /** Register and validate a repository entirely on the owning node. */
-export async function registerOwnedRepo(env: OwnedRepoEnv, input: OwnedRepoInput): Promise<OwnedRepoResult> {
+export async function registerOwnedRepo(env: OwnedRepoEnv, input: OwnedRepoInput, callerSignal?: AbortSignal): Promise<OwnedRepoResult> {
   const runnerFailure = requireOwnerRunner(env);
   if (runnerFailure) return runnerFailure;
   const name = String(input.name || "").trim();
   const gitUrl = String(input.git_url || "").trim();
   const requestedBranch = String(input.default_branch || "").trim();
   if (!name || !gitUrl) return { ok: false, error: "fieldsRequired" };
+  if (callerSignal?.aborted) return { ok: false, error: "cancelled" };
   const hostId = localHostId(env.db);
   if (hostId == null) return { ok: false, error: "operationFailed", message: "local node is not initialized" };
   const existing = findRepoByGitUrl(env.db, hostId, gitUrl);
-  if (existing && existing.status !== "error") {
+  if (existing?.status === "cloning") return { ok: false, error: "notReady", message: "cloning" };
+  if (existing?.status === "ready") {
     return { ok: true, id: existing.id, existing: true, retrying: false, status: "ready" };
   }
 
@@ -74,13 +77,30 @@ export async function registerOwnedRepo(env: OwnedRepoEnv, input: OwnedRepoInput
   }
   env.syncRepos();
 
+  const deadline = AbortSignal.timeout(REPO_REGISTRATION_TIMEOUT_MS);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
   try {
-    const remote = await initMirror(env.runner, gitUrl, input.token || null, dest);
+    const remote = await initMirror(env.runner, gitUrl, input.token || null, dest, signal);
+    signal.throwIfAborted();
     const defaultBranch = selectRemoteBranch(remote, requestedBranch);
     env.db.prepare("UPDATE repos SET default_branch=?,status='ready',error=NULL WHERE id=?").run(defaultBranch, id);
     env.syncRepos();
     return { ok: true, id, existing: !!existing, retrying: !!existing, status: "ready" };
   } catch (error) {
+    if (signal.aborted) {
+      // No usable repository was created. Roll back only this registration,
+      // preserving an existing failed entry (and its ID) when this was a retry.
+      if (existing) {
+        env.db.prepare("UPDATE repos SET name=?,git_url=?,token=?,default_branch=?,mirror_path=?,status=?,error=? WHERE id=?")
+          .run(existing.name, existing.git_url, existing.token, existing.default_branch,
+            existing.mirror_path, existing.status, existing.error, id);
+      } else {
+        await env.runner.rmrf(dest).catch(() => {});
+        env.db.prepare("DELETE FROM repos WHERE id=? AND status='cloning'").run(id);
+      }
+      env.syncRepos();
+      return { ok: false, error: signal.reason?.name === "TimeoutError" ? "timedOut" : "cancelled" };
+    }
     const message = messageOf(error);
     env.db.prepare("UPDATE repos SET status='error',error=? WHERE id=?").run(message, id);
     env.syncRepos();

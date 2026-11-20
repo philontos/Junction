@@ -42,6 +42,32 @@ test("LocalRunner.exec terminates a command at its requested deadline", async ()
   );
 });
 
+test("cancelling a Git-like process also stops its child helper", async (t) => {
+  if (process.platform === "win32") return t.skip("POSIX process groups");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cancel-command-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const pidFile = path.join(tmp, "helper.pid");
+  const controller = new AbortController();
+  const running = localRunner.exec(process.execPath, ["-e", `
+    const {spawn}=require('node:child_process');
+    const helper=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{stdio:'inherit'});
+    require('node:fs').writeFileSync(process.argv[1],String(helper.pid));
+    setInterval(()=>{},1000);
+  `, pidFile], { signal: controller.signal });
+  const rejected = assert.rejects(running, (error: any) => error.name === "AbortError");
+  t.after(() => controller.abort());
+  for (let i = 0; !fs.existsSync(pidFile) && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(fs.existsSync(pidFile), "helper started");
+  const helper = Number(fs.readFileSync(pidFile, "utf8"));
+  controller.abort();
+  await rejected;
+  for (let i = 0; i < 100; i++) {
+    try { process.kill(helper, 0); } catch { return; }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.fail("the cancelled helper must not remain running");
+});
+
 test("sshControlPath stays below macOS's unix-socket limit for deep profiles", () => {
   const deep = "/Users/example/.task-dispatcher/profiles/tailscale-test/data/12345678";
   const controlPath = sshControlPath(deep, 501);

@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -17,6 +17,8 @@ export interface ExecOpts {
   maxBuffer?: number;
   /** Kill a command after this elapsed-time deadline. Omitted means no deadline. */
   timeoutMs?: number;
+  /** Cancel this command and its children, without touching other task sessions. */
+  signal?: AbortSignal;
 }
 
 /** Minimal command transport used by bootstrap and interactive tmux relays. */
@@ -45,11 +47,61 @@ export interface Runner extends CommandRunner {
   putFile(localSrc: string, dest: string): Promise<void>;
 }
 
+function cancellableExec(file: string, args: string[], opts: ExecOpts): Promise<string> {
+  opts.signal!.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const grouped = process.platform !== "win32";
+    const child = spawn(file, args, {
+      cwd: opts.cwd, env: { ...process.env, ...opts.env },
+      detached: grouped, stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = [], stderr: Buffer[] = [];
+    let outBytes = 0, errBytes = 0, failure: Error | undefined;
+    const limit = opts.maxBuffer ?? 64 * 1024 * 1024;
+    const stop = () => {
+      try {
+        if (grouped && child.pid) process.kill(-child.pid, "SIGKILL");
+        else child.kill("SIGKILL");
+      } catch { /* already exited */ }
+    };
+    const abort = () => { failure = opts.signal!.reason; stop(); };
+    const timer = opts.timeoutMs ? setTimeout(() => {
+      failure = new Error(`command timed out after ${opts.timeoutMs}ms`);
+      failure.name = "TimeoutError"; stop();
+    }, opts.timeoutMs) : undefined;
+    timer?.unref();
+    child.stdout.on("data", (chunk: Buffer) => {
+      outBytes += chunk.length;
+      if (outBytes <= limit) stdout.push(chunk);
+      else { failure = new Error("command output exceeded limit"); stop(); }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      errBytes += chunk.length;
+      if (errBytes <= limit) stderr.push(chunk);
+      else { failure = new Error("command output exceeded limit"); stop(); }
+    });
+    child.on("error", error => { failure = error; });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      opts.signal!.removeEventListener("abort", abort);
+      if (failure) reject(failure);
+      else if (code !== 0) reject(Object.assign(new Error(Buffer.concat(stderr).toString().trim() || `${file} exited with ${code ?? signal}`), { code }));
+      else resolve(Buffer.concat(stdout).toString());
+    });
+    opts.signal!.addEventListener("abort", abort, { once: true });
+    if (opts.signal!.aborted) abort();
+  });
+}
+
 export class LocalRunner implements Runner {
   kind = "local" as const;
   dataDir = DATA_DIR;
 
   async exec(file: string, args: string[], opts: ExecOpts = {}): Promise<string> {
+    // Git can spawn SSH/curl/credential helpers. Killing only the parent leaves
+    // those running (and holding the output pipes open). Cancellable commands
+    // get their own process group; normal task/tmux launches keep their behavior.
+    if (opts.signal) return cancellableExec(file, args, opts);
     try {
       const { stdout } = await pexec(file, args, {
         cwd: opts.cwd,
@@ -155,6 +207,7 @@ export class RemoteRunner implements CommandRunner {
     return localRunner.exec("ssh", [...sshBaseArgs(this.managed, this.port), this.target, this.remoteCmd(file, args, opts)], {
       maxBuffer: opts.maxBuffer,
       timeoutMs: opts.timeoutMs,
+      signal: opts.signal,
     });
   }
 }

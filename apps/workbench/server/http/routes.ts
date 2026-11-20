@@ -161,9 +161,12 @@ const ownedRepoEnv: OwnedRepoEnv = {
 
 function sendRepoFailure(req: Request, res: Response, result: any) {
   const lang = langFromReq(req);
+  if (result?.error === "timedOut") return res.status(504).json({ code: "repoTimeout", error: tr(lang, "repo.timeout") });
+  if (result?.error === "cancelled") return res.status(409).json({ code: "repoCancelled", error: tr(lang, "repo.cancelled") });
   if (result?.error === "fieldsRequired") return res.status(400).json({ error: tr(lang, "repo.fieldsRequired") });
   if (result?.error === "notFound") return res.status(404).json({ error: tr(lang, "notFound") });
-  if (result?.error === "notReady") return res.status(409).json({ error: tr(lang, "repo.status", { status: result.message || "unknown" }) });
+  if (result?.error === "notReady") return res.status(409).json({ error: result.message === "cloning"
+    ? tr(lang, "repo.checking") : tr(lang, "repo.status", { status: result.message || "unknown" }) });
   if (result?.error === "hasLiveTasks") {
     return res.status(409).json({
       error: tr(lang, "repo.hasLiveTasks", { count: result.liveCount || 0 }),
@@ -171,6 +174,20 @@ function sendRepoFailure(req: Request, res: Response, result: any) {
     });
   }
   return res.status(500).json({ error: result?.message || result?.error || "repository operation failed" });
+}
+
+// A completed request body is not a cancellation. The response closes early
+// when the browser aborts, including through the local/cloud HTTP proxies.
+function repoRequestCancellation(req: Request, res: Response) {
+  const controller = new AbortController();
+  const cancel = () => { if (!res.writableEnded) controller.abort(); };
+  req.once("aborted", cancel);
+  res.once("close", cancel);
+  if (req.aborted || res.destroyed) cancel();
+  return { signal: controller.signal, dispose() {
+    req.off("aborted", cancel);
+    res.off("close", cancel);
+  } };
 }
 
 function sendPasteFailure(req: Request, res: Response, result: any) {
@@ -480,9 +497,13 @@ app.post("/api/repos", async (req, res) => {
   if (requestedHost != null && Number(requestedHost) !== localHostId(db)) {
     return res.status(409).json({ error: "remote repositories must be registered through the target node" });
   }
-  const result = await registerOwnedRepo(ownedRepoEnv, req.body ?? {});
-  if (!result.ok) return sendRepoFailure(req, res, result);
-  res.json(result);
+  const request = repoRequestCancellation(req, res);
+  try {
+    const result = await registerOwnedRepo(ownedRepoEnv, req.body ?? {}, request.signal);
+    if (res.destroyed) return;
+    if (!result.ok) return sendRepoFailure(req, res, result);
+    res.json(result);
+  } finally { request.dispose(); }
 });
 
 app.post("/api/repos/:id/fetch", async (req, res) => {
@@ -975,10 +996,15 @@ app.get("/api/nodes/:hostId/tasks/:taskId/transcript", async (req, res) => {
 app.post("/api/nodes/:hostId/repos", async (req, res) => {
   const host = remoteHost(req, res);
   if (!host) return;
-  const { out, result } = await runNodeJson(host, ["repo-create", b64Json(req.body ?? {})]);
-  if (!result) return sendMissingNodeCommand(req, res, "repo-create", out);
-  if (!result.ok) return sendRepoFailure(req, res, result);
-  res.json(result);
+  const request = repoRequestCancellation(req, res);
+  try {
+    const out = await runNodeCommand(host, ["repo-create", b64Json(req.body ?? {})], { signal: request.signal });
+    if (res.destroyed) return;
+    const result = parseNodeJson(out.stdout);
+    if (!result) return sendMissingNodeCommand(req, res, "repo-create", out);
+    if (!result.ok) return sendRepoFailure(req, res, result);
+    res.json(result);
+  } finally { request.dispose(); }
 });
 
 app.post("/api/nodes/:hostId/repos/:repoId/fetch", async (req, res) => {

@@ -11,6 +11,7 @@ import { rerender, loadFleet } from "./hosts.js";
 
 let repoHostId = null;   // which machine the register-repo modal targets
 let repoSubmitting = false;
+let repoRequest = null;
 let repoDetailsTarget = null; // { id, hostId|null }; null hostId = controller-local repo
 
 function esc(s) {
@@ -21,6 +22,7 @@ function esc(s) {
 
 function setRepoSubmitState(active, message = "", error = false) {
   repoSubmitting = active;
+  for (const id of ["r-name", "r-url", "r-token", "r-default"]) $(id).disabled = active;
   const btn = $("r-submit");
   const status = $("r-status");
   if (btn) {
@@ -38,17 +40,6 @@ function repoStatusText(r) {
   if (r.status === "cloning") return t("repo.statusChecking");
   if (r.status === "error") return t("repo.statusError");
   return "";
-}
-
-function watchRepoRegistration(id, tries = 12) {
-  let left = tries;
-  const tick = async () => {
-    await loadRepos();
-    const repo = state.repos.find((r) => Number(r.id) === Number(id));
-    if (!repo || repo.status !== "cloning" || --left <= 0) return;
-    setTimeout(tick, 1500);
-  };
-  setTimeout(tick, 500);
 }
 
 export async function loadRepos(options = {}) {
@@ -190,6 +181,7 @@ export async function delRepo(id) {
 }
 
 export function openRepoModal(hostId) {
+  if (repoSubmitting) return;
   repoHostId = hostId ?? null;   // which machine this repo registers on
   const h = state.hostsById[hostId];
   $("rm-host").textContent = h ? (h.kind === "local" ? t("host.local") : h.name) : "";
@@ -199,7 +191,15 @@ export function openRepoModal(hostId) {
   setTimeout(() => $("r-name").focus(), 30);
 }
 export function closeRepoModal() {
-  if (repoSubmitting) return;
+  if (repoRequest) {
+    const request = repoRequest;
+    repoRequest = null;
+    clearTimeout(request.slowTimer);
+    clearTimeout(request.timer);
+    request.controller.abort();
+    // Refresh only the catalog; cancelling never disconnects a task terminal.
+    setTimeout(() => { void (request.remote ? loadFleet() : loadRepos()); }, 250);
+  }
   $("repo-modal").style.display = "none";
   setRepoSubmitState(false);
 }
@@ -222,11 +222,26 @@ export async function addRepo() {
   if (!body.git_url) return showRepoValidation("r-url", t("repo.urlRequired"));
   ["r-name", "r-url"].forEach((id) => $(id).removeAttribute("aria-invalid"));
   setRepoSubmitState(true, t("repo.submittingHint"));
+  const host = state.hostsById[repoHostId];
+  const remote = !!host && host.kind !== "local";
+  const request = { controller: new AbortController(), remote, timedOut: false };
+  repoRequest = request;
+  request.slowTimer = setTimeout(() => {
+    if (repoRequest === request) setRepoSubmitState(true, t("repo.slowHint"));
+  }, 8000);
+  // The owner has a 30s Git deadline. Leave room for relay latency, while also
+  // bounding a stalled connection to an offline/older node.
+  request.timer = setTimeout(() => {
+    request.timedOut = true;
+    request.controller.abort();
+  }, 45000);
   try {
-    const host = state.hostsById[repoHostId];
-    const remote = host && host.kind !== "local";
     const endpoint = remote ? `/api/nodes/${repoHostId}/repos` : "/api/repos";
-    const created = await api(endpoint, { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body) });
+    const created = await api(endpoint, { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify(body), signal: request.controller.signal });
+    if (repoRequest !== request) return; // an old response must not close a newly opened form
+    clearTimeout(request.slowTimer);
+    clearTimeout(request.timer);
+    repoRequest = null;
     ["r-name","r-url","r-token","r-default"].forEach(i => $(i).value = "");
     setRepoSubmitState(false);
     $("repo-modal").style.display = "none";
@@ -235,10 +250,14 @@ export async function addRepo() {
     if (remote) await loadFleet();
     else {
       await loadRepos();
-      watchRepoRegistration(created.id);
     }
   } catch (e) {
-    setRepoSubmitState(false, t("repo.submitFailed", { error: e.message }), true);
-    toast(e.message, "error", 6000);
+    if (repoRequest !== request) return;
+    const message = request.timedOut ? t("repo.requestTimeout") : t("repo.submitFailed", { error: e.message });
+    setRepoSubmitState(false, message, true);
+  } finally {
+    clearTimeout(request.slowTimer);
+    clearTimeout(request.timer);
+    if (repoRequest === request) repoRequest = null;
   }
 }

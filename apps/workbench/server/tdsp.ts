@@ -246,7 +246,14 @@ process.exitCode = await runCli(process.argv.slice(2), {
       writeManifest: (id) => writeTaskManifestFromDb(DATA_DIR, db, id),
     }, taskId, input);
   },
-  repoCreate: (input) => registerOwnedRepo(ownedRepoEnv, input),
+  repoCreate: async (input) => {
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    const signals = ["SIGHUP", "SIGTERM", "SIGINT"] as const;
+    for (const signal of signals) process.once(signal, cancel);
+    try { return await registerOwnedRepo(ownedRepoEnv, input, controller.signal); }
+    finally { for (const signal of signals) process.off(signal, cancel); }
+  },
   repoFetch: (id) => fetchOwnedRepo(ownedRepoEnv, id),
   repoBranches: (id) => branchesForOwnedRepo(ownedRepoEnv, id),
   repoDelete: (id, force) => deleteOwnedRepo(ownedRepoEnv, id, force),

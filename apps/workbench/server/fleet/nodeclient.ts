@@ -20,6 +20,7 @@ export interface NodeCommandOptions {
   input?: Buffer;
   timeoutMs?: number;
   maxBuffer?: number;
+  signal?: AbortSignal;
 }
 
 export type NodeCommandHost = Pick<Host, "kind" | "target" | "tdsp_bin">
@@ -36,6 +37,7 @@ export function quoteNodeArg(value: string): string {
  * interpreted by the target node's Switchyard installation.
  */
 export function runNodeCommand(host: NodeCommandHost, args: string[], options: NodeCommandOptions = {}): Promise<NodeCommandResult> {
+  if (options.signal?.aborted) return Promise.resolve({ ok: false, stdout: "", stderr: "node command cancelled", code: null });
   if (host.kind === "local") {
     return Promise.resolve({ ok: false, stdout: "", stderr: "local host is not a remote node", code: null });
   }
@@ -62,7 +64,12 @@ export function runNodeCommand(host: NodeCommandHost, args: string[], options: N
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
       resolve(result);
+    };
+    const abort = () => {
+      try { child.kill(); } catch {}
+      finish({ ok: false, stdout: "", stderr: "node command cancelled", code: null });
     };
     const overflow = () => {
       try { child.kill(); } catch {}
@@ -91,6 +98,8 @@ export function runNodeCommand(host: NodeCommandHost, args: string[], options: N
       finish({ ok: false, stdout: Buffer.concat(stdout).toString(), stderr: "node command timed out", code: null });
     }, timeoutMs);
     timer.unref();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) abort();
     child.stdin.on("error", () => {});
     child.stdin.end(options.input);
   });

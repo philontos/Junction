@@ -112,6 +112,49 @@ test("registration rejects a missing explicit branch and can retry with automati
   ]);
 });
 
+test("a pending registration cannot be mistaken for a ready repository; cancellation rolls it back", async () => {
+  const s = setup();
+  const controller = new AbortController();
+  let checking!: () => void;
+  const started = new Promise<void>(resolve => { checking = resolve; });
+  const original = s.env.runner.exec;
+  s.env.runner.exec = async (file, args, opts) => {
+    if (args[0] !== "ls-remote") return original(file, args, opts);
+    checking();
+    return new Promise<string>((_resolve, reject) => {
+      opts!.signal!.addEventListener("abort", () => reject(opts!.signal!.reason), { once: true });
+    });
+  };
+  const input = { name: "cancel-me", git_url: "git@example/cancel-me" };
+  const pending = registerOwnedRepo(s.env, input, controller.signal);
+  await started;
+  assert.deepEqual(await registerOwnedRepo(s.env, input), { ok: false, error: "notReady", message: "cloning" });
+  controller.abort();
+  assert.deepEqual(await pending, { ok: false, error: "cancelled" });
+  assert.deepEqual(s.db.prepare("SELECT * FROM repos").all(), []);
+  s.env.runner.exec = original;
+  assert.equal((await registerOwnedRepo(s.env, input)).ok, true, "retry adds exactly one ready repository");
+  assert.equal((s.db.prepare("SELECT count(*) AS n FROM repos").get() as any).n, 1);
+});
+
+test("deadline stops registration and cancellation of a retry preserves the prior failed entry", async () => {
+  const s = setup(["main"]);
+  const input = { name: "retry", git_url: "git@example/retry", default_branch: "missing" };
+  await registerOwnedRepo(s.env, input);
+  const before = s.db.prepare("SELECT * FROM repos").get();
+  const controller = new AbortController();
+  s.env.runner.exec = async (_file, args, opts) => {
+    if (args[0] === "ls-remote") {
+      controller.abort(new DOMException("Timed out", "TimeoutError"));
+      opts!.signal!.throwIfAborted();
+    }
+    return "";
+  };
+  const result = await registerOwnedRepo(s.env, { ...input, name: "changed", default_branch: "main" }, controller.signal);
+  assert.deepEqual(result, { ok: false, error: "timedOut" });
+  assert.deepEqual(s.db.prepare("SELECT * FROM repos").get(), before);
+});
+
 test("registration requires a selection when remote HEAD is unavailable and multiple branches exist", async () => {
   const s = setup(["develop", "master"], null);
   const result = await registerOwnedRepo(s.env, { name: "ambiguous", git_url: "git@example/ambiguous" });
