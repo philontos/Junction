@@ -3,23 +3,32 @@
 const key = user => 'switchyard-local-device:' + user;
 const pendingKey = 'switchyard-local-confirmation';
 const uuid = value => typeof value === 'string' && /^[0-9a-f-]{36}$/.test(value);
-const localOrigin = value => {
+export const localOrigin = value => {
   try { const url = new URL(value); return url.protocol === 'http:' && url.hostname === '127.0.0.1' && !!url.port && value === url.origin; }
   catch { return false; }
 };
+const remembered = new Map(); // Storage-restricted browsers can still route this page.
 export const validTask = value => typeof value === 'string' && /^(?:[1-9]\d*|n[1-9]\d*:[1-9]\d*)$/.test(value);
 export function localDevice(user) {
+  if (remembered.has(user)) return remembered.get(user);
   try {
     const value = JSON.parse(localStorage.getItem(key(user)));
     return uuid(value.device) && localOrigin(value.origin) ? value : null;
   } catch { return null; }
+}
+export function rememberLocalDevice(user, device, origin) {
+  if (!user || !uuid(device) || !localOrigin(origin)) return;
+  try { localStorage.setItem(key(user), JSON.stringify({ device, origin })); remembered.delete(user); }
+  catch { remembered.set(user, { device, origin }); }
 }
 export function devicePath(device, user, task) {
   const local = localDevice(user)?.device === device;
   return (local ? '/local/open/' + device : '/workspace/' + device + '/') + (validTask(task) ? '?task=' + encodeURIComponent(task) : '');
 }
 export function forgetLocalDevice(user, device) {
-  try { if (localDevice(user)?.device === device) localStorage.removeItem(key(user)); } catch {}
+  if (localDevice(user)?.device !== device) return;
+  remembered.delete(user);
+  try { localStorage.removeItem(key(user)); } catch {}
 }
 export function beginLocalConfirmation(user, device, origin, task) {
   if (!user || !uuid(device) || !localOrigin(origin)) return '';
@@ -38,6 +47,6 @@ export function confirmLocalDevice(nonce, device, user) {
   sessionStorage.removeItem(pendingKey);
   // Only the same tab that initiated the login can confirm it. The callback
   // runs after the loopback node has accepted its own device-bound login code.
-  try { localStorage.setItem(key(user), JSON.stringify({ device, origin: pending.origin })); } catch {}
+  rememberLocalDevice(user, device, pending.origin);
   return pending.origin + '/local/open' + (validTask(pending.task) ? '?task=' + encodeURIComponent(pending.task) : '');
 }

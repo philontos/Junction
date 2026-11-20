@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 import { installationView } from './install-progress.js';
-import { devicePath, localDevice, forgetLocalDevice } from './device-routing.js';
+import { devicePath, forgetLocalDevice } from './device-routing.js';
+import { discoverLocalDevice } from './local-discovery.js';
 import { reconcileChildren } from '../js/core/keyed-list.js';
 Theme.init();
 function renderThemeToggle() {
@@ -17,7 +18,7 @@ if (location.hash) history.replaceState(null, '', location.pathname);
 let signedIn = false, installationId = '', installationKey = '', lastDevices = '', refreshing = false;
 let registrationOpen = false, authMode = setupCode ? 'activate' : 'login';
 let decidingBinding = '';
-let currentUser = '', navigating = false;
+let currentUser = '', navigating = false, retryDiscovery = false;
 async function api(route, body, method = 'POST') {
   let response;
   try { response = await fetch('/hub/' + route, {signal:AbortSignal.timeout(15000), ...(body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })}); }
@@ -103,7 +104,12 @@ async function refresh() {
     renderInstallation(installation);
     openInstalledLocal(installation,items);
   }
-  const local = localDevice(currentUser)?.device;
+  if (navigating) return;
+  const discovery = await discoverLocalDevice(currentUser, items, { retry: retryDiscovery });
+  retryDiscovery = false;
+  const local = discovery.local?.device;
+  $('install').hidden = items.some(d => d.id === local);
+  $('local-detection').hidden = !discovery.blocked;
   const signature = JSON.stringify([local, items.map(d => [d.id, d.name, !!d.online])]);
   if (signature === lastDevices) return;
   lastDevices = signature;
@@ -162,6 +168,11 @@ $('install').onclick = async () => {
   } catch (e) { error(e.message); } finally { $('install').disabled = false; }
 };
 $('retry-install').onclick = () => $('install').click();
+$('retry-local').onclick = async () => {
+  retryDiscovery = true; $('retry-local').disabled = true;
+  try { await refresh(); } catch (e) { error(e.message); }
+  finally { $('retry-local').disabled = false; }
+};
 async function decideBinding(action) {
   if(decidingBinding || !installationId)return;
   const labels=[$('keep-binding').textContent,$('switch-binding').textContent];

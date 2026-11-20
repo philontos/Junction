@@ -32,6 +32,7 @@
     <section id="workspace" hidden>
       <div class="heading"><div><h1>工作台</h1><p>选择设备，继续工作。</p></div><button id="install" class="primary">＋ 连接这台电脑</button></div>
       <div id="devices" class="devices"></div>
+      <p id="local-detection" class="note" role="status" hidden>本机识别被浏览器阻止，请允许访问本地网络后重试。<button id="retry-local" class="text" type="button">重新识别</button></p>
       <section id="setup" class="setup" hidden>
         <div class="setup-heading"><h2 id="setup-title">连接这台电脑</h2><button id="close-setup" class="text" aria-label="关闭安装面板">关闭</button></div>
         <p id="setup-help">在本机终端执行一次。自动检测并安装缺失的 Node.js、Git、tmux 等工具，每一步验证通过后继续。</p>

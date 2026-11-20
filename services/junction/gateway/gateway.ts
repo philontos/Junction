@@ -85,7 +85,7 @@ export function createGateway(config: GatewayConfig) {
     for (const [socket,binding] of terminals) if(digest(binding.session)===digest(token)) socket.destroy();
     res.setHeader('Set-Cookie',`sw_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`); res.json({ok:true});
   });
-  const devices = (userId: string) => store.devices(userId).map(d=>({...d,online:broker.nodes.has(d.id),local_workspace:broker.localAvailable(d.id)}));
+  const devices = (userId: string) => store.devices(userId).map(d=>({...d,online:broker.nodes.has(d.id),local_workspace:broker.localAvailable(d.id),local_origin:broker.localOrigin(d.id)}));
   app.get('/hub/devices', (req,res) => res.json({items:devices(user(req).id)}));
   app.post('/hub/devices/:id/local-access', async (req,res) => {
     try {

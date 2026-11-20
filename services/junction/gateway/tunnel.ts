@@ -6,9 +6,10 @@ import type { Duplex } from 'node:stream';
 import WebSocket, { createWebSocketStream } from 'ws';
 import { CloudError } from './store.js';
 import type { LocalAccessRequest, LocalAccessResult } from '../../../packages/node-transport/local-access.js';
+import { isLocalWorkspaceOrigin } from '../../../packages/node-transport/local-access.js';
 
 interface Pending { device: string; resolve: (stream: Duplex) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
-interface Control { ws: WebSocket; alive: boolean; streams: Set<WebSocket>; pending: Set<string>; local: boolean }
+interface Control { ws: WebSocket; alive: boolean; streams: Set<WebSocket>; pending: Set<string>; local: boolean; localOrigin?: string }
 interface Access { device: string; resolve: (result: LocalAccessResult) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
 export class TunnelBroker {
   readonly nodes = new Map<string, Control>();
@@ -37,7 +38,11 @@ export class TunnelBroker {
     ws.on('message', raw => {
       let message: any;
       try { message = JSON.parse(raw.toString()); } catch { ws.close(1008, 'Invalid message'); return; }
-      if (message.type === 'capabilities' && Array.isArray(message.features)) { node.local = message.features.includes('local-workspace/1'); return; }
+      if (message.type === 'capabilities' && Array.isArray(message.features)) {
+        node.local = message.features.includes('local-workspace/1');
+        node.localOrigin = node.local && message.features.includes('local-discovery/1') && isLocalWorkspaceOrigin(message.local_origin) ? message.local_origin : undefined;
+        return;
+      }
       const request = message.type === 'local-access-result' && this.access.get(message.id);
       if (!request || request.device !== id) { ws.close(1008, 'Unexpected control message'); return; }
       clearTimeout(request.timer); this.access.delete(message.id);
@@ -66,6 +71,7 @@ export class TunnelBroker {
     node.ws.terminate();
   }
   localAvailable(device: string) { return this.nodes.get(device)?.local === true; }
+  localOrigin(device: string) { return this.nodes.get(device)?.localOrigin; }
   localAccess(device: string, user: LocalAccessRequest): Promise<LocalAccessResult> {
     const node = this.nodes.get(device);
     if (!node || node.ws.readyState !== WebSocket.OPEN) return Promise.reject(new CloudError(503, '设备离线，请先启动本机节点。'));

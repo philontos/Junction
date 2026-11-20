@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import WebSocket, { createWebSocketStream } from 'ws';
 import { createLocalWorkspace, listenLocalWorkspace, type LocalAccessRequest, type LocalAccessResult } from './local-workspace.js';
 
-export function startNodeTunnel(server: string, token: string, port: number, onState = (_state: string) => {}, localAccess?: (request: LocalAccessRequest) => LocalAccessResult) {
+export function startNodeTunnel(server: string, token: string, port: number, onState = (_state: string) => {}, localAccess?: (request: LocalAccessRequest) => LocalAccessResult, localOrigin?: string) {
   const origin=new URL(server);
   if (origin.protocol !== 'https:' && !(origin.protocol === 'http:' && ['127.0.0.1','localhost'].includes(origin.hostname))) throw new Error('HTTPS required');
   const base=origin.origin.replace(/^http/,'ws');
@@ -24,7 +24,7 @@ export function startNodeTunnel(server: string, token: string, port: number, onS
       let m:any;try{m=JSON.parse(raw.toString());}catch{ws.close(1008,'Invalid protocol');return;}
       if(m.type==='ready' && m.protocol==='switchyard-tunnel/1'){
         delay=1000;onState('online');
-        if(localAccess && m.capabilities?.includes('local-workspace/1'))ws.send(JSON.stringify({type:'capabilities',features:['local-workspace/1']}));
+        if(localAccess && m.capabilities?.includes('local-workspace/1'))ws.send(JSON.stringify({type:'capabilities',features:['local-workspace/1', ...(localOrigin ? ['local-discovery/1'] : [])],local_origin:localOrigin}));
         return;
       }
       if(m.type==='local-access' && localAccess && /^[0-9a-f-]{36}$/.test(m.id)) {
@@ -93,7 +93,7 @@ async function daemon(configPath:string) {
     fs.renameSync(temporary,file);
   };
   runtime('connecting');
-  tunnel=startNodeTunnel(config.server,config.device_token,port,state=>{runtime(state);console.log(new Date().toISOString()+' node '+state);},local ? request=>local!.issue(request) : undefined);
+  tunnel=startNodeTunnel(config.server,config.device_token,port,state=>{runtime(state);console.log(new Date().toISOString()+' node '+state);},local ? request=>local!.issue(request) : undefined,local?.origin());
 }
 if(process.argv[1] && fs.realpathSync(process.argv[1])===fileURLToPath(import.meta.url)) {
   const file=process.argv[2];if(!file)throw new Error('Usage: node.ts CONFIG');

@@ -68,11 +68,28 @@ export function createLocalWorkspace(config: Config) {
   app.use((req, res, next) => {
     res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff' });
     if (!hostAllowed(req)) { res.status(403).json({ error: '仅允许从本机工作台访问。' }); return; }
+    // Discovery reveals only this device's ID to its configured cloud origin.
+    // It neither reads cookies nor grants a session or access to the backend.
+    if (req.path === '/local/identity' && req.headers.origin === origin) {
+      res.set({ 'Access-Control-Allow-Origin': origin, Vary: 'Origin' });
+      if (req.method === 'OPTIONS' && req.headers['access-control-request-method'] === 'GET') {
+        res.set({ 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Allow-Private-Network': 'true' });
+        res.sendStatus(204); return;
+      }
+      if (req.method === 'GET') { next(); return; }
+      res.sendStatus(405); return;
+    }
     // No cross-origin browser API or WebSocket access. Login is a top-level
     // navigation carrying a short-lived code in the fragment, never in logs.
     if (req.headers.origin && req.headers.origin !== localOrigin()) { res.status(403).json({ error: '请求来源无效。' }); return; }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin !== localOrigin()) { res.status(403).json({ error: '请从本机工作台操作。' }); return; }
     next();
+  });
+  app.get('/local/identity', (req, res) => {
+    if (req.headers.origin !== origin || req.query.device !== config.deviceId || typeof req.query.challenge !== 'string' || !/^[0-9a-f-]{36}$/.test(req.query.challenge)) {
+      res.sendStatus(404); return;
+    }
+    res.json({ device_id: config.deviceId, challenge: req.query.challenge });
   });
   app.get('/local/open', (_req, res) => res.type('html').send(localEntryHtml(config.root, origin, config.deviceId, 'local')));
   app.post('/local/session', express.json({ limit: '2kb' }), (req, res) => {
@@ -125,7 +142,7 @@ export function createLocalWorkspace(config: Config) {
     proxyUpgrade(req, socket, head, req.url!, net.connect(config.upstreamPort, '127.0.0.1'));
   });
   return {
-    app, server,
+    app, server, origin: localOrigin,
     issue(request: LocalAccessRequest): LocalAccessResult {
       sweep();
       if (!request.user_id || typeof request.user_id !== 'string' || request.user_id.length > 128 || typeof request.username !== 'string') throw new Error('Invalid identity');
