@@ -13,7 +13,7 @@ export function workspaceOf(normalized: any): any | null {
 }
 // Compare repository identities without transferring embedded HTTPS credentials.
 export function publicRepoUrl(value: string): string {
-  try { const u = new URL(value); u.username = ""; u.password = ""; u.search = ""; u.hash = ""; return u.toString(); }
+  try { const u = new URL(value); if (u.protocol !== "ssh:") u.username = ""; u.password = ""; u.search = ""; u.hash = ""; return u.toString(); }
   catch { return value; }
 }
 export function repoIdentity(value: string): string {

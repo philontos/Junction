@@ -18,12 +18,12 @@ type DB = Database.Database;
 // The worktree-setup step bound to a machine's Runner: create the worktree,
 // inject the per-task Claude hooks, and keep them out of git status.
 // `ns` scopes the local temp path so two Switchyard instances sharing a box do not collide.
-function setupWorktreeOn(runner: Runner, ns: string): RepoTaskEnv["setupWorktree"] {
+function setupWorktreeOn(runner: Runner, ns: string, signal?: AbortSignal): RepoTaskEnv["setupWorktree"] {
   return async ({ id, mirror, worktree, workBranch, baseBranch, agent }) => {
     // create the worktree from the base branch's latest origin tip (falls back to
     // a local head for unpushed bases). The base is only a start point, so this
     // works even when a live task currently has that branch checked out.
-    await addWorktreeFromBranch(runner, mirror, worktree, workBranch, baseBranch);
+    await addWorktreeFromBranch(runner, mirror, worktree, workBranch, baseBranch, signal);
     // Capture the immutable start point before hooks are delivered and, crucially,
     // before the agent can create commits. Code preview diffs against this SHA
     // rather than HEAD, so a committed task never appears "clean".
@@ -62,6 +62,7 @@ export interface RepoEnvOpts {
   db: DB;
   ns: string;
   runner: Runner;
+  signal?: AbortSignal;
   /** Persist the task's durable record on the owning node. */
   writeManifest: (id: number) => void | Promise<void>;
 }
@@ -76,7 +77,7 @@ export function buildRepoTaskEnv(opts: RepoEnvOpts): RepoTaskEnv {
     ns: opts.ns,
     workspaceRoot: opts.runner.workspaceRoot,
     writeManifest: opts.writeManifest,
-    setupWorktree: setupWorktreeOn(opts.runner, opts.ns),
+    setupWorktree: setupWorktreeOn(opts.runner, opts.ns, opts.signal),
     setupReference: ({ mirror, worktree, requestedRef }) =>
       addReferenceSnapshotFromBranch(opts.runner, mirror, worktree, requestedRef),
     startSession: (session, worktree, opening, sopts) => startSession(opts.runner, session, worktree, opening, sopts),

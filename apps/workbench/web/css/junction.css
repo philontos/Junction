@@ -214,3 +214,6 @@
 #jx-share-feedback[data-state=error] #jx-share-label { color: var(--red); }
 #jx-share-error { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { #jx-share-progress::-webkit-progress-value { transition: none; } }
+.jx-preparation{display:grid;gap:8px;margin-top:16px;color:var(--muted);font-size:12px}
+.jx-preparation[hidden]{display:none}
+.jx-preparation progress{width:100%;height:5px;accent-color:var(--accent)}

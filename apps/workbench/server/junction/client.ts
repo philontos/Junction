@@ -43,20 +43,20 @@ export class JunctionClient {
     if (!token || token.length > 4096 || /[\r\n]/.test(token)) throw new JunctionError(503, "Junction 令牌文件无效。");
     let response: Response;
     try {
-      response = await this.fetcher(this.config.url + route, { ...init, redirect: "error", signal: AbortSignal.timeout(60_000),
+      response = await this.fetcher(this.config.url + route, { ...init, redirect: "error", signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
         headers: { ...init.headers, Authorization: `Bearer ${token}` } });
-    } catch { throw new JunctionError(502, "无法连接 Junction，请检查服务是否在线。"); }
+    } catch { init.signal?.throwIfAborted(); throw new JunctionError(502, "无法连接 Junction，请检查服务是否在线。"); }
     let body: any;
     try { body = response.status === 204 ? null : await response.json(); }
     catch { throw new JunctionError(502, `Junction 返回了无效响应（HTTP ${response.status}），请检查服务地址和网关。`); }
     if (!response.ok) throw new JunctionError(response.status, body?.error?.detail || "Junction 请求失败。");
     return body;
   }
-  async *pages(base: string, resource: string) {
+  async *pages(base: string, resource: string, signal?: AbortSignal) {
     let cursor: string | null = null;
     const seen = new Set<string>();
     do {
-      const page = await this.request(`${base}/${resource}?` + new URLSearchParams(cursor ? { cursor } : {}));
+      const page = await this.request(`${base}/${resource}?` + new URLSearchParams(cursor ? { cursor } : {}), { signal });
       if (!Array.isArray(page.items)) throw new JunctionError(502, "Junction 分页响应无效。");
       yield page.items;
       cursor = page.next_cursor;
@@ -64,24 +64,24 @@ export class JunctionClient {
       if (cursor) seen.add(cursor);
     } while (cursor);
   }
-  async snapshot(contextId: string, revisionId: string) {
+  async snapshot(contextId: string, revisionId: string, signal?: AbortSignal) {
     const base = revisionPath(contextId, revisionId);
-    const meta = await this.request(base);
+    const meta = await this.request(base, { signal });
     const normalized = structuredClone(meta.revision.normalized);
     if (normalized.schema_version !== "junction.context/1") throw new JunctionError(409, "不支持此 Context 格式版本。");
     normalized.session.turns = [];
     normalized.session.messages = [];
     normalized.diagnostics = [];
-    for await (const items of this.pages(base, "turns")) normalized.session.turns.push(...items);
-    for await (const items of this.pages(base, "diagnostics")) normalized.diagnostics.push(...items);
+    for await (const items of this.pages(base, "turns", signal)) normalized.session.turns.push(...items);
+    for await (const items of this.pages(base, "diagnostics", signal)) normalized.diagnostics.push(...items);
     let chars = 0;
-    for await (const items of this.pages(base, "messages")) {
+    for await (const items of this.pages(base, "messages", signal)) {
       for (const msg of items) {
         if (msg.content_truncated) {
           let offset: number | null = 0;
           let content = "";
           do {
-            const chunk = await this.request(`${base}/messages/${encodeURIComponent(msg.id)}/content?offset=${offset}`);
+            const chunk = await this.request(`${base}/messages/${encodeURIComponent(msg.id)}/content?offset=${offset}`, { signal });
             content += chunk.text;
             if (content.length > 64 * 1024 * 1024 || (chunk.next_offset !== null && chunk.next_offset <= offset!)) {
               throw new JunctionError(502, "Junction 内容分块无效或过大。");
@@ -98,7 +98,7 @@ export class JunctionClient {
     }
     if (normalized.record_index != null) {
       normalized.records = [];
-      for await (const items of this.pages(base, "records")) {
+      for await (const items of this.pages(base, "records", signal)) {
         chars += JSON.stringify(items).length;
         if (chars > 96 * 1024 * 1024) throw new JunctionError(413, "Context 过大，无法导入当前工作区。");
         normalized.records.push(...items);

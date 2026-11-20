@@ -25,3 +25,10 @@ test("interrupted sharing never reports success from HTTP 200", async () => {
   await assert.rejects(readShareStream(response('{"type":"error","message":"找不到会话"}\n'), () => {}), /找不到会话/);
   await assert.rejects(readShareStream(response('{"type":"complete","result":{}}\n'), () => {}), /回执无效/);
 });
+test("continuation reports preparation failures and warns about an unconfirmed task receipt", async () => {
+  await assert.rejects(readShareStream(response('{"type":"error","message":"仓库认证失败"}\n'), () => {}, "任务创建"), /仓库认证失败/);
+  await assert.rejects(readShareStream(response('{"type":"progress","stage":"agent"}\n'), () => {}, "任务创建"), /刷新任务列表确认/);
+  const result = await readShareStream(response('{"type":"complete","result":{"id":3,"context_id":"context","repo_id":5}}\n'), () => {}, "任务创建");
+  assert.equal(result.id, 3);
+  assert.equal(result.repo_id, 5);
+});

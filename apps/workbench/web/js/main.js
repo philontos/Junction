@@ -163,7 +163,7 @@ Promise.all([loadRepos(initialRequest), loadHosts(initialRequest), loadTasks(ini
   window.PageLoad.ready();
 }).catch(() => window.PageLoad.error(t("workspace.failed")));
 refreshProviders().catch(() => {});
-initJunction({ allTasks, loadTasks, connect, loadFleet, connectNode });
+initJunction({ allTasks, loadTasks, loadRepos, connect, loadFleet, connectNode });
 initOnboarding();             // independent: slow VPN/DNS checks never block the local dashboard
 setInterval(async () => { await loadTasks(); syncReadWaiting(); }, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots

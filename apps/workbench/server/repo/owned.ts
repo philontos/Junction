@@ -32,18 +32,20 @@ export interface OwnedRepoEnv {
   removeReferenceRoots?(taskId: number, taskWorktree: string): Promise<void>;
 }
 
+export type RepoRegistrationEnv = Pick<OwnedRepoEnv, "db" | "runner" | "syncRepos">;
+
 function messageOf(error: unknown): string {
   return String((error as any)?.message || error);
 }
 
-function requireOwnerRunner(env: OwnedRepoEnv): OwnedRepoFailure | null {
+function requireOwnerRunner(env: Pick<OwnedRepoEnv, "runner">): OwnedRepoFailure | null {
   return env.runner.kind === "local"
     ? null
     : { ok: false, error: "operationFailed", message: "Repository operations must run on the owning node" };
 }
 
 /** Register and validate a repository entirely on the owning node. */
-export async function registerOwnedRepo(env: OwnedRepoEnv, input: OwnedRepoInput, callerSignal?: AbortSignal): Promise<OwnedRepoResult> {
+export async function registerOwnedRepo(env: RepoRegistrationEnv, input: OwnedRepoInput, callerSignal?: AbortSignal): Promise<OwnedRepoResult> {
   const runnerFailure = requireOwnerRunner(env);
   if (runnerFailure) return runnerFailure;
   const name = String(input.name || "").trim();

@@ -371,7 +371,11 @@ function showContinue(meta) {
   const hint = w || meta.revision.normalized.extensions?.["switchyard.capture/1"];
   const match = matchingWorkspaceRepo(repos, hint?.repo_url);
   const repo = select([], "Workspace"); populateWorkspaceOptions(repo, repos);
-  repo.value = match ? String(match.id) : "";
+  if (hint?.repo_url) {
+    const name = match?.name || hint.repo_name || L("Context 仓库", "Context repository");
+    repo.prepend(new Option(`${name} · ${L("自动准备", "Automatic setup")}`, "context"));
+    repo.value = "context";
+  }
   const workspaceHint = note(I18N.t("task.managedHint"));
   const cwd = textInput("", "~/Projects/my-project"); cwd.maxLength = 4096;
   const cwdField = field(L("工作目录（当前设备）", "Working directory (this device)"), cwd);
@@ -395,9 +399,16 @@ function showContinue(meta) {
   branchField.hidden = true;
   repo.onchange = () => {
     const hasRepo = !!Number(repo.value);
+    const automatic = repo.value === "context";
     cwdField.hidden = repo.value !== "directory";
     cwd.required = repo.value === "directory";
-    workspaceHint.hidden = repo.value !== "";
+    workspaceHint.hidden = repo.value !== "" && !automatic;
+    workspaceHint.textContent = automatic
+      ? L("自动匹配或添加仓库，并创建新的 Worktree。", "Match or add the repository and create a new worktree.")
+      : I18N.t("task.managedHint");
+    if (automatic && !hint.commit) workspaceHint.textContent += hint.branch && hint.branch !== "HEAD"
+      ? L(` 未记录提交号，将使用 ${hint.branch} 分支的当前版本。`, ` No commit recorded; use the current ${hint.branch} branch.`)
+      : L(" 未记录代码版本，将使用仓库默认分支。", " No revision recorded; use the repository's default branch.");
     branchField.hidden = !hasRepo || !!w;
     branch.required = hasRepo && !w;
     branch.value = repos.find(r => r.id === Number(repo.value))?.default_branch || "main";
@@ -415,11 +426,27 @@ function showContinue(meta) {
   if (w?.dirty) fields.append(el("p", L("来源的未提交修改未包含在 Context 中。", "Uncommitted source changes are not included."), "jx-warning"));
   if (meta.revision.status !== "ready") fields.append(note(L("部分历史内容或关联无法确认，Agent 会先检查记录与当前代码。", "Some history or relationships could not be confirmed. The agent will check the records and current code first.")));
   const submit = el("button", L("创建任务", "Create task"), "primary"); submit.type = "submit"; submit.id = "jx-task-submit"; submit.setAttribute("form", form.id);
+  const preparation = el("div", undefined, "jx-preparation"); preparation.hidden = true;
+  preparation.setAttribute("role", "status"); preparation.setAttribute("aria-live", "polite");
+  const progressLabel = el("span"); progressLabel.id = "jx-prepare-label";
+  const progressBar = el("progress"); progressBar.max = 6; progressBar.value = 0;
+  progressBar.setAttribute("aria-labelledby", progressLabel.id);
+  preparation.append(progressLabel, progressBar); form.append(preparation);
+  const stages = { context: [1, "读取 Context…", "Reading context…"], repository: [2, "准备仓库…", "Preparing repository…"],
+    fetch: [3, "拉取代码版本…", "Fetching code…"], worktree: [4, "创建工作区…", "Creating workspace…"], agent: [5, "启动 Agent…", "Starting agent…"] };
+  const updateProgress = event => {
+    const stage = stages[event.stage]; if (!stage) return;
+    progressBar.value = Math.max(progressBar.value, stage[0]);
+    progressLabel.textContent = L(event.message || stage[1], stage[2]);
+  };
   $("jx-task-submit-slot").append(submit);
   const setBusy = busy => {
     launchingContext = busy; fields.disabled = busy; submit.disabled = busy;
-    $("jx-task-close").disabled = busy; $("jx-task-cancel").disabled = busy; $("jx-detail").inert = busy;
+    $("jx-task-close").disabled = busy; $("jx-task-cancel").disabled = busy;
+    for (const button of $("jx-task-navigation").querySelectorAll("button")) button.disabled = busy;
     form.setAttribute("aria-busy", String(busy));
+    preparation.hidden = !busy;
+    if (busy) { progressBar.value = 0; progressLabel.textContent = L("正在检查 Agent…", "Checking agent…"); }
     submit.textContent = busy ? L("创建中…", "Creating…") : L("创建任务", "Create task");
   };
   form.onsubmit = async e => {
@@ -430,14 +457,24 @@ function showContinue(meta) {
     let result;
     try {
       await requireAgent(agent);
-      const destination = workspaceSelection(repo.value, cwd.value);
-      if (!destination.repo_id) await requireDirectoryTasks(destination.cwd_mode === "managed");
-      result = await send("/continue", { context_id: meta.id, revision_id: meta.revision.id, ...destination, agent,
-        title: title.value.trim(), base_branch: branch.value, prompt: prompt.value, agent_model: model.value, acknowledge: true });
-    } catch (error) { setBusy(false); showError(error); return; }
+      const automatic = repo.value === "context";
+      const capabilities = await api("/api/tasks/options");
+      if (automatic && !capabilities.context_repository_setup) throw new Error(L("请先更新此设备的本地节点，再自动准备 Context 仓库。", "Update this device's local node before automatic repository setup."));
+      const destination = automatic ? { workspace_mode: "context" } : workspaceSelection(repo.value, cwd.value);
+      if (!automatic && !destination.repo_id) await requireDirectoryTasks(destination.cwd_mode === "managed");
+      const body = { context_id: meta.id, revision_id: meta.revision.id, ...destination, agent,
+        title: title.value.trim(), base_branch: branch.value, prompt: prompt.value, agent_model: model.value, acknowledge: true };
+      if (capabilities.context_repository_setup) {
+        const response = await fetch(nodePath("/api/junction/continue?stream=1"), {
+          method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang },
+          body: JSON.stringify(body), signal: AbortSignal.timeout(360000),
+        });
+        result = await readShareStream(response, updateProgress, "任务创建");
+      } else result = await send("/continue", body);
+    } catch (error) { setBusy(false); showError(error); void hooks.loadRepos(); return; }
     setBusy(false); closeJunction();
     try {
-      await hooks.loadTasks(); hooks.connect(result.id); toast(L("已创建接续任务", "Continuation task created"), "success");
+      await hooks.loadRepos(); await hooks.loadTasks(); hooks.connect(result.id); toast(L("已创建接续任务", "Continuation task created"), "success");
     } catch {
       toast(L(`任务 #${result.id} 已创建，请刷新任务列表后打开。`, `Task #${result.id} was created. Refresh the task list to open it.`), "error");
     }

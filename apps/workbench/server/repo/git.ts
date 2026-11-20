@@ -183,6 +183,26 @@ function taskGitError(stage: string, error: any): Error {
   return new Error(`${stage}：${detail}\n请检查此设备到仓库的网络连接和 Git 认证后重试。`, { cause: error });
 }
 
+/** A shared snapshot must start at its recorded commit, never a newer branch tip. */
+export async function ensureContextCommit(runner: Runner, mirror: string, commit: string, callerSignal?: AbortSignal) {
+  if (!/^[0-9a-f]{40,64}$/i.test(commit)) throw new Error("Context 提交号无效。");
+  const deadline = AbortSignal.timeout(TASK_GIT_TIMEOUT_MS);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
+  try {
+    await git(runner, mirror, ["cat-file", "-e", `${commit}^{commit}`], {}, undefined, signal);
+    return;
+  } catch { signal.throwIfAborted(); }
+  try {
+    await git(runner, mirror, ["fetch", "--no-tags", "origin", commit], {}, undefined, signal);
+    await git(runner, mirror, ["cat-file", "-e", `${commit}^{commit}`], {}, undefined, signal);
+  } catch (error: any) {
+    if (/not our ref|unadvertised object|couldn't find remote ref/i.test(String(error?.message))) {
+      throw new Error("仓库中找不到 Context 对应的提交。请先在来源设备推送该提交，或回原设备继续。", { cause: error });
+    }
+    throw taskGitError("无法拉取 Context 对应的提交", error);
+  }
+}
+
 /**
  * Create a task's worktree from `baseBranch`. Refreshes the base's tracking ref
  * then branches from the fetched commit. Only a verified local branch can be
@@ -193,8 +213,10 @@ function taskGitError(stage: string, error: any): Error {
  */
 export async function addWorktreeFromBranch(
   runner: Runner, mirror: string, dest: string, workBranch: string, baseBranch: string,
+  callerSignal?: AbortSignal,
 ) {
-  const signal = AbortSignal.timeout(TASK_GIT_TIMEOUT_MS);
+  const deadline = AbortSignal.timeout(TASK_GIT_TIMEOUT_MS);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
   let startRef = baseBranch;
   if (!/^[0-9a-f]{40,64}$/i.test(baseBranch)) {
     try {

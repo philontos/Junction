@@ -112,6 +112,7 @@ test("handoff preserves provenance and full history, with a working paginated of
 });
 test("repository URLs strip credentials and match SSH to HTTPS without equating unrelated repos", () => {
   assert.equal(publicRepoUrl("https://secret:token@github.com/org/repo.git?q=token"), "https://github.com/org/repo.git");
+  assert.equal(publicRepoUrl("ssh://git@github.com/org/repo.git"), "ssh://git@github.com/org/repo.git");
   assert.equal(repoIdentity("git@github.com:org/repo.git"), repoIdentity("https://github.com/org/repo"));
   assert.notEqual(repoIdentity("/local/a"), repoIdentity("/local/b"));
 });
