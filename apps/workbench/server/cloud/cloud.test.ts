@@ -120,7 +120,7 @@ test('gateway relays HTTP, progress and terminal to the owned, URL-pinned node; 
   assert.equal(new TextDecoder().decode((await reader.read()).value),'{"step":2}\n');
   const page=await request('/workspace/'+na.device_id+'/',session),html=await page.text();
   assert.match(html,new RegExp('content="/nodes/'+na.device_id+'"'));
-  assert.match(html,/<body class="cloud-workspace">/);
+  assert.match(html,/<body class="cloud-workspace" data-page-loading>/);
   assert.match(html,new RegExp('id="cloud-device-switcher"[^>]+data-device-id="'+na.device_id+'"'));
   assert.match(html,/data-user-id="alice"/);
   assert.doesNotMatch(html,/class="sec cloud-device-link"/);

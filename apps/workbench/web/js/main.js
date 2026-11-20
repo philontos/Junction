@@ -122,7 +122,6 @@ renderSwitcher();
 renderThemeToggle();
 initCloudWorkspace({ selectHost, allTasks, connect, connectNode });
 
-function dismissBoot() { const b = $("boot"); if (b) b.classList.add("done"); }
 setCodeViewOpener(openTaskCode);
 setReferenceOpener(openRuntimeReference);
 initRuntimeReferences({ refreshLocal: loadTasks, refreshFleet: loadFleet });
@@ -156,13 +155,16 @@ $("t-provider").dataset.ph = t("provider.default");   // model-backend picker
 csMount("t-provider", onProviderChange);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
 const firstFleet=loadFleet();
-Promise.allSettled([loadRepos(), loadHosts(), loadTasks(), refreshProviders()]).then(() => {
-  dismissBoot(); syncReadWaiting();
+const initialRequest = { signal: AbortSignal.timeout(15000) };
+Promise.all([loadRepos(initialRequest), loadHosts(initialRequest), loadTasks(initialRequest)]).then(loaded => {
+  if (loaded.some(ok => !ok)) { window.PageLoad.error(t("workspace.failed")); return; }
+  syncReadWaiting();
   restoreCloudWorkspace(firstFleet).catch(e => console.warn("workspace restore failed", e));
-});
+  window.PageLoad.ready();
+}).catch(() => window.PageLoad.error(t("workspace.failed")));
+refreshProviders().catch(() => {});
 initJunction({ allTasks, loadTasks, connect, loadFleet, connectNode });
 initOnboarding();             // independent: slow VPN/DNS checks never block the local dashboard
-setTimeout(dismissBoot, 2500);   // failsafe so a slow/hung fetch never traps the spinner
 setInterval(async () => { await loadTasks(); syncReadWaiting(); }, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots
 setInterval(loadFleet, 15000);  // refresh each node's live task count (slower — it ssh's out)

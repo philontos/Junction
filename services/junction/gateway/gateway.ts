@@ -93,7 +93,7 @@ export function createGateway(config: GatewayConfig) {
       const device=store.device(req.params.id,u.id);if(!device)throw new CloudError(404,'设备不存在。');
       const result=await broker.localAccess(device.id,{user_id:u.id,username:u.username,task_id:typeof req.body?.task_id==='string'?req.body.task_id:undefined});
       if(!store.session(cookie(req.headers.cookie)) || !store.device(device.id,u.id))throw new CloudError(401,'登录或设备绑定已失效。');
-      res.json(result);
+      res.json({...result,user_id:u.id});
     }catch(error){fail(res,error);}
   });
   app.post('/hub/pairings', (req,res) => { csrf(req); const u=user(req); rate('pair:'+u.id);const code=store.pair(u.id);res.json({code,installation_id:digest(code),expires_in:600,origin}); });
@@ -182,6 +182,9 @@ export function createGateway(config: GatewayConfig) {
     const device=store.device(req.params[0],u.id);if(!device)throw new CloudError(404,'设备不存在。');
     res.type('html').send(localEntryHtml(config.root,origin,device.id));
   });
+  // Public shell only: the browser checks its same-tab nonce and authenticated
+  // account before remembering a routing preference. This grants no API access.
+  app.get('/local/connected', (_req,res) => res.type('html').send(localEntryHtml(config.root,origin,'','confirm')));
   app.get('/', (_req,res) => res.sendFile(path.join(config.root,'web/cloud/index.html')));
   app.get('/install.sh', (_req,res) => {
     const script=fs.readFileSync(path.join(config.root,'scripts/cloud-install.sh'),'utf8').replaceAll('__SWITCHYARD_ORIGIN__',origin);

@@ -1,6 +1,7 @@
 import { $, nodeBase } from "../core/dom.js";
 import { state } from "../core/state.js";
 import { duringAutoFollow } from "./mobile.js";
+import { devicePath } from "../../cloud/device-routing.js";
 
 let switcher, panel, list, advanced, hostList, hooks;
 let devices = [], loading = false, failure = "", expired = false, pending;
@@ -67,7 +68,7 @@ function renderDevices() {
     const current = device.id === switcher.dataset.deviceId;
     const row = element("a", "cloud-device-option" + (current ? " current" : ""));
     row.dataset.deviceId = device.id;
-    if (device.online) row.href = direct && current ? "/" : cloudOrigin + "/workspace/" + encodeURIComponent(device.id) + "/";
+    if (device.online) row.href = direct && current ? "/" : cloudOrigin + devicePath(device.id, switcher.dataset.userId);
     else { row.setAttribute("aria-disabled", "true"); row.tabIndex = -1; }
     if (current) row.setAttribute("aria-current", "location");
     const name = element("span", "cloud-option-name", device.name);
@@ -158,7 +159,6 @@ export function repaintCloudWorkspace() {
   if (!switcher) return;
   panel.setAttribute("aria-label", text("switch"));
   panel.querySelector(".cloud-device-heading").textContent = text("switch");
-  panel.querySelector(".cloud-manage").textContent = text("manage") + " ↗";
   advanced.querySelector("summary").textContent = text("advanced");
   advanced.querySelector("p").textContent = text("sshNote");
   advanced.querySelector(".cloud-add-ssh").textContent = text("addSsh");
@@ -179,18 +179,6 @@ export function initCloudWorkspace(callbacks) {
     requestedTask = task.startsWith('n') ? task : Number(task);
     query.delete('task'); history.replaceState(null, '', location.pathname + (query.size ? '?' + query : ''));
   }
-  const localOpen = $("workspace-local-open");
-  if (localOpen) localOpen.onclick = () => {
-    const url = new URL('/local/open/' + switcher.dataset.deviceId, location.origin);
-    if (validTask(state.selectedTaskId)) url.searchParams.set('task', String(state.selectedTaskId));
-    localOpen.href = url.href;
-  };
-  const cloudReturn = $("workspace-cloud-return");
-  if (cloudReturn) cloudReturn.onclick = () => {
-    const url = new URL('/workspace/' + switcher.dataset.deviceId + '/', cloudOrigin);
-    if (validTask(state.selectedTaskId)) url.searchParams.set('task', String(state.selectedTaskId));
-    cloudReturn.href = url.href;
-  };
   document.addEventListener("pointerdown", cancelRestore, true);
   document.addEventListener("keydown", cancelRestore, true);
   window.addEventListener("pagehide", remember);
@@ -199,8 +187,6 @@ export function initCloudWorkspace(callbacks) {
   panel = element("div", "cloud-device-panel");
   panel.append(element("div", "cloud-device-heading"));
   list = element("div", "cloud-device-list"); panel.append(list);
-  const manage = element("a", "cloud-menu-action cloud-manage"); manage.href = cloudOrigin + "/?view=cloud";
-  panel.append(manage);
   advanced = element("details", "cloud-advanced");
   advanced.append(element("summary"), element("p"));
   hostList = element("div", "cloud-host-list"); advanced.append(hostList);

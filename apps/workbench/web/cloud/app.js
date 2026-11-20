@@ -1,5 +1,7 @@
 const $ = id => document.getElementById(id);
 import { installationView } from './install-progress.js';
+import { devicePath, localDevice, forgetLocalDevice } from './device-routing.js';
+import { reconcileChildren } from '../js/core/keyed-list.js';
 Theme.init();
 function renderThemeToggle() {
   const toLight = Theme.theme === 'dark';
@@ -15,7 +17,7 @@ if (location.hash) history.replaceState(null, '', location.pathname);
 let signedIn = false, installationId = '', installationKey = '', lastDevices = '', refreshing = false;
 let registrationOpen = false, authMode = setupCode ? 'activate' : 'login';
 let decidingBinding = '';
-let stayInCloud = new URLSearchParams(location.search).get('view') === 'cloud';
+let currentUser = '', navigating = false;
 async function api(route, body, method = 'POST') {
   let response;
   try { response = await fetch('/hub/' + route, {signal:AbortSignal.timeout(15000), ...(body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })}); }
@@ -44,12 +46,13 @@ function auth() {
   $('auth-toggle').textContent=registering ? '返回登录' : '注册账号';
 }
 async function workspace(user, username = user) {
-  signedIn = true; $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; $('username').textContent = username;
+  signedIn = true; currentUser = user; $('username').textContent = username;
   installationKey='switchyard-install:'+user;
   try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
   const next = new URLSearchParams(location.search).get('next');
-  if (next && /^\/(?:local\/open\/[0-9a-f-]{36}|workspace\/[0-9a-f-]{36}\/)(?:\?task=(?:[1-9]\d*|n[1-9]\d*%3A[1-9]\d*))?$/.test(next)) { location.replace(next); return; }
+  if (next && /^\/(?:local\/open\/[0-9a-f-]{36}|workspace\/[0-9a-f-]{36}\/)(?:\?task=(?:[1-9]\d*|n[1-9]\d*%3A[1-9]\d*))?$/.test(next)) { navigating = true; location.replace(next); return; }
   await refresh();
+  if (!navigating) { $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; window.PageLoad.fade($('workspace')); }
 }
 function renderInstallation(record) {
   const view=installationView(record);
@@ -74,7 +77,7 @@ function renderInstallation(record) {
   $('setup-enter').hidden=!view.complete;
   if(view.complete){
     $('setup-enter').href='/local/open/'+encodeURIComponent(record.device_id);
-    $('setup-enter').textContent='打开本机工作台 →';
+    $('setup-enter').textContent='开始工作 →';
     $('command').parentElement.hidden=true; $('setup-help').hidden=true;
   }
 }
@@ -82,10 +85,11 @@ function openInstalledLocal(record, items) {
   // An online device is not proof that it belongs to this browser's computer.
   // Only continue the installation initiated in this tab; never guess from the
   // device list. Wait for the local listener's advertised capability as well.
-  if (stayInCloud || document.hidden || !installationView(record).complete || !items.some(d => d.id === record.device_id && d.online && d.local_workspace)) return;
+  if (document.hidden || !installationView(record).complete || !items.some(d => d.id === record.device_id && d.online && d.local_workspace)) return;
   installationId = '';
   try { sessionStorage.removeItem(installationKey); } catch {}
   $('setup-status').textContent = '连接成功 · 正在打开本机工作台';
+  navigating = true;
   location.replace('/local/open/' + encodeURIComponent(record.device_id));
 }
 const computer = '<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></svg>';
@@ -99,35 +103,38 @@ async function refresh() {
     renderInstallation(installation);
     openInstalledLocal(installation,items);
   }
-  const signature = JSON.stringify(items);
+  const local = localDevice(currentUser)?.device;
+  const signature = JSON.stringify([local, items.map(d => [d.id, d.name, !!d.online])]);
   if (signature === lastDevices) return;
-  lastDevices = signature; $('devices').replaceChildren();
+  lastDevices = signature;
+  const existing = new Map([...$('devices').children].map(card => [card.dataset.deviceId, card]));
+  const cards = [];
   if (!items.length) {
     const empty = document.createElement('div'); empty.className = 'empty';
     empty.innerHTML = '<strong>把你的电脑接入工作台</strong><p>安装一次本机节点，之后打开这个网页就能继续工作。</p>';
-    $('devices').append(empty);
+    cards.push(empty);
   }
   for (const d of items) {
+    const key = JSON.stringify([d.name, !!d.online, d.id === local]);
+    const previous = existing.get(d.id);
+    if (previous?.dataset.version === key) { cards.push(previous); continue; }
     const card = document.createElement('article'); card.className = 'device';
-    card.innerHTML = `<div class="device-title"><span class="device-icon">${computer}</span><div><div class="device-name"></div><div class="status"><span class="dot ${d.online ? 'online' : ''}"></span>${d.online ? '在线 · 在此设备执行' : '离线 · 等待节点连接'}</div></div></div><div class="device-actions"><a class="enter ${d.online ? '' : 'offline'}">进入工作台 →</a><button class="text">解除绑定</button></div>`;
+    card.dataset.deviceId = d.id; card.dataset.version = key;
+    card.innerHTML = `<div class="device-title"><span class="device-icon">${computer}</span><div><div class="device-name"></div><div class="status"><span class="dot ${d.online ? 'online' : ''}"></span>${d.id === local ? '本机 · ' : ''}${d.online ? '在线' : '离线 · 等待节点连接'}</div></div></div><div class="device-actions"><a class="enter ${d.online ? '' : 'offline'}">开始工作 →</a><button class="text">解除绑定</button></div>`;
     card.querySelector('.device-name').textContent = d.name;
     const enter = card.querySelector('a');
     if (d.online) {
-      enter.href = (d.local_workspace ? '/local/open/' : '/workspace/') + encodeURIComponent(d.id) + (d.local_workspace ? '' : '/');
-      if (d.local_workspace) {
-        enter.textContent = '本机打开 →';
-        enter.title = '在当前电脑上直接连接此节点';
-        const remote = document.createElement('a'); remote.className = 'text'; remote.href = '/workspace/' + encodeURIComponent(d.id) + '/'; remote.textContent = '远程进入';
-        enter.after(remote);
-      }
+      enter.href = devicePath(d.id, currentUser);
     }
     else { enter.setAttribute('aria-disabled', 'true'); enter.textContent = '设备离线'; }
     card.querySelector('button').onclick = async () => {
       if (!confirm(`解除「${d.name}」的绑定？云端将不能再控制它，本机任务仍会保留。`)) return;
-      try { await api('devices/' + d.id, {}, 'DELETE'); await refresh(); } catch (e) { error(e.message); }
+      try { await api('devices/' + d.id, {}, 'DELETE'); forgetLocalDevice(currentUser, d.id); await refresh(); } catch (e) { error(e.message); }
     };
-    $('devices').append(card);
+    cards.push(card);
+    window.PageLoad.fade(card);
   }
+  reconcileChildren($('devices'), cards);
   } finally { refreshing=false; }
 }
 $('auth-form').onsubmit = async event => {
@@ -145,7 +152,6 @@ $('install').onclick = async () => {
   error(); $('install').disabled = true;
   try {
     const { code, origin, installation_id } = await api('pairings', {});
-    stayInCloud=false;
     installationId=installation_id;
     try { sessionStorage.setItem(installationKey,installationId); } catch {}
     // Only the non-secret status ID is kept across reloads. The one-use code
@@ -180,5 +186,5 @@ $('copy').onclick = async () => {
 };
 try { const current = await api('session'); registrationOpen=current.registration_open===true; if (setupCode || !current.user_id) auth(); else await workspace(current.user_id,current.username); }
 catch (e) { auth(); error(e.message); }
-finally { $('cloud-loading').hidden = true; }
+finally { if (!navigating) window.PageLoad.ready(); }
 setInterval(() => { if (signedIn && !document.hidden) refresh().catch(e => error(e.message)); }, 5000);

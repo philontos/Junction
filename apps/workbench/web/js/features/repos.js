@@ -51,12 +51,13 @@ function watchRepoRegistration(id, tries = 12) {
   setTimeout(tick, 500);
 }
 
-export async function loadRepos() {
-  const r = await api("/api/repos").catch(() => null);
-  if (!r) return; // server transiently down — stay quiet, poller will retry
+export async function loadRepos(options = {}) {
+  const r = await api("/api/repos", options).catch(() => null);
+  if (!r) return false; // server transiently down — keep the current view
   state.repos = r;
   rerender();
   repaintRepoDetails();
+  return true;
 }
 // A repo is a collapsible group header in col2; its tasks are nested under it by
 // renderList (hosts.js). `online` = is this repo's machine reachable — dispatch

@@ -910,8 +910,12 @@ a { color: var(--accent-bar); }
 /* boot overlay: covers the page during first paint + load, then fades out —
    hides the CDN/FOUC gap and avoids the abrupt content pop-in */
 #boot { position: fixed; inset: 0; z-index: 1000; background: var(--bg);
-  display: flex; align-items: center; justify-content: center; transition: opacity .35s ease; }
+  display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center; transition: opacity .35s ease; }
 #boot.done { opacity: 0; pointer-events: none; }
+body[data-page-loading] > :not(#boot) { visibility: hidden; }
+#boot p { max-width: 420px; padding: 0 20px; color: var(--muted); text-align: center; }
+#boot a { text-decoration: none; }
+@media (prefers-reduced-motion: reduce) { #boot { transition: none; } }
 
 /* ============================================================================
    MOBILE / TOUCH  (≤760px)

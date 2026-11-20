@@ -19,9 +19,10 @@
 <link rel="stylesheet" href="/vendor/xterm.css" />
 <link rel="stylesheet" href="/css/app.css" />
 <link rel="stylesheet" href="/css/junction.css" />
+<script defer src="/page-load.js"></script>
 </head>
-<body>
-<div id="boot"><div class="spinner"></div></div>
+<body data-page-loading>
+<div id="boot" role="status" aria-label="加载中"><div class="spinner"></div></div>
 <header><a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true" /><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true" /></a><span style="flex:1"></span><button id="junction-nav" class="sec">共享 Context</button><button id="onboarding-btn" class="sec onboarding-nav" onclick="openOnboardingModal()"><span id="onboarding-nav-dot" class="onboarding-nav-dot pending" aria-hidden="true"></span><span class="onboarding-nav-label" data-i18n="onboarding.nav"></span></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
@@ -351,10 +352,7 @@
      xterm is self-hosted under /vendor (no external CDN). -->
 <script src="/i18n.js"></script>
 <script src="/theme.js"></script>
-<script>I18N.init(); Theme.init(); I18N.applyStatic();
-  // failsafe: reveal the page even if a downstream script never runs
-  setTimeout(function () { var b = document.getElementById("boot"); if (b) b.classList.add("done"); }, 7000);
-</script>
+<script>I18N.init(); Theme.init(); I18N.applyStatic();</script>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
 <!-- Official @xterm/addon-canvas@0.7.0 browser bundle, compatible with xterm 5.5. -->

@@ -74,7 +74,7 @@ export function createLocalWorkspace(config: Config) {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin !== localOrigin()) { res.status(403).json({ error: '请从本机工作台操作。' }); return; }
     next();
   });
-  app.get('/local/open', (_req, res) => res.type('html').send(localEntryHtml(config.root, origin, config.deviceId, true)));
+  app.get('/local/open', (_req, res) => res.type('html').send(localEntryHtml(config.root, origin, config.deviceId, 'local')));
   app.post('/local/session', express.json({ limit: '2kb' }), (req, res) => {
     sweep();
     if (req.body?.device_id !== config.deviceId) { res.status(409).json({ error: '这里是另一台设备的节点，请回到云端选择当前电脑。' }); return; }
@@ -112,7 +112,7 @@ export function createLocalWorkspace(config: Config) {
   app.use('/api', (req, res) => proxyHttp(req, res, req.originalUrl, net.connect(config.upstreamPort, '127.0.0.1')));
   app.get('/', (req, res) => {
     const user = session(req);
-    if (!user) { res.redirect('/local/open'); return; }
+    if (!user) { res.redirect('/local/open' + (validTask(req.query.task) ? '?task=' + encodeURIComponent(req.query.task) : '')); return; }
     res.type('html').send(workspaceHtml(config.root, { deviceId: config.deviceId, deviceName: config.deviceName, userId: user.user_id, cloudOrigin: origin, local: true }));
   });
   app.use('/vendor/highlight', express.static(path.dirname(createRequire(import.meta.url).resolve('@highlightjs/cdn-assets/package.json'))));

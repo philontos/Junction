@@ -773,9 +773,9 @@ export function taskCard(t, online, orderKey = null) {
 // Fetch ALL tasks into the cache (tasksById keeps every task so connect() works
 // for any session, even one whose card is filtered out of the current machine),
 // then re-render. The 4s poller calls this; rerender() (hosts.js) builds col2.
-export async function loadTasks() {
-  const tasks = await api("/api/tasks").catch(() => null);
-  if (!tasks) return;
+export async function loadTasks(options = {}) {
+  const tasks = await api("/api/tasks", options).catch(() => null);
+  if (!tasks) return false;
   tasksById = Object.fromEntries(tasks.map(t => [t.id, t]));
   taskOrder = tasks.map(t => t.id);          // preserve the API's id-DESC order
   // push each task's latest Claude session id into its live pane so the term-bar
@@ -789,8 +789,9 @@ export async function loadTasks() {
   // open card was one of them, clear the now-dangling selection.
   const keep = new Set(tasks.filter(t => t.status !== "cleaned").map(t => t.id));
   if (prunePanes(keep).includes(state.selectedTaskId)) state.selectedTaskId = null;
-  if (editingTaskKey != null) return;        // a rename input is open — refresh the cache but leave the DOM alone
+  if (editingTaskKey != null) return true;   // keep the active rename input
   rerender();
+  return true;
 }
 
 // Inline rename: double-clicking a card's title swaps it for a text input.

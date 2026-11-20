@@ -2,6 +2,7 @@ import { agentCatalog, agentName, canShareAgent, loadAgentCatalog, requireAgent 
 import { $, api, nodePath } from "../core/dom.js";
 import { requireDirectoryTasks } from "../core/directory-tasks.js";
 import { state } from "../core/state.js";
+import { reconcileChildren } from "../core/keyed-list.js";
 import { toast } from "../core/feedback.js";
 import { readShareStream } from "./junction-stream.js";
 import { createContextReader } from "./junction-reader.js";
@@ -72,9 +73,9 @@ export async function openJunction(taskId = null) {
   ++generation;
   selectedContext = null;
   $("jx-detail").replaceChildren();
-  $("jx-search").value = "";
-  // Clear the previous visit before showing the dialog, including while the
-  // connection check is pending. Detail navigation has its own generation.
+  if (!listReady) $("jx-search").value = "";
+  // A first visit starts with loading. Later visits keep the existing cards
+  // visible while refreshing, without reintroducing a modal loading overlay.
   const loading = loadList();
   $("junction-modal").hidden = false;
   return loading;
@@ -114,6 +115,7 @@ async function showConnection(known) {
         connectingJunction = false;
         closeContextDialog();
         toast(L("已连接 Junction · ", "Connected to Junction · ") + result.user_id);
+        listReady = false; listItems = []; listCursor = null;
         await openJunction();
       } finally {
         connectingJunction = false;
@@ -134,11 +136,16 @@ function renderContextList() {
     const text = normalize([contextCopy(item).title, item.title, item.owner_name, item.owner_id].join(" "));
     return terms.every(term => text.includes(term));
   });
-  const list = $("jx-list"), cards = document.createDocumentFragment();
+  const list = $("jx-list"), cards = [];
+  const existing = new Map([...list.children].map(card => [card.dataset.contextId, card]));
   for (const item of matches) {
     const r = item.revision, workspace = r.normalized?.extensions?.["switchyard.workspace/1"] || r.normalized?.extensions?.["switchyard.capture/1"];
     const copy = contextCopy(item);
+    const version = JSON.stringify([I18N.lang, r.id, copy, r.provider, contextOwner(item), workspace?.repo_name, workspace?.branch]);
+    const previous = existing.get(item.id);
+    if (previous?.dataset.version === version) { cards.push(previous); continue; }
     const group = el("div", undefined, "jx-context-card");
+    group.dataset.contextId = item.id; group.dataset.version = version;
     const card = button("", () => openDetail(item), "jx-card");
     card.dataset.contextId = item.id;
     card.setAttribute("aria-label", `${L("预览并接续", "Preview and continue")}: ${copy.title}`);
@@ -153,15 +160,16 @@ function renderContextList() {
       cardFact("branch", workspace?.branch || L("分支未记录", "Branch not recorded")),
       cardFact("owner", contextOwner(item)));
     card.append(footer); group.append(card);
-    cards.append(group);
+    cards.push(group);
+    if (listReady) window.PageLoad.fade(group);
   }
   if (!matches.length) {
     const empty = el("div", undefined, "jx-empty");
     empty.append(el("p", terms.length ? L("未找到匹配的 Context", "No matching contexts") : L("还没有共享的 Context", "No shared contexts yet")));
     if (terms.length && listCursor) empty.append(note(L("可加载更多，或换个关键词。", "Load more, or try another search.")));
-    cards.append(empty);
+    cards.push(empty);
   }
-  list.replaceChildren(cards);
+  reconcileChildren(list, cards);
   const count = $("jx-count");
   count.textContent = terms.length ? `${matches.length} / ${listItems.length}` : `${listItems.length} ${listCursor ? L("已加载", "loaded") : L("个", "contexts")}`;
   count.title = terms.length ? L("匹配数 / 已加载数", "Matches / loaded contexts") : L("已加载的 Context", "Loaded contexts");
@@ -173,10 +181,11 @@ async function loadList(append = false) {
   const controller = new AbortController(); listController = controller;
   const request = ++listRequest, list = $("jx-list"), options = { signal: controller.signal };
   const cursor = append ? listCursor : null;
+  const initial = !listReady;
   clearError("jx-error");
   list.setAttribute("aria-busy", "true");
   $("jx-refresh").disabled = $("jx-more").disabled = true;
-  if (!append) {
+  if (!append && initial) {
     listReady = false; listItems = []; listCursor = null;
     $("jx-more").hidden = true; $("jx-count").textContent = "";
     $("jx-count").removeAttribute("aria-label"); $("jx-count").removeAttribute("title");
@@ -185,7 +194,7 @@ async function loadList(append = false) {
     $("jx-library-loading").setAttribute("aria-hidden", "false");
     $("jx-library").parentElement.dataset.loading = "true";
     list.replaceChildren();
-  } else {
+  } else if (append) {
     const spinner = el("span", undefined, "spinner"); spinner.setAttribute("aria-hidden", "true");
     $("jx-more").replaceChildren(spinner, document.createTextNode(L("加载中…", "Loading…")));
   }
@@ -194,6 +203,7 @@ async function loadList(append = false) {
       const connection = await call("/connection", options);
       if (request !== listRequest) return;
       if (!connection.configured) {
+        listReady = false; listItems = []; listCursor = null; list.replaceChildren();
         list.append(button(L("连接 Junction", "Connect Junction"), () => showConnection(), "jx-empty sec"));
         return showConnection(connection);
       }
@@ -205,14 +215,15 @@ async function loadList(append = false) {
     ]);
     if (request !== listRequest) return;
     status = currentStatus;
-    listItems = [...new Map([...listItems, ...page.items].map(item => [item.id, item])).values()];
+    listItems = [...new Map([...(append ? listItems : []), ...page.items].map(item => [item.id, item])).values()];
     listCursor = page.next_cursor; listReady = true;
     renderContextList();
     $("jx-more").hidden = !listCursor;
   } catch (e) {
     if (request !== listRequest) return;
     controller.abort();
-    if (!append) list.replaceChildren(button(L("重新加载", "Retry"), () => loadList()));
+    if ([401, 403].includes(e.status)) { listReady = false; listItems = []; listCursor = null; }
+    if (!listReady) list.replaceChildren(button(L("重新加载", "Retry"), () => loadList()));
     if (junctionIsOpen()) showError(e, "jx-error");
   } finally {
     if (request === listRequest) {

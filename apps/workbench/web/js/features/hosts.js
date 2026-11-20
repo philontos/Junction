@@ -40,12 +40,13 @@ const listScrollByHost = new Map(); // host id -> #m-list scrollTop for this ses
 // ---- machines: col1 is a vertical icon rail; col2 (renderList, added next)
 // lists the active machine's repos + tasks. loadHosts/loadRepos/loadTasks all
 // funnel through rerender() — the single re-render hub. ----
-export async function loadHosts() {
-  const hs = await api("/api/hosts").catch(() => null);
-  if (!hs) return;
+export async function loadHosts(options = {}) {
+  const hs = await api("/api/hosts", options).catch(() => null);
+  if (!hs) return false;
   state.hostsById = Object.fromEntries(hs.map(h => [h.id, h]));
   hostsOrder = hs.map(h => h.id);   // API order: local machine first
   rerender();
+  return true;
 }
 // Update a node's code in place — git pull its src (transparently follows the
 // symlink to the machine's own clone) + npm install. Idempotent; the node's tdsp
@@ -480,7 +481,7 @@ function renderListHtml() {
       ${updateRow}
       <button class="danger" onclick="delHost(${h.id})">${t("host.del")}</button>
     </div>` : "";
-  const cloud=!!nodeBase();
+  const cloud=!!nodeBase() || document.body.classList.contains('cloud-workspace');
   const title=isLocal ? t(cloud ? "workspace.tasks" : "host.local") : cloud ? `SSH · ${h.name}` : h.name;
   const header = `<div class="mh">${cloud && isLocal ? "" : `<span class="mh-ic">${isLocal ? "🖥" : "▦"}</span>`}<span class="mh-name" title="${esc(title)}">${esc(title)}</span>${gear}${selfUpdate}${newTask}${newRepo}${menu}</div>`;
   let content = "";

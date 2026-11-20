@@ -61,8 +61,10 @@ test('local workbench: cloud ownership, one-use login, direct HTTP/PTY, offline 
   assert.equal(wrongHost, 403);
   assert.equal((await fetch(localUrl + '/api/test', { headers: { Cookie: auth, Origin: cloud } })).status, 403);
   const html = await (await request('/')).text();
-  assert.match(html, /switchyard-base" content=""/); assert.match(html, /data-mode="local"/); assert.match(html, /本机直连/);
-  assert.ok(html.includes(`id="workspace-cloud-return" class="sec workspace-local-open" href="${cloud}/workspace/${device.device_id}/"`));
+  assert.match(html, /switchyard-base" content=""/); assert.match(html, /data-mode="local"/);
+  assert.ok(html.includes(`id="workspace-home" class="sec workspace-home" href="${cloud}/"`));
+  assert.doesNotMatch(html, /workspace-cloud-return|workspace-local-open/);
+  assert.match(html, /data-page-loading/);
   const returnPath = '/workspace/' + device.device_id + '/?task=n2%3A21';
   const expiredCloud = await fetch(cloud + returnPath, { redirect: 'manual' });
   assert.equal(expiredCloud.status, 302);

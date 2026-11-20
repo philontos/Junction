@@ -8,10 +8,12 @@
   <script>try{var _t=localStorage.getItem("theme");document.documentElement.dataset.theme=_t==="light"?"light":"dark";if(_t==="light"){var _m=document.querySelector('meta[name="theme-color"]');if(_m)_m.content="#f5f0e8";}}catch(e){document.documentElement.dataset.theme="dark";}</script>
   <link rel="stylesheet" href="/css/app.css">
   <link rel="stylesheet" href="/cloud/style.css">
+  <script defer src="/page-load.js"></script>
   <script src="/theme.js"></script>
   <script type="module" src="/cloud/app.js"></script>
 </head>
-<body class="cloud-portal">
+<body class="cloud-portal" data-page-loading>
+  <div id="boot" role="status" aria-label="加载中"><div class="spinner"></div></div>
   <header>
     <a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true"><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true"></a>
     <div class="header-actions"><div id="account" hidden><span id="username"></span><button id="logout" class="sec">退出</button></div><button id="theme-toggle" class="sec" type="button" aria-label="切换主题"></button></div>
@@ -28,7 +30,7 @@
       <p id="auth-switch" class="auth-switch" hidden><span id="auth-switch-label">还没有账号？</span><button id="auth-toggle" class="text" type="button">注册账号</button></p>
     </section>
     <section id="workspace" hidden>
-      <div class="heading"><div><h1>我的设备</h1><p>选择设备，进入工作台。</p></div><button id="install" class="primary">＋ 安装本机节点</button></div>
+      <div class="heading"><div><h1>工作台</h1><p>选择设备，继续工作。</p></div><button id="install" class="primary">＋ 连接这台电脑</button></div>
       <div id="devices" class="devices"></div>
       <section id="setup" class="setup" hidden>
         <div class="setup-heading"><h2 id="setup-title">连接这台电脑</h2><button id="close-setup" class="text" aria-label="关闭安装面板">关闭</button></div>
@@ -43,7 +45,6 @@
       <p class="footnote">任务在所选设备执行，共享 Context 保存在 Junction。</p>
     </section>
     <p id="error" class="error" role="alert" hidden></p>
-    <p id="cloud-loading" class="loading" role="status">正在连接工作台…</p>
   </main>
 </body>
 </html>
