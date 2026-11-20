@@ -6,7 +6,10 @@ const validTask = value => typeof value === 'string' && /^(?:[1-9]\d*|n[1-9]\d*:
 // Remove the one-use credential before loading the workbench or navigating.
 if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 const retry = document.getElementById('entry-retry');
-if (validTask(task)) retry.href += '?task=' + encodeURIComponent(task);
+if (validTask(task)) {
+  retry.href += '?task=' + encodeURIComponent(task);
+  document.getElementById('entry-cloud').href += '?task=' + encodeURIComponent(task);
+}
 const destination = '/' + (validTask(task) ? '?task=' + encodeURIComponent(task) : '');
 async function request(url, body) {
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });

@@ -62,6 +62,11 @@ test('local workbench: cloud ownership, one-use login, direct HTTP/PTY, offline 
   assert.equal((await fetch(localUrl + '/api/test', { headers: { Cookie: auth, Origin: cloud } })).status, 403);
   const html = await (await request('/')).text();
   assert.match(html, /switchyard-base" content=""/); assert.match(html, /data-mode="local"/); assert.match(html, /本机直连/);
+  assert.ok(html.includes(`id="workspace-cloud-return" class="sec workspace-local-open" href="${cloud}/workspace/${device.device_id}/"`));
+  const returnPath = '/workspace/' + device.device_id + '/?task=n2%3A21';
+  const expiredCloud = await fetch(cloud + returnPath, { redirect: 'manual' });
+  assert.equal(expiredCloud.status, 302);
+  assert.equal(expiredCloud.headers.get('location'), '/?next=' + encodeURIComponent(returnPath));
   const directory = await (await request('/local/devices')).json() as any; assert.equal(directory.items[0].id, device.device_id);
   assert.deepEqual(await (await request('/api/test?value=1', '{"value":42}')).json(), { path: '/api/test?value=1', body: '{"value":42}' });
   const terminal = new WebSocket(localUrl.replace('http', 'ws') + '/pty?session=test', { headers: { Cookie: auth, Origin: localUrl } });

@@ -172,7 +172,7 @@ export function createGateway(config: GatewayConfig) {
   // A distinct device in every URL prevents a second browser tab from changing
   // the execution target of an already open task view.
   app.get(new RegExp(`^/workspace/(${uuid})/?$`), (req,res) => {
-    const u=store.session(cookie(req.headers.cookie));if(!u){res.redirect('/');return;}
+    const u=store.session(cookie(req.headers.cookie));if(!u){res.redirect('/?next='+encodeURIComponent(req.originalUrl));return;}
     const device=store.device(req.params[0],u.id);if(!device)throw new CloudError(404,'设备不存在。');
     res.type('html').send(workspaceHtml(config.root,{deviceId:device.id,deviceName:device.name,userId:u.id,cloudOrigin:origin}));
   });

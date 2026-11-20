@@ -15,6 +15,7 @@ if (location.hash) history.replaceState(null, '', location.pathname);
 let signedIn = false, installationId = '', installationKey = '', lastDevices = '', refreshing = false;
 let registrationOpen = false, authMode = setupCode ? 'activate' : 'login';
 let decidingBinding = '';
+let stayInCloud = new URLSearchParams(location.search).get('view') === 'cloud';
 async function api(route, body, method = 'POST') {
   let response;
   try { response = await fetch('/hub/' + route, {signal:AbortSignal.timeout(15000), ...(body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })}); }
@@ -46,9 +47,9 @@ async function workspace(user, username = user) {
   signedIn = true; $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; $('username').textContent = username;
   installationKey='switchyard-install:'+user;
   try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
-  await refresh();
   const next = new URLSearchParams(location.search).get('next');
-  if (next && /^\/local\/open\/[0-9a-f-]{36}(?:\?task=(?:[1-9]\d*|n[1-9]\d*%3A[1-9]\d*))?$/.test(next)) location.replace(next);
+  if (next && /^\/(?:local\/open\/[0-9a-f-]{36}|workspace\/[0-9a-f-]{36}\/)(?:\?task=(?:[1-9]\d*|n[1-9]\d*%3A[1-9]\d*))?$/.test(next)) { location.replace(next); return; }
+  await refresh();
 }
 function renderInstallation(record) {
   const view=installationView(record);
@@ -75,8 +76,17 @@ function renderInstallation(record) {
     $('setup-enter').href='/local/open/'+encodeURIComponent(record.device_id);
     $('setup-enter').textContent='打开本机工作台 →';
     $('command').parentElement.hidden=true; $('setup-help').hidden=true;
-    try { sessionStorage.removeItem(installationKey); } catch {}
   }
+}
+function openInstalledLocal(record, items) {
+  // An online device is not proof that it belongs to this browser's computer.
+  // Only continue the installation initiated in this tab; never guess from the
+  // device list. Wait for the local listener's advertised capability as well.
+  if (stayInCloud || document.hidden || !installationView(record).complete || !items.some(d => d.id === record.device_id && d.online && d.local_workspace)) return;
+  installationId = '';
+  try { sessionStorage.removeItem(installationKey); } catch {}
+  $('setup-status').textContent = '连接成功 · 正在打开本机工作台';
+  location.replace('/local/open/' + encodeURIComponent(record.device_id));
 }
 const computer = '<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></svg>';
 async function refresh() {
@@ -85,7 +95,10 @@ async function refresh() {
   try {
   const id=installationId;
   const [{items}, installation] = await Promise.all([api('devices'),id ? api('installations/'+id) : null]);
-  if(installation && installationId===id)renderInstallation(installation);
+  if(installation && installationId===id){
+    renderInstallation(installation);
+    openInstalledLocal(installation,items);
+  }
   const signature = JSON.stringify(items);
   if (signature === lastDevices) return;
   lastDevices = signature; $('devices').replaceChildren();
@@ -132,6 +145,7 @@ $('install').onclick = async () => {
   error(); $('install').disabled = true;
   try {
     const { code, origin, installation_id } = await api('pairings', {});
+    stayInCloud=false;
     installationId=installation_id;
     try { sessionStorage.setItem(installationKey,installationId); } catch {}
     // Only the non-secret status ID is kept across reloads. The one-use code

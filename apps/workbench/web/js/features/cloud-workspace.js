@@ -185,6 +185,12 @@ export function initCloudWorkspace(callbacks) {
     if (validTask(state.selectedTaskId)) url.searchParams.set('task', String(state.selectedTaskId));
     localOpen.href = url.href;
   };
+  const cloudReturn = $("workspace-cloud-return");
+  if (cloudReturn) cloudReturn.onclick = () => {
+    const url = new URL('/workspace/' + switcher.dataset.deviceId + '/', cloudOrigin);
+    if (validTask(state.selectedTaskId)) url.searchParams.set('task', String(state.selectedTaskId));
+    cloudReturn.href = url.href;
+  };
   document.addEventListener("pointerdown", cancelRestore, true);
   document.addEventListener("keydown", cancelRestore, true);
   window.addEventListener("pagehide", remember);
@@ -193,7 +199,7 @@ export function initCloudWorkspace(callbacks) {
   panel = element("div", "cloud-device-panel");
   panel.append(element("div", "cloud-device-heading"));
   list = element("div", "cloud-device-list"); panel.append(list);
-  const manage = element("a", "cloud-menu-action cloud-manage"); manage.href = cloudOrigin + "/";
+  const manage = element("a", "cloud-menu-action cloud-manage"); manage.href = cloudOrigin + "/?view=cloud";
   panel.append(manage);
   advanced = element("details", "cloud-advanced");
   advanced.append(element("summary"), element("p"));
