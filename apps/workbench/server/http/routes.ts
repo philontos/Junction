@@ -33,6 +33,7 @@ import { bootstrapMachine, validProfileName } from "../fleet/bootstrap.js";
 import { createLocalTask, createRepoTask, type RepoTaskEnv } from "../task/createtask.js";
 import { buildDirectoryEnv, createDirectoryTask, startDirectorySession } from "../task/directory.js";
 import { taskControlDir, taskCwd } from "../task/workspace.js";
+import { workspaceLayout } from "../task/workspace-layout.js";
 import { addTaskReference, type AddTaskReferenceResult } from "../task/addreference.js";
 import {
   listTaskReferences,
@@ -530,7 +531,7 @@ app.delete("/api/repos/:id", async (req, res) => {
 });
 
 // ---------- tasks ----------
-app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, agents: agentCatalog(), home: os.homedir() }));
+app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, managed_workspaces: true, workspace: workspaceLayout(DATA_DIR), agents: agentCatalog(), home: os.homedir() }));
 app.get("/api/tasks", async (_req, res) => {
   const tasks = listOwnedTasks(db);
   const withLive = await Promise.all(
@@ -602,7 +603,7 @@ app.post("/api/tasks", async (req, res) => {
     if (provider_id && !provider) return res.status(400).json({ error: "模型后端不存在。" });
     try {
       return res.status(201).json(await createDirectoryTask(buildDirectoryEnv(db, NS, localRunner), {
-        cwd: req.body?.cwd, title, prompt, agent: kind, model: agent_model,
+        cwd: req.body?.cwd, cwdMode: req.body?.cwd_mode, title, prompt, agent: kind, model: agent_model,
         providerId: provider?.id, env: providerEnv(provider),
       }));
     } catch (error: any) { return res.status(400).json({ error: error.message }); }

@@ -1,6 +1,6 @@
 import { agentCatalog, agentName, canShareAgent, loadAgentCatalog, requireAgent } from "../core/agents.js";
 import { $, api, nodePath } from "../core/dom.js";
-import { requireDirectoryTasks } from "../core/directory-tasks.js";
+import { requireDirectoryTasks, populateWorkspaceOptions, workspaceSelection, matchingWorkspaceRepo } from "../core/directory-tasks.js";
 import { state } from "../core/state.js";
 import { reconcileChildren } from "../core/keyed-list.js";
 import { toast } from "../core/feedback.js";
@@ -369,10 +369,11 @@ function showContinue(meta) {
   const repos = state.repos.filter(r => r.status === "ready" && state.hostsById[r.host_id]?.kind === "local");
   const w = meta.revision.normalized.extensions?.["switchyard.workspace/1"];
   const hint = w || meta.revision.normalized.extensions?.["switchyard.capture/1"];
-  const matches = repos.filter(r => r.name === hint?.repo_name || r.git_url === hint?.repo_url);
-  const match = matches.length === 1 ? matches[0] : null;
-  const repo = select([["", L("工作目录", "Working directory")], ...repos.map(r => [String(r.id), `${r.name} · Worktree`])], "Workspace");
-  const cwd = textInput("~", "~/Projects"); cwd.maxLength = 4096;
+  const match = matchingWorkspaceRepo(repos, hint?.repo_url);
+  const repo = select([], "Workspace"); populateWorkspaceOptions(repo, repos);
+  repo.value = match ? String(match.id) : "";
+  const workspaceHint = note(I18N.t("task.managedHint"));
+  const cwd = textInput("", "~/Projects/my-project"); cwd.maxLength = 4096;
   const cwdField = field(L("工作目录（当前设备）", "Working directory (this device)"), cwd);
   let agent = agentCatalog().some(a => a.id === meta.revision.provider) ? meta.revision.provider : "claude";
   const agents = el("div", undefined, "agent-seg"); agents.setAttribute("role", "group"); agents.setAttribute("aria-label", "Agent");
@@ -393,17 +394,21 @@ function showContinue(meta) {
   const branchField = field(L("起始分支 · 新 Worktree", "Base branch · new Worktree"), branch);
   branchField.hidden = true;
   repo.onchange = () => {
-    cwdField.hidden = !!repo.value;
-    branchField.hidden = !repo.value || !!w;
-    branch.required = !!repo.value && !w;
+    const hasRepo = !!Number(repo.value);
+    cwdField.hidden = repo.value !== "directory";
+    cwd.required = repo.value === "directory";
+    workspaceHint.hidden = repo.value !== "";
+    branchField.hidden = !hasRepo || !!w;
+    branch.required = hasRepo && !w;
     branch.value = repos.find(r => r.id === Number(repo.value))?.default_branch || "main";
   };
+  repo.onchange();
   const prompt = el("textarea"); prompt.rows = 2; prompt.maxLength = 8000; prompt.placeholder = L("接下来要做什么？留空则按 Context 继续。", "What should the agent do next? Leave blank to continue from the context.");
   const model = textInput("", L("默认模型", "Default model")); model.maxLength = 100;
   const form = el("form", undefined, "jx-form"); form.id = "jx-task-form";
   const fields = el("fieldset"); form.append(fields);
   const agentField = el("div", undefined, "jx-field"); agentField.append(el("span", "Agent"), agents);
-  fields.append(agentField, field(L("工作位置", "Workspace"), repo), cwdField, branchField, field(L("任务标题", "Task title"), title), field(L("补充要求（可选）", "Instructions (optional)"), prompt));
+  fields.append(agentField, field(L("工作位置", "Workspace"), repo), workspaceHint, cwdField, branchField, field(L("任务标题", "Task title"), title), field(L("补充要求（可选）", "Instructions (optional)"), prompt));
   const options = el("details", undefined, "jx-section"); options.append(el("summary", L("更多设置", "More options")));
   options.append(field(L("模型", "Model"), model));
   fields.append(options);
@@ -425,9 +430,9 @@ function showContinue(meta) {
     let result;
     try {
       await requireAgent(agent);
-      if (!repo.value) await requireDirectoryTasks();
-      result = await send("/continue", { context_id: meta.id, revision_id: meta.revision.id, repo_id: Number(repo.value), agent,
-        cwd: repo.value ? undefined : cwd.value.trim() || "~",
+      const destination = workspaceSelection(repo.value, cwd.value);
+      if (!destination.repo_id) await requireDirectoryTasks(destination.cwd_mode === "managed");
+      result = await send("/continue", { context_id: meta.id, revision_id: meta.revision.id, ...destination, agent,
         title: title.value.trim(), base_branch: branch.value, prompt: prompt.value, agent_model: model.value, acknowledge: true });
     } catch (error) { setBusy(false); showError(error); return; }
     setBusy(false); closeJunction();

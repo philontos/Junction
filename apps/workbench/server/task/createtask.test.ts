@@ -233,7 +233,7 @@ test("createRepoTask inserts a running task, prepares the worktree, starts the s
     assert.equal(s.mirror, REPO.mirror_path);
     assert.equal(s.baseBranch, "master");
     assert.equal(s.workBranch, `feat/${r.id}-fix-login`);
-    assert.equal(s.worktree, path.resolve(`/data/worktrees/4-${r.id}`));
+    assert.equal(s.worktree, path.resolve(`/data/workspaces/repos/4-switchyard/${r.id}`));
 
     const m = JSON.parse(fs.readFileSync(path.join(dir, "tasks", String(r.id), "task.json"), "utf8"));
     assert.equal(m.task.work_branch, `feat/${r.id}-fix-login`);
@@ -255,7 +255,7 @@ test("createRepoTask materializes pinned task-local references and installs the 
     assert.equal(r.ok, true);
     if (!r.ok) return;
 
-    const taskPath = path.resolve(`/data/worktrees/4-${r.id}`);
+    const taskPath = path.resolve(`/data/workspaces/repos/4-switchyard/${r.id}`);
     const refPath = path.join(taskPath, ".tdsp", "refs", "api");
     const reference = db.prepare("SELECT * FROM task_references WHERE task_id=?").get(r.id) as any;
     assert.equal(reference.repo_id, REFERENCE_REPO.id);
@@ -329,7 +329,7 @@ test("createRepoTask rolls back a partially-created reference worktree", async (
       "setup",
       "ref-failed",
       `remove-ref:${REFERENCE_REPO.mirror_path}:${attemptedPath}`,
-      `remove-ref-roots:${r.id}:${path.resolve(`/data/worktrees/4-${r.id}`)}`,
+      `remove-ref-roots:${r.id}:${path.resolve(`/data/workspaces/repos/4-switchyard/${r.id}`)}`,
       "remove",
     ]);
     assert.equal((db.prepare("SELECT count(*) AS c FROM task_references").get() as { c: number }).c, 0);
@@ -451,7 +451,7 @@ test("createRepoTask cleans up when the session fails to start after the worktre
     if (r.ok || r.error === "invalidReference") return;
     assert.deepEqual(calls, [
       "setup",
-      `remove-ref-roots:${r.id}:${path.resolve(`/data/worktrees/4-${r.id}`)}`,
+      `remove-ref-roots:${r.id}:${path.resolve(`/data/workspaces/repos/4-switchyard/${r.id}`)}`,
       "remove",
     ], "worktree metadata and checkout are torn down");
     const row = db.prepare("SELECT status FROM tasks WHERE title='t'").get() as { status: string };

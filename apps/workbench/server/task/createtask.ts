@@ -5,6 +5,7 @@
 // tests). The durable record is the manifest, written here as the single writer.
 import path from "node:path";
 import { writeTaskManifestFromDb } from "./taskmanifest.js";
+import { repositoryTaskDirectory } from "./workspace-layout.js";
 import { resolveCwd } from "../fleet/local.js";
 import type { AgentKind } from "../session/agent.js";
 import type Database from "better-sqlite3";
@@ -209,7 +210,7 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
   const id = Number(info.lastInsertRowid);
   const s = slug(opts.title);
   const workBranch = `feat/${id}-${s}`;
-  const worktree = path.resolve(path.join(path.dirname(repo.mirror_path), "..", "worktrees", `${repo.id}-${id}`));
+  const worktree = repositoryTaskDirectory(path.resolve(path.dirname(repo.mirror_path), ".."), repo.id, repo.name, id);
   const referenceRoot = referenceRootPath(worktree);
   const session = `tdsp-${env.ns}-${id}-${slug(repo.name)}-${s}`;
   const materialized: Array<{

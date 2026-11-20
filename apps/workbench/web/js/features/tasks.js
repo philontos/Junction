@@ -4,7 +4,7 @@ import { agentCatalog, loadAgentCatalog, requireAgent } from "../core/agents.js"
 // to a task's tmux session. paintSelection() reflects the currently-open card
 // and is shared with hosts.js (a remote shell clears the task selection).
 import { $, api } from "../core/dom.js";
-import { requireDirectoryTasks } from "../core/directory-tasks.js";
+import { requireDirectoryTasks, populateWorkspaceOptions, workspaceSelection } from "../core/directory-tasks.js";
 import { toast, showLoading, hideLoading } from "../core/feedback.js";
 import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
@@ -332,9 +332,10 @@ function applyAgentUI() {
 export function selectTaskWorkspace() {
   taskRepoId = Number($("t-workspace").value) || null;
   const repo = state.repos.find(r => r.id === taskRepoId);
-  $("t-cwd-sec").hidden = !!repo;
+  $("t-cwd-sec").hidden = $("t-workspace").value !== "directory";
+  $("t-workspace-hint").hidden = $("t-workspace").value !== "";
   $("t-repo-options").hidden = !repo;
-  $("tm-repo").textContent = repo?.name || t("task.directoryMode");
+  $("tm-repo").textContent = repo?.name || t($("t-workspace").value === "directory" ? "task.directoryMode" : "task.managedTitle");
   $("t-title").dataset.i18nPh = repo ? "task.titlePh" : "task.optionalTitlePh";
   $("t-title").placeholder = t($("t-title").dataset.i18nPh);
   resetTaskReferences();
@@ -346,9 +347,9 @@ export function openTaskModal(repoId = null) {
   if (repoId && !repo) return toast(t("toast.repoNotReady"), "error");
   nodeTask = null;
   $("t-workspace-sec").hidden = false;
-  $("t-workspace").replaceChildren(option("", t("task.directoryMode")), ...state.repos.filter(r => r.status === "ready").map(r => option(r.id, `${r.name} · Worktree`)));
+  populateWorkspaceOptions($("t-workspace"), state.repos);
   $("t-workspace").value = repo ? String(repo.id) : "";
-  $("t-cwd").value = "~";
+  $("t-cwd").value = "";
   selectTaskWorkspace();
   $("t-title").value = ""; $("t-prompt").value = "";   // fresh form each open
   $("prov-panel").style.display = "none";              // collapse the manage panel
@@ -543,6 +544,9 @@ async function addNodeTask() {
 export async function addTask() {
   if (directoryCheckPending) return;
   if (nodeTask) return addNodeTask();
+  let destination;
+  try { destination = workspaceSelection($("t-workspace").value, $("t-cwd").value); }
+  catch (e) { $("t-cwd").focus(); return toast(e.message, "error"); }
   directoryCheckPending = true;
   try { await requireAgent(selectedAgent); } catch (e) { return toast(e.message, "error"); }
   finally { directoryCheckPending = false; }
@@ -553,18 +557,17 @@ export async function addTask() {
   const providerShown = $("t-provider-sec").style.display !== "none";
   const external = selectedAgent !== "claude";
   const body = {
-    repo_id: Number(taskRepoId), base_branch: Selects["t-base"].value,
+    ...destination, base_branch: Selects["t-base"].value,
     title: $("t-title").value.trim(), prompt: $("t-prompt").value,
     provider_id: providerShown ? selectedProviderId() : null,   // null == default claude login
     agent: selectedAgent,
     agent_model: external ? ($("t-codex-model").value.trim() || null) : null,
-    cwd: taskRepoId ? undefined : $("t-cwd").value.trim() || "~",
     references,
   };
   if (body.repo_id && (!body.base_branch || !body.title)) return toast(t("toast.taskFieldsRequired"), "error");
   if (!body.repo_id) {
     directoryCheckPending = true;
-    try { await requireDirectoryTasks(); }
+    try { await requireDirectoryTasks(body.cwd_mode === "managed"); }
     catch (e) { return toast(e.message, "error", 8000); }
     finally { directoryCheckPending = false; }
   }

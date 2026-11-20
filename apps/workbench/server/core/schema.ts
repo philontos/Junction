@@ -146,6 +146,7 @@ function reconcileColumns(db: DB) {
   addColumn(db, "tasks", "kind", "TEXT DEFAULT 'repo'");       // 'repo' | 'local'
   addColumn(db, "tasks", "host_id", "INTEGER");                // local tasks: which machine
   addColumn(db, "tasks", "cwd", "TEXT");                       // local tasks: working dir
+  addColumn(db, "tasks", "cwd_mode", "TEXT DEFAULT 'existing'"); // old tasks retain their recorded cwd
   addColumn(db, "tasks", "claude_session", "TEXT");           // Claude session id, captured by the SessionStart hook
   addColumn(db, "tasks", "provider_id", "INTEGER");           // alternate model backend; NULL == default claude login
   // the agent axis: which coding-agent CLI runs the task (claude default | codex

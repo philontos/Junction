@@ -7,7 +7,7 @@ import { getRepo, getTask, getProvider, providerEnv, syncTaskManifest } from "..
 import { localRunner } from "../fleet/runner.js";
 import { buildRepoTaskEnv } from "../repo/repoenv.js";
 import { createRepoTask } from "../task/createtask.js";
-import { buildDirectoryEnv, createDirectoryTask, directoryCwd } from "../task/directory.js";
+import { buildDirectoryEnv, createDirectoryTask, directoryDestination } from "../task/directory.js";
 import { taskControlDir, taskCwd } from "../task/workspace.js";
 import { locateNativeJsonl } from "../session/transcript.js";
 import { isAgentKind, canShareAgent } from "../session/agent.js";
@@ -65,6 +65,7 @@ async function taskSource(id: unknown) {
     derivedFrom = { context_id: m.context_id, revision_id: m.revision_id }; } catch { /* ordinary task */ }
   const capture = {
     source: { node_id: NS, task_id: task.id }, cwd, workspace_kind: task.kind,
+    ...(task.kind === "directory" ? { cwd_mode: task.cwd_mode || "existing" } : {}),
     repo_url: remoteUrl ? publicRepoUrl(remoteUrl) : null, repo_name: repo?.name ?? (remoteUrl ? path.basename(cwd) : null),
     branch, commit, dirty: dirty === null ? null : !!dirty,
     ...(derivedFrom ? { derived_from: derivedFrom } : {}),
@@ -204,18 +205,18 @@ export function registerJunctionRoutes(app: Express) {
     const provider = b.agent === "claude" && b.provider_id ? getProvider.get(Number(b.provider_id)) as Provider | undefined : undefined;
     if (b.provider_id && !provider) throw new JunctionError(400, "模型后端不存在。");
     // Validate the local destination before downloading a potentially large history.
-    let cwd: string | undefined;
+    let destination: Awaited<ReturnType<typeof directoryDestination>> | undefined;
     if (!b.repo_id) {
-      try { cwd = await directoryCwd(b.cwd); }
+      try { destination = await directoryDestination(b.cwd, b.cwd_mode); }
       catch (e: any) { throw new JunctionError(400, e.message); }
     }
     const snapshot = await client.snapshot(b.context_id, b.revision_id);
     if (snapshot.meta.revision.status === "failed") throw new JunctionError(409, "该 Context 解析失败，不能接续。");
-    if (cwd) {
+    if (destination) {
       const env = buildDirectoryEnv(db, NS, localRunner);
       env.prepare = async task => {
         const control = taskControlDir(DATA_DIR, task);
-        const manifest = writeHandoff(control, snapshot, client.config.url, cwd);
+        const manifest = writeHandoff(control, snapshot, client.config.url, taskCwd(task));
         await fs.writeFile(path.join(control, "context.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 });
         const prompt = handoffPrompt(str(b.prompt, 8000), path.join(control, ".tdsp/context"));
         task.prompt = prompt;
@@ -225,7 +226,7 @@ export function registerJunctionRoutes(app: Express) {
       const start = env.start;
       env.start = (task, options) => start(task, { ...options, prompt: task.prompt });
       try {
-        const result = await createDirectoryTask(env, { cwd,
+        const result = await createDirectoryTask(env, { cwd: destination.cwd, cwdMode: destination.mode,
           title: str(b.title, 200).trim() || `接续：${snapshot.meta.title}`.slice(0, 200),
           agent: b.agent, model: str(b.agent_model, 100) || null, providerId: provider?.id, env: providerEnv(provider),
         });

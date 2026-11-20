@@ -177,7 +177,7 @@ export function writeTaskManifest(
     schema_version: 1,
     task_id: task.id,
     primary: task.kind !== "repo"
-      ? { kind: task.kind, path: task.cwd }
+      ? { kind: task.kind, path: task.cwd, cwd_mode: task.cwd_mode || "existing" }
       : {
           kind: "repository",
           repo_id: task.repo_id,
@@ -240,7 +240,7 @@ export function readTaskManifests(dataDir: string): TaskManifest[] {
 
 const TASK_COLS = [
   "id", "repo_id", "base_branch", "base_commit", "work_branch", "title", "prompt", "worktree_path",
-  "session", "status", "error", "created_at", "kind", "host_id", "cwd",
+  "session", "status", "error", "created_at", "kind", "host_id", "cwd", "cwd_mode",
   "claude_session", "provider_id", "agent", "agent_model",
 ] as const;
 
@@ -276,6 +276,7 @@ export function adoptTaskManifests(db: DB, manifests: TaskManifest[]): number {
     }
     insert.run(...TASK_COLS.map((c) => {
       if (c === "agent" && t[c] == null) return "claude";
+      if (c === "cwd_mode" && t[c] == null) return "existing";
       return (t[c] ?? null) as unknown;
     }));
     const insertReference = db.prepare(

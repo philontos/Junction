@@ -19,3 +19,23 @@ The gateway renders the workbench's web assets, but never launches Agents. Exist
 Public contracts retain their existing versions: `junction.context/1`, optional environment metadata, and `switchyard-tunnel/1`. Directory changes do not alter Context IDs, database schemas, device IDs or local data locations. Local workbench support is negotiated as `local-workspace/1`, so old nodes can still use remote relay.
 
 The merge contains both original Git histories. `git log --all` exposes their commits; `git log --follow -- <file>` tracks moved files. New development happens in Junction; the old Switchyard checkout is retained for rollback/reference and is not the ongoing source of release builds.
+
+## Task workspaces and Context lifecycle
+
+The node allocates execution directories; Junction owns shared Context identities and revisions. Each node keeps a stable data root independent of release installations:
+
+```text
+<node data>/
+  mirrors/<repo-id>-<name>.git              shared Git objects
+  workspaces/tasks/<task-id>/              independent directory task output
+  workspaces/repos/<repo-id>-<name>/<task-id>/  repository task worktree
+  tasks/<task-id>/                         durable task metadata
+    task.json, workspace.json              identity, workspace and reference paths
+    context.json                          pinned handoff provenance, when present
+```
+
+Creation without `cwd` defaults to a managed workspace. `cwd_mode: existing` requires an explicit existing directory; legacy requests with an explicit `cwd` retain that behavior. `GET /api/tasks/options` advertises `managed_workspaces` and the destination node's layout. A new UI must check that capability before sending a managed request to an older node. Once assigned, the absolute path in the task record is authoritative; resume never recomputes it, and upgrades never relocate old tasks.
+
+Sharing snapshots the conversation and environment description, not the working directory. Repeated shares of one node/task identity map to one Context with immutable revisions. Continuation creates a new task with its own directory, session and fixed source revision. When a unique registered repository matches the source URL, the UI selects that repository's new worktree; otherwise it defaults to a managed directory. A local handoff archive is placed under the task control directory's `.tdsp/context/`; it is separate from the new Agent's native session and must be treated as historical evidence. Republishing a continuation retains `derived_from` and uses the new task's own Context identity.
+
+Directory task output is retained after task metadata deletion; it is never placed under `tasks/<id>` because that directory is disposable control metadata. Repository worktrees keep their existing explicit cleanup flow. Context does not transfer tools, credentials or execution permissions.

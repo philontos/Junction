@@ -58,6 +58,7 @@ export interface Task {
   kind: string;              // 'repo' | 'local' (bare shell) | 'directory' (Agent)
   host_id: number | null;    // local tasks: the machine they run on
   cwd: string | null;        // local tasks: working dir
+  cwd_mode?: "managed" | "existing" | null; // directory tasks: allocated workspace or explicit path
   claude_session: string | null;  // Claude session id (UUID), captured by the SessionStart hook
   provider_id: number | null;      // alternate model backend; NULL == default claude login
   agent: string;                   // which coding-agent CLI runs the task: claude | codex | kimi

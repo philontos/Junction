@@ -127,9 +127,10 @@
     <div id="t-workspace-sec">
       <label class="tm-lbl" for="t-workspace" data-i18n="task.workspaceLabel"></label>
       <select id="t-workspace" onchange="selectTaskWorkspace()"></select>
-      <div id="t-cwd-sec">
+      <p id="t-workspace-hint" class="hint" data-i18n="task.managedHint"></p>
+      <div id="t-cwd-sec" hidden>
         <label class="tm-lbl" for="t-cwd" data-i18n="task.cwdLabel"></label>
-        <input id="t-cwd" value="~" placeholder="~/Projects" autocomplete="off" spellcheck="false" />
+        <input id="t-cwd" placeholder="~/Projects/my-project" maxlength="4096" autocomplete="off" spellcheck="false" />
       </div>
     </div>
     <div id="t-repo-options">
