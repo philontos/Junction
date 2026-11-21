@@ -1,4 +1,5 @@
 import { beginLocalConfirmation, confirmLocalDevice, validTask } from './device-routing.js';
+import { beginLocalRecovery, clearLocalRecovery } from './local-session.js';
 const meta = name => document.querySelector(`meta[name="${name}"]`).content;
 const mode = meta('local-entry-mode'), device = meta('switchyard-device-id');
 const cloudOrigin = meta('switchyard-cloud-origin');
@@ -8,7 +9,9 @@ const task = fragment.get('task') || new URLSearchParams(location.search).get('t
 if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 const retry = document.getElementById('entry-retry');
 if (validTask(task)) {
-  retry.href += '?task=' + encodeURIComponent(task);
+  const url = new URL(retry.href);
+  url.searchParams.set('task', task);
+  retry.href = url.href;
 }
 const destination = '/' + (validTask(task) ? '?task=' + encodeURIComponent(task) : '');
 async function request(url, body) {
@@ -36,8 +39,13 @@ try {
     else location.replace(Theme.url(destination));
   } else {
     const response = await fetch('/local/status', { signal: AbortSignal.timeout(3000) });
-    if (response.ok) location.replace(Theme.url(destination));
-    else {
+    if (response.ok) {
+      clearLocalRecovery(device);
+      location.replace(Theme.url(destination));
+    } else if (response.status === 401 && beginLocalRecovery(device)) {
+      document.getElementById('entry-status').textContent = '正在确认账号并恢复连接…';
+      location.replace(Theme.url(retry.href));
+    } else {
       document.getElementById('entry-status').textContent = '从云端确认账号后，即可在本机继续工作。';
       retry.hidden = false; retry.textContent = '重新连接';
       window.PageLoad.ready();

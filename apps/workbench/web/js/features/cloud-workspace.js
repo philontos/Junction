@@ -2,6 +2,7 @@ import { $, nodeBase } from "../core/dom.js";
 import { state } from "../core/state.js";
 import { duringAutoFollow } from "./mobile.js";
 import { devicePath } from "../../cloud/device-routing.js";
+import { watchLocalSession } from "../../cloud/local-session.js";
 
 let switcher, panel, list, advanced, hostList, hooks;
 let devices = [], loading = false, failure = "", expired = false, pending;
@@ -204,16 +205,11 @@ export function initCloudWorkspace(callbacks) {
   }, true);
   repaintCloudWorkspace(); refreshDevices(true);
   setInterval(() => { if (!document.hidden && !switcher.open) refreshDevices(); }, 15000);
-  if (direct) setInterval(async () => {
-    if (document.hidden) return;
-    try {
-      const response = await fetch('/local/status');
-      if (response.status === 401) {
-        const task = validTask(state.selectedTaskId) ? '?task=' + encodeURIComponent(state.selectedTaskId) : '';
-        location.replace(Theme.url('/local/open' + task));
-      }
-    } catch { /* The terminal already handles a temporary node restart. */ }
-  }, 30000);
+  if (direct) watchLocalSession(switcher.dataset.deviceId, () => {
+    remember();
+    const task = validTask(state.selectedTaskId) ? '?task=' + encodeURIComponent(state.selectedTaskId) : '';
+    location.replace(Theme.url('/local/open' + task));
+  });
 }
 
 // Only re-attach a still-live task belonging to this user, node and host. Never
