@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#1a1613">
   <meta name="referrer" content="no-referrer">
   <meta name="local-entry-mode" content="__ENTRY_MODE__">
   <meta name="switchyard-cloud-origin" content="__CLOUD_ORIGIN__">
   <meta name="switchyard-device-id" content="__DEVICE_ID__">
-  <title>Switchyard · 本机工作台</title>
-  <script>try{document.documentElement.dataset.theme=localStorage.getItem('theme')==='light'?'light':'dark';}catch{document.documentElement.dataset.theme='dark';}</script>
+  <title>Junction · 本机工作台</title>
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/css/app.css">
   <link rel="stylesheet" href="/cloud/style.css">
   <script defer src="/page-load.js"></script>
@@ -16,12 +17,12 @@
 </head>
 <body class="cloud-portal" data-page-loading>
   <div id="boot" role="status" aria-label="连接中"><div class="spinner"></div></div>
-  <header><a class="brand" href="__CLOUD_ORIGIN__/"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="Switchyard"><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="Switchyard"></a></header>
+  <header><a class="brand" href="__CLOUD_ORIGIN__/" data-theme-link><img class="brand-logo brand-logo-dark" src="/assets/junction-wordmark.png" alt="Junction"><img class="brand-logo brand-logo-light" src="/assets/junction-wordmark-light.png" alt="Junction"></a></header>
   <main><section class="auth local-entry">
     <h1 id="entry-title">连接这台电脑</h1>
     <p id="entry-status" role="status">正在连接…</p>
     <p id="entry-error" class="error" role="alert" hidden></p>
-    <div class="setup-actions"><a id="entry-retry" class="enter" href="__CLOUD_ORIGIN__/local/open/__DEVICE_ID__" hidden>重新连接</a><a id="entry-cloud" class="text" href="__CLOUD_ORIGIN__/">返回工作台</a></div>
+    <div class="setup-actions"><a id="entry-retry" class="enter" href="__CLOUD_ORIGIN__/local/open/__DEVICE_ID__" data-theme-link hidden>重新连接</a><a id="entry-cloud" class="text" href="__CLOUD_ORIGIN__/" data-theme-link>返回工作台</a></div>
   </section></main>
 </body>
 </html>

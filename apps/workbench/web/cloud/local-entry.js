@@ -22,21 +22,21 @@ try {
     const response = await fetch('/hub/session', { signal: AbortSignal.timeout(15000) });
     const account = await response.json();
     if (!response.ok || !account.user_id) throw new Error('登录已过期，请返回工作台重新登录。');
-    location.replace(confirmLocalDevice(fragment.get('confirm'), fragment.get('device'), account.user_id));
+    location.replace(Theme.url(confirmLocalDevice(fragment.get('confirm'), fragment.get('device'), account.user_id)));
   } else if (mode === 'cloud') {
     const grant = await request('/hub/devices/' + device + '/local-access', { task_id: validTask(task) ? task : undefined });
     const url = new URL(grant.url);
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.pathname !== '/local/open' || url.username || url.password || new URLSearchParams(url.hash.slice(1)).get('device') !== device) throw new Error('节点返回了无效的本机地址。');
     const nonce = beginLocalConfirmation(grant.user_id, device, url.origin, task);
     if (nonce) { const params = new URLSearchParams(url.hash.slice(1)); params.set('confirm', nonce); url.hash = params.toString(); }
-    location.replace(url.href);
+    location.replace(Theme.url(url.href));
   } else if (fragment.get('code')) {
     await request('/local/session', { code: fragment.get('code'), device_id: fragment.get('device') });
-    if (fragment.get('confirm')) location.replace(cloudOrigin + '/local/connected#' + new URLSearchParams({ confirm: fragment.get('confirm'), device }));
-    else location.replace(destination);
+    if (fragment.get('confirm')) location.replace(Theme.url(cloudOrigin + '/local/connected#' + new URLSearchParams({ confirm: fragment.get('confirm'), device })));
+    else location.replace(Theme.url(destination));
   } else {
     const response = await fetch('/local/status', { signal: AbortSignal.timeout(3000) });
-    if (response.ok) location.replace(destination);
+    if (response.ok) location.replace(Theme.url(destination));
     else {
       document.getElementById('entry-status').textContent = '从云端确认账号后，即可在本机继续工作。';
       retry.hidden = false; retry.textContent = '重新连接';

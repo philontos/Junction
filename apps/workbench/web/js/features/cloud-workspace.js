@@ -59,7 +59,7 @@ function renderDevices() {
     const status = element("div", "cloud-device-message", failure);
     status.setAttribute("role", "status");
     const retry = element(expired ? "a" : "button", "cloud-menu-action", text(expired ? "expired" : "retry"));
-    if (expired) retry.href = direct ? "/local/open" : "/";
+    if (expired) { retry.href = direct ? "/local/open" : "/"; retry.dataset.themeLink = ""; }
     else { retry.type = "button"; retry.onclick = () => refreshDevices(true); }
     list.append(status, retry);
     return;
@@ -68,6 +68,7 @@ function renderDevices() {
     const current = device.id === switcher.dataset.deviceId;
     const row = element("a", "cloud-device-option" + (current ? " current" : ""));
     row.dataset.deviceId = device.id;
+    row.dataset.themeLink = "";
     if (device.online) row.href = direct && current ? "/" : cloudOrigin + devicePath(device.id, switcher.dataset.userId);
     else { row.setAttribute("aria-disabled", "true"); row.tabIndex = -1; }
     if (current) row.setAttribute("aria-current", "location");
@@ -209,7 +210,7 @@ export function initCloudWorkspace(callbacks) {
       const response = await fetch('/local/status');
       if (response.status === 401) {
         const task = validTask(state.selectedTaskId) ? '?task=' + encodeURIComponent(state.selectedTaskId) : '';
-        location.replace('/local/open' + task);
+        location.replace(Theme.url('/local/open' + task));
       }
     } catch { /* The terminal already handles a temporary node restart. */ }
   }, 30000);

@@ -13,7 +13,7 @@ try {
   if (workspace?.dataset.mode !== 'local' && localDevice(workspace?.dataset.userId)?.device === workspace?.dataset.deviceId) {
     // Resolve the device before importing the app: a bookmarked cloud URL must
     // never briefly render or attach a relayed terminal for this computer.
-    location.replace(devicePath(workspace.dataset.deviceId, workspace.dataset.userId, new URLSearchParams(location.search).get('task')));
+    location.replace(Theme.url(devicePath(workspace.dataset.deviceId, workspace.dataset.userId, new URLSearchParams(location.search).get('task'))));
   } else {
     await import('../js/main.js');
   }

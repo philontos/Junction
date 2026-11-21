@@ -31,7 +31,7 @@ function error(message = '') { $('error').textContent = message; $('error').hidd
 function auth() {
   signedIn = false; $('auth').hidden = false; $('workspace').hidden = true; $('account').hidden = true;
   const activating=authMode==='activate', registering=authMode==='register';
-  $('auth-title').textContent=activating ? '设置你的登录密码' : registering ? '创建 Switchyard 账号' : '登录 Switchyard';
+  $('auth-title').textContent=activating ? '设置你的登录密码' : registering ? '创建 Junction 账号' : '登录 Junction';
   $('auth-description').textContent=activating ? '设置后，即可安装节点并进入工作台。' : registering ? '连接自己的设备，共享工作 Context。' : '连接你的设备，继续工作。';
   $('user-label').hidden=activating; $('user').required=!activating;
   $('user').maxLength=registering ? 32 : 64; $('user').minLength=registering ? 3 : 1;
@@ -51,7 +51,7 @@ async function workspace(user, username = user) {
   installationKey='switchyard-install:'+user;
   try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
   const next = new URLSearchParams(location.search).get('next');
-  if (next && /^\/(?:local\/open\/[0-9a-f-]{36}|workspace\/[0-9a-f-]{36}\/)(?:\?task=(?:[1-9]\d*|n[1-9]\d*%3A[1-9]\d*))?$/.test(next)) { navigating = true; location.replace(next); return; }
+  if (next && /^\/(?:local\/open\/[0-9a-f-]{36}|workspace\/[0-9a-f-]{36}\/)(?:\?task=(?:[1-9]\d*|n[1-9]\d*%3A[1-9]\d*))?$/.test(next)) { navigating = true; location.replace(Theme.url(next)); return; }
   await refresh();
   if (!navigating) { $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; window.PageLoad.fade($('workspace')); }
 }
@@ -91,7 +91,7 @@ function openInstalledLocal(record, items) {
   try { sessionStorage.removeItem(installationKey); } catch {}
   $('setup-status').textContent = '连接成功 · 正在打开本机工作台';
   navigating = true;
-  location.replace('/local/open/' + encodeURIComponent(record.device_id));
+  location.replace(Theme.url('/local/open/' + encodeURIComponent(record.device_id)));
 }
 const computer = '<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></svg>';
 async function refresh() {
@@ -129,6 +129,7 @@ async function refresh() {
     card.innerHTML = `<div class="device-title"><span class="device-icon">${computer}</span><div><div class="device-name"></div><div class="status"><span class="dot ${d.online ? 'online' : ''}"></span>${d.id === local ? '本机 · ' : ''}${d.online ? '在线' : '离线 · 等待节点连接'}</div></div></div><div class="device-actions"><a class="enter ${d.online ? '' : 'offline'}">开始工作 →</a><button class="text">解除绑定</button></div>`;
     card.querySelector('.device-name').textContent = d.name;
     const enter = card.querySelector('a');
+    enter.dataset.themeLink = '';
     if (d.online) {
       enter.href = devicePath(d.id, currentUser);
     }

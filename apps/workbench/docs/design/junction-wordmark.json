@@ -1,0 +1,18 @@
+{
+  "name": "Junction wordmark",
+  "generator": "Built-in image_gen",
+  "reference": "apps/workbench/web/assets/switchyard-wordmark-light.png",
+  "variants": [
+    {
+      "theme": "light",
+      "asset": "apps/workbench/web/assets/junction-wordmark-light.png",
+      "prompt": "Use case: logo-brand / style-transfer. Create the replacement header wordmark for the same software product, now named Junction. The supplied Switchyard PNG is a style reference: keep its clean rounded geometric monoline letter construction, softly squared curves, near-continuous strokes with a few deliberate tiny gaps, restrained engineering/software character, dark warm charcoal lettering and tiny terracotta-orange details. Replace the entire word with EXACTLY \"Junction\" (capital J, then u n c t i o n; 8 letters). Do not leave any letters from Switchyard. Design original lettering in the same family, readable at a 27px-high web header size; keep a clearly recognizable capital J and normal legible lowercase letters. Make the dot of the i terracotta #d97757 and optionally a tiny short angled stroke in the word the same orange; the remainder is deep warm charcoal #2e271f. One single horizontal wordmark, no separate icon, no tagline, no mockup, no frame, no shadows or texture, no extra text. Truly transparent alpha background, not a checkerboard or white background. Tight composition closely cropped around the word with only 2–3 percent transparent padding; wide canvas around a 4.3:1 width/height ratio, letters filling its usable height. Crisp flat vector-like edges, high resolution PNG suitable as an actual website asset."
+    },
+    {
+      "theme": "dark",
+      "asset": "apps/workbench/web/assets/junction-wordmark.png",
+      "reference": "apps/workbench/web/assets/junction-wordmark-light.png",
+      "prompt": "Use case: logo-brand, precise color edit. This is the approved light-theme Junction wordmark and the edit target. Produce its DARK-THEME version. Change ONLY the dark charcoal lettering to a flat warm ivory color #ece6dd. Keep the terracotta-orange i dot exactly #d97757. Preserve the precise letter outlines, stroke width, letter spacing, proportions, word spelling \"Junction\", word position, canvas dimensions, and transparent margins. Do not redraw or redesign any letter. Preserve a genuinely transparent alpha background; do not add a dark background or checkerboard. No gradient, texture, shadows, mockup, or extra elements. Output one clean transparent PNG wordmark, identical geometry to the reference, readable against #1a1613."
+    }
+  ]
+}
