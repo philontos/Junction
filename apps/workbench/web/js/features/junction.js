@@ -622,8 +622,8 @@ export function initJunction(callbacks, options = {}) {
   if (settings.mount) {
     modal.className = 'context-page';
     const shell = modal.firstElementChild; shell.setAttribute('role', 'region'); shell.removeAttribute('aria-modal');
-    const heading = modal.querySelector('#jx-heading'), title = el('h1', 'Context'); title.id = heading.id; heading.replaceWith(title);
-    const intro = el('div', undefined, 'context-intro'); title.before(intro); intro.append(title, el('p', L('共享工作上下文，接续每一段进展。', 'Shared work, ready to continue.')));
+    shell.removeAttribute('aria-labelledby'); shell.setAttribute('aria-label', 'Context');
+    modal.querySelector('.jx-head').hidden = true;
     modal.querySelector('#jx-connect').hidden = !!settings.continueContext || !!settings.managed; modal.querySelector('#jx-close').hidden = true;
     const toolbar = modal.querySelector('.jx-search-bar');
     const scopes = el('div', undefined, 'jx-scopes'); scopes.setAttribute('role', 'group'); scopes.setAttribute('aria-label', L('共享范围', 'Shared contexts'));
@@ -637,11 +637,8 @@ export function initJunction(callbacks, options = {}) {
       };
       scopes.append(scope);
     }
-    toolbar.prepend(scopes); toolbar.append(modal.querySelector('#jx-refresh'));
-    const collection = el('section', undefined, 'jx-collection'); collection.setAttribute('aria-labelledby', 'jx-collection-title');
-    const collectionHead = el('div', undefined, 'jx-collection-heading');
-    const label = el('h2', L('共享记录', 'Shared contexts')); label.id = 'jx-collection-title';
-    collectionHead.append(label, modal.querySelector('#jx-count')); collection.append(collectionHead);
+    toolbar.prepend(scopes); toolbar.append(modal.querySelector('#jx-connect'), modal.querySelector('#jx-refresh'));
+    const collection = el('section', undefined, 'jx-collection'); collection.setAttribute('aria-label', L('共享记录', 'Shared contexts'));
     const body = modal.querySelector('.jx-body'); body.before(collection); collection.append(body);
   }
   const taskModal = el("div"); taskModal.id = "jx-task-modal"; taskModal.hidden = true;
