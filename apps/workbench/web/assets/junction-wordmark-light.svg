@@ -1,5 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="248" height="48" viewBox="0 2 248 48" fill="none">
   <title>Junction</title>
+  <defs>
+    <clipPath id="j-turn"><path d="M0 34 31 24v26H0Z"/></clipPath>
+    <clipPath id="n-turn"><path d="M229 15h16v20l-16-12Z"/></clipPath>
+  </defs>
   <g stroke="#302b25" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M7 7h20v26c0 7-4 11-11 11h-2C7 44 3 40 3 34"/>
     <path d="M39 21v12c0 7 4 11 11 11s11-4 11-11V21"/>
@@ -9,6 +13,10 @@
     <path d="M168 21v23"/>
     <path d="M192 21h2c7 0 11 4 11 11v1c0 7-4 11-11 11h-2c-7 0-11-4-11-11v-1c0-7 4-11 11-11Z"/>
     <path d="M218 44V21h11c7 0 11 4 11 11v12"/>
+  </g>
+  <g stroke="#c86643" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round">
+    <path clip-path="url(#j-turn)" d="M7 7h20v26c0 7-4 11-11 11h-2C7 44 3 40 3 34"/>
+    <path clip-path="url(#n-turn)" d="M218 44V21h11c7 0 11 4 11 11v12"/>
   </g>
   <circle cx="168" cy="10" r="3" fill="#c86643"/>
 </svg>

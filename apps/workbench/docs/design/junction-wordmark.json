@@ -1,8 +1,8 @@
 {
   "name": "Junction wordmark",
-  "revision": 3,
+  "revision": 4,
   "format": "SVG",
-  "construction": "Original geometric monoline paths; rounded terminals, consistent 4.8-unit stroke, terracotta i dot. No fonts, raster images, filters or external resources.",
+  "construction": "Original geometric monoline paths; rounded terminals, consistent 4.8-unit stroke. Terracotta accents follow the J lower bend and final n shoulder, with diagonal joins and a matching i dot. No fonts, raster images, filters or external resources.",
   "reference": "Rounded geometric Switchyard wordmark supplied by the user",
   "view_box": "0 2 248 48",
   "variants": {
