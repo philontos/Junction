@@ -22,7 +22,7 @@ export function contextRepository(normalized: any) {
 // Only network Git URLs can be registered automatically; authentication is local.
 export function contextCloneUrl(value: string): string {
   if (!value || value.length > 4096 || /[\s\x00-\x1f\x7f]/.test(value)) {
-    throw new JunctionError(409, "Context 的仓库地址无效，请在当前设备添加对应仓库后选择它。");
+    throw new JunctionError(409, "Context 的仓库地址无效，请在来源设备修正仓库远程地址后重新共享。");
   }
   if (/^(?:[a-zA-Z0-9_][a-zA-Z0-9_.-]*@)?[a-zA-Z0-9_][a-zA-Z0-9_.-]*:(?![/:])[^\s]+$/.test(value)) return value;
   try {
@@ -34,7 +34,7 @@ export function contextCloneUrl(value: string): string {
     url.password = ""; url.search = ""; url.hash = "";
     return url.toString();
   } catch {
-    throw new JunctionError(409, "此 Context 未记录可自动拉取的仓库地址。请在当前设备添加对应仓库，或选择独立工作区。");
+    throw new JunctionError(409, "此 Context 未记录可拉取的仓库地址，请在来源设备配置 Git 远程地址后重新共享。");
   }
 }
 
@@ -55,11 +55,12 @@ export async function prepareContextRepository(
       throw new JunctionError(409, "目标仓库与 Context 的来源仓库不一致。");
     }
   } else {
-    if (!source.repoUrl) throw new JunctionError(409, "Context 未记录仓库地址，请选择工作位置。");
+    if (!source.repoUrl) throw new JunctionError(409, "Context 未记录仓库地址，无法自动准备代码。");
     const sourceUrl = contextCloneUrl(source.repoUrl);
     const matches = listOwnedRepos(env.db).filter(r => repoIdentity(r.git_url) === repoIdentity(source.repoUrl));
-    const ready = matches.filter(r => r.status === "ready" && r.mirror_path);
-    if (ready.length > 1) throw new JunctionError(409, "当前设备有多个匹配的仓库，请在工作位置中选择一个。");
+    // Equivalent remotes can have multiple local registrations. Reuse the oldest
+    // ready one consistently; every continuation still creates a fresh worktree.
+    const ready = matches.filter(r => r.status === "ready" && r.mirror_path).sort((a, b) => a.id - b.id);
     repo = ready[0];
     if (!repo) {
       if (matches.some(r => r.status === "cloning")) throw new JunctionError(409, "对应仓库正在准备中，请稍后重试。");

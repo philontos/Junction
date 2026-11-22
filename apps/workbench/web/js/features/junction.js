@@ -1,6 +1,6 @@
 import { agentCatalog, agentName, canShareAgent, loadAgentCatalog, requireAgent } from "../core/agents.js";
 import { $, api, nodePath } from "../core/dom.js";
-import { requireDirectoryTasks, populateWorkspaceOptions, workspaceSelection, matchingWorkspaceRepo } from "../core/directory-tasks.js";
+import { requireDirectoryTasks } from "../core/directory-tasks.js";
 import { state } from "../core/state.js";
 import { reconcileChildren } from "../core/keyed-list.js";
 import { toast } from "../core/feedback.js";
@@ -20,7 +20,6 @@ function button(text, fn, cls = "sec") { const b = el("button", text, cls); b.ty
 const contextDialogIsOpen = () => !$("jx-task-modal").hidden;
 function showError(e, id = contextDialogIsOpen() ? "jx-task-error" : "jx-error") { $(id).textContent = e.message || String(e); $(id).hidden = false; }
 function clearError(id = contextDialogIsOpen() ? "jx-task-error" : "jx-error") { $(id).hidden = true; }
-function select(options, label) { const s = el("select"); s.setAttribute("aria-label", label); for (const [value, text] of options) s.append(new Option(text, value)); return s; }
 function field(label, input) { const f = el("label", undefined, "jx-field"); f.append(el("span", label), input); return f; }
 function textInput(value = "", placeholder = "") { const input = el("input"); input.value = value; input.placeholder = placeholder; return input; }
 function note(text) { return el("p", text, "jx-note"); }
@@ -437,19 +436,11 @@ async function openDetail(meta, initialMode = settings.mount ? "reader" : "task"
 function showContinue(meta) {
   const target = $("jx-detail").querySelector(".jx-continuation"); target.replaceChildren();
   if (meta.revision.status === "failed") { target.append(note(L("记录解析失败，暂时无法接续。请查看详细信息。", "This record could not be parsed. Review the details before continuing."))); return; }
-  const repos = state.repos.filter(r => r.status === "ready" && state.hostsById[r.host_id]?.kind === "local");
   const w = meta.revision.normalized.extensions?.["switchyard.workspace/1"];
   const hint = w || meta.revision.normalized.extensions?.["switchyard.capture/1"];
-  const match = matchingWorkspaceRepo(repos, hint?.repo_url);
-  const repo = select([], "Workspace"); populateWorkspaceOptions(repo, repos);
-  if (hint?.repo_url) {
-    const name = match?.name || hint.repo_name || L("Context 仓库", "Context repository");
-    repo.prepend(new Option(`${name} · ${L("自动准备", "Automatic setup")}`, "context"));
-    repo.value = "context";
-  }
-  const workspaceHint = note(I18N.t("task.managedHint"));
-  const cwd = textInput("", "~/Projects/my-project"); cwd.maxLength = 4096;
-  const cwdField = field(L("工作目录（当前设备）", "Working directory (this device)"), cwd);
+  // The executing node owns repository matching and managed directory allocation.
+  // A handoff never needs the user to choose a path or reuse the source cwd.
+  const automaticRepo = typeof hint?.repo_url === "string" && !!hint.repo_url.trim();
   let agent = agentCatalog().some(a => a.id === meta.revision.provider) ? meta.revision.provider : "claude";
   const agents = el("div", undefined, "agent-seg"); agents.setAttribute("role", "group"); agents.setAttribute("aria-label", "Agent");
   for (const { id: value, name: label } of agentCatalog()) {
@@ -465,36 +456,20 @@ function showContinue(meta) {
     agents.append(b);
   }
   const title = textInput(`${L("接续", "Continue")}: ${contextCopy(meta).title}`.slice(0, 200)); title.maxLength = 200; title.required = true;
-  const branch = textInput(match?.default_branch || "main");
-  const branchField = field(L("起始分支 · 新 Worktree", "Base branch · new Worktree"), branch);
-  branchField.hidden = true;
-  repo.onchange = () => {
-    const hasRepo = !!Number(repo.value);
-    const automatic = repo.value === "context";
-    cwdField.hidden = repo.value !== "directory";
-    cwd.required = repo.value === "directory";
-    workspaceHint.hidden = repo.value !== "" && !automatic;
-    workspaceHint.textContent = automatic
-      ? L("自动匹配或添加仓库，并创建新的 Worktree。", "Match or add the repository and create a new worktree.")
-      : I18N.t("task.managedHint");
-    if (automatic && !hint.commit) workspaceHint.textContent += hint.branch && hint.branch !== "HEAD"
-      ? L(` 未记录提交号，将使用 ${hint.branch} 分支的当前版本。`, ` No commit recorded; use the current ${hint.branch} branch.`)
-      : L(" 未记录代码版本，将使用仓库默认分支。", " No revision recorded; use the repository's default branch.");
-    branchField.hidden = !hasRepo || !!w;
-    branch.required = hasRepo && !w;
-    branch.value = repos.find(r => r.id === Number(repo.value))?.default_branch || "main";
-  };
-  repo.onchange();
   const prompt = el("textarea"); prompt.rows = 2; prompt.maxLength = 8000; prompt.placeholder = L("接下来要做什么？留空则按 Context 继续。", "What should the agent do next? Leave blank to continue from the context.");
   const model = textInput("", L("默认模型", "Default model")); model.maxLength = 100;
   const form = el("form", undefined, "jx-form"); form.id = "jx-task-form";
   const fields = el("fieldset"); form.append(fields);
   const agentField = el("div", undefined, "jx-field"); agentField.append(el("span", "Agent"), agents);
-  fields.append(agentField, field(L("工作位置", "Workspace"), repo), workspaceHint, cwdField, branchField, field(L("任务标题", "Task title"), title), field(L("补充要求（可选）", "Instructions (optional)"), prompt));
+  fields.append(agentField, field(L("任务标题", "Task title"), title), field(L("补充要求（可选）", "Instructions (optional)"), prompt));
   const options = el("details", undefined, "jx-section"); options.append(el("summary", L("更多设置", "More options")));
   options.append(field(L("模型", "Model"), model));
   fields.append(options);
-  if (w?.dirty) fields.append(el("p", L("来源的未提交修改未包含在 Context 中。", "Uncommitted source changes are not included."), "jx-warning"));
+  if (automaticRepo && !hint.commit) fields.append(note(hint.branch && hint.branch !== "HEAD"
+    ? L(`未记录提交号，将使用 ${hint.branch} 分支的当前版本。`, `No commit recorded; use the current ${hint.branch} branch.`)
+    : L("未记录代码版本，将使用仓库默认分支。", "No revision recorded; use the repository's default branch.")));
+  if (!automaticRepo && (hint?.repo_name || hint?.commit || hint?.branch)) fields.append(note(L("未记录仓库地址，将在独立任务中加载历史，代码需要重新准备。", "No repository address recorded. History will open in an independent task; code must be prepared separately.")));
+  if (hint?.dirty) fields.append(el("p", L("来源的未提交修改未包含在 Context 中。", "Uncommitted source changes are not included."), "jx-warning"));
   if (meta.revision.status !== "ready") fields.append(note(L("部分历史内容或关联无法确认，Agent 会先检查记录与当前代码。", "Some history or relationships could not be confirmed. The agent will check the records and current code first.")));
   const submit = el("button", L("创建任务", "Create task"), "primary"); submit.type = "submit"; submit.id = "jx-task-submit"; submit.setAttribute("form", form.id);
   const preparation = el("div", undefined, "jx-preparation"); preparation.hidden = true;
@@ -528,13 +503,12 @@ function showContinue(meta) {
     let result;
     try {
       await requireAgent(agent);
-      const automatic = repo.value === "context";
       const capabilities = await api("/api/tasks/options");
-      if (automatic && !capabilities.context_repository_setup) throw new Error(L("请先更新此设备的本地节点，再自动准备 Context 仓库。", "Update this device's local node before automatic repository setup."));
-      const destination = automatic ? { workspace_mode: "context" } : workspaceSelection(repo.value, cwd.value);
-      if (!automatic && !destination.repo_id) await requireDirectoryTasks(destination.cwd_mode === "managed");
+      if (automaticRepo && !capabilities.context_repository_setup) throw new Error(L("请先更新此设备的本地节点，再自动准备 Context 仓库。", "Update this device's local node before automatic repository setup."));
+      const destination = automaticRepo ? { workspace_mode: "context" } : { repo_id: 0, cwd_mode: "managed" };
+      if (!automaticRepo) await requireDirectoryTasks(true);
       const body = { context_id: meta.id, revision_id: meta.revision.id, ...destination, agent,
-        title: title.value.trim(), base_branch: branch.value, prompt: prompt.value, agent_model: model.value, acknowledge: true };
+        title: title.value.trim(), prompt: prompt.value, agent_model: model.value, acknowledge: true };
       if (capabilities.context_repository_setup) {
         const response = await fetch(nodePath("/api/junction/continue?stream=1"), {
           method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang },

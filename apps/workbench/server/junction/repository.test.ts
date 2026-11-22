@@ -53,12 +53,14 @@ test("matches SSH to HTTPS without changing local authentication", async t => {
   assert.equal(env.calls.length, 0);
 });
 
-test("ambiguous and in-progress registrations require resolution instead of duplicating", async t => {
+test("duplicate remotes reuse the oldest ready repo and in-progress setups do not duplicate", async t => {
   const env = fixture(t);
   const id = env.insert(source.repoUrl);
-  env.insert("git@github.example:org/sample.git");
-  await assert.rejects(prepareContextRepository(env, source, undefined), /多个/);
-  assert.equal((await prepareContextRepository(env, source, id)).id, id);
+  const second = env.insert("git@github.example:org/sample.git");
+  assert.equal((await prepareContextRepository(env, source, undefined)).id, id);
+  assert.equal((await prepareContextRepository(env, source, second)).id, second);
+  env.db.prepare("UPDATE repos SET status='error' WHERE id=?").run(id);
+  assert.equal((await prepareContextRepository(env, source, undefined)).id, second);
   env.db.prepare("UPDATE repos SET status='cloning'").run();
   await assert.rejects(prepareContextRepository(env, source, undefined), /正在准备/);
   assert.equal(env.calls.length, 0);
