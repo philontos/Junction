@@ -15,7 +15,7 @@ try {
     // Resolve the device before importing the app: a bookmarked cloud URL must
     // never briefly render or attach a relayed terminal for this computer.
     const params = new URLSearchParams(location.search);
-    location.replace(withContext(devicePath(workspace.dataset.deviceId, workspace.dataset.userId, params.get('task')), contextReference(params)));
+    location.replace(Theme.url(withContext(devicePath(workspace.dataset.deviceId, workspace.dataset.userId, params.get('task')), contextReference(params))));
   } else {
     await import('../js/main.js');
   }

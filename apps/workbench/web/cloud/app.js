@@ -6,8 +6,8 @@ import { contextReference, withContext, safeWorkspaceReturn } from './context-li
 import { reconcileChildren } from '../js/core/keyed-list.js';
 I18N.init();
 Theme.init();
-const contextsPage = location.pathname !== '/devices';
-const continuation = contextReference(new URLSearchParams(location.search));
+let contextsPage = location.pathname !== '/devices';
+let continuation = contextReference(new URLSearchParams(location.search));
 document.title = (contextsPage ? 'Context' : '工作台') + ' · Junction';
 $('workbench-nav').href = withContext('/devices', continuation);
 $(contextsPage ? 'context-nav' : 'workbench-nav').setAttribute('aria-current', 'page');
@@ -53,22 +53,50 @@ function auth() {
   $('auth-switch-label').textContent=registering ? '已有账号？' : '还没有账号？';
   $('auth-toggle').textContent=registering ? '返回登录' : '注册账号';
 }
+const contextUI = import('./contexts.js');
+const positions = new Map();
+let routeEpoch = 0;
+function showPage(pathname = location.pathname, query = location.search, push = false) {
+  const epoch = ++routeEpoch;
+  positions.set(contextsPage ? '/contexts' : '/devices', scrollY);
+  if (push) history.pushState(null, '', pathname + query);
+  contextsPage = pathname !== '/devices';
+  continuation = contextReference(new URLSearchParams(query));
+  document.title = (contextsPage ? 'Context' : '工作台') + ' · Junction';
+  $('context-nav').toggleAttribute('aria-current', contextsPage);
+  $('workbench-nav').toggleAttribute('aria-current', !contextsPage);
+  $(contextsPage ? 'context-nav' : 'workbench-nav').setAttribute('aria-current', 'page');
+  $('workbench-nav').href = withContext('/devices', continuation);
+  $('auth').hidden = true; $('account').hidden = $('primary-nav').hidden = false;
+  $('context-space').hidden = !contextsPage; $('workspace').hidden = contextsPage;
+  error();
+  const section = $(contextsPage ? 'context-space' : 'workspace');
+  if (push) window.PageLoad.fade(section);
+  window.scrollTo(0, positions.get(contextsPage ? '/contexts' : '/devices') || 0);
+  // Navigation renders synchronously. Data refreshes in the existing section;
+  // a pending response never changes the selected route or clears old cards.
+  const loading = contextsPage ? contextUI.then(m => m.openContextSpace(currentUser)) : refresh();
+  loading.catch(e => { if (epoch === routeEpoch) error(e.message); });
+}
 async function workspace(user, username = user) {
   signedIn = true; currentUser = user; $('username').textContent = username;
   installationKey='switchyard-install:'+user;
   try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
   const next = safeWorkspaceReturn(new URLSearchParams(location.search).get('next'));
-  if (next) { navigating = true; location.replace(next); return; }
-  if (contextsPage && !setupCode) {
-    const { openContextSpace } = await import('./contexts.js');
-    await openContextSpace(user);
-    $('auth').hidden = true; $('context-space').hidden = false; $('account').hidden = false; $('primary-nav').hidden = false;
-    return;
-  }
-  if (contextsPage) { navigating = true; location.replace('/devices'); return; }
-  await refresh();
-  if (!navigating) { $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; $('primary-nav').hidden = false; window.PageLoad.fade($('workspace')); }
+  if (next) { navigating = true; location.replace(Theme.url(next)); return; }
+  showPage(setupCode ? '/devices' : location.pathname, location.search, !!setupCode);
 }
+document.addEventListener('click', event => {
+  const link = event.target.closest('a[href]');
+  if (!signedIn || !link || event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target) return;
+  const url = new URL(link.href);
+  if (url.origin !== location.origin || !['/', '/contexts', '/devices'].includes(url.pathname)) return;
+  event.preventDefault();
+  if (url.pathname === location.pathname && url.search === location.search) return;
+  showPage(url.pathname, url.search, true);
+});
+window.addEventListener('popstate', () => { if (signedIn) showPage(); });
+window.addEventListener('pageshow', event => { if (event.persisted && signedIn) showPage(); });
 function renderInstallation(record) {
   const view=installationView(record);
   $('setup').hidden=false;
@@ -105,7 +133,7 @@ function openInstalledLocal(record, items) {
   try { sessionStorage.removeItem(installationKey); } catch {}
   $('setup-status').textContent = '连接成功 · 正在打开本机工作台';
   navigating = true;
-  location.replace(withContext('/local/open/' + encodeURIComponent(record.device_id), continuation));
+  location.replace(Theme.url(withContext('/local/open/' + encodeURIComponent(record.device_id), continuation)));
 }
 const computer = '<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></svg>';
 async function refresh() {
@@ -124,7 +152,7 @@ async function refresh() {
   const local = discovery.local?.device;
   $('install').hidden = items.some(d => d.id === local);
   $('local-detection').hidden = !discovery.blocked;
-  const signature = JSON.stringify([local, items.map(d => [d.id, d.name, !!d.online])]);
+  const signature = JSON.stringify([local, continuation, items.map(d => [d.id, d.name, !!d.online])]);
   if (signature === lastDevices) return;
   lastDevices = signature;
   const existing = new Map([...$('devices').children].map(card => [card.dataset.deviceId, card]));
@@ -135,14 +163,14 @@ async function refresh() {
     cards.push(empty);
   }
   for (const d of items) {
-    const key = JSON.stringify([d.name, !!d.online, d.id === local]);
+    const key = JSON.stringify([d.name, !!d.online, d.id === local, continuation]);
     const previous = existing.get(d.id);
     if (previous?.dataset.version === key) { cards.push(previous); continue; }
     const card = document.createElement('article'); card.className = 'device';
     card.dataset.deviceId = d.id; card.dataset.version = key;
     card.innerHTML = `<div class="device-title"><span class="device-icon">${computer}</span><div><div class="device-name"></div><div class="status"><span class="dot ${d.online ? 'online' : ''}"></span>${d.id === local ? '本机 · ' : ''}${d.online ? '在线' : '离线 · 等待节点连接'}</div></div></div><div class="device-actions"><a class="enter ${d.online ? '' : 'offline'}">开始工作 →</a><button class="text">解除绑定</button></div>`;
     card.querySelector('.device-name').textContent = d.name;
-    const enter = card.querySelector('a');
+    const enter = card.querySelector('a'); enter.dataset.themeLink = '';
     if (d.online) {
       enter.href = withContext(devicePath(d.id, currentUser), continuation);
       if (continuation) enter.textContent = '在此设备继续 →';
@@ -168,7 +196,7 @@ $('auth-form').onsubmit = async event => {
   } catch (e) { error(e.message); } finally { $('submit').disabled = false; $('auth-toggle').disabled=false; $('submit').textContent=label; $('auth-form').removeAttribute('aria-busy'); }
 };
 $('auth-toggle').onclick = () => { authMode=authMode==='login' ? 'register' : 'login'; $('password').value=''; error(); auth(); $('user').focus(); };
-$('logout').onclick = async () => { try { await api('logout', {}); try { sessionStorage.removeItem(installationKey); } catch {} location.href = '/'; } catch (e) { error(e.message); } };
+$('logout').onclick = async () => { try { await api('logout', {}); try { sessionStorage.removeItem(installationKey); sessionStorage.removeItem('junction-context-cards:'+currentUser); } catch {} location.href = '/'; } catch (e) { error(e.message); } };
 $('install').onclick = async () => {
   error(); $('install').disabled = true;
   try {
@@ -213,4 +241,4 @@ $('copy').onclick = async () => {
 try { const current = await api('session'); registrationOpen=current.registration_open===true; if (setupCode || !current.user_id) auth(); else await workspace(current.user_id,current.username); }
 catch (e) { auth(); error(e.message); }
 finally { if (!navigating) window.PageLoad.ready(); }
-setInterval(() => { if (signedIn && !contextsPage && !document.hidden) refresh().catch(e => error(e.message)); }, 5000);
+setInterval(() => { if (signedIn && !contextsPage && !document.hidden) refresh().catch(e => { if (!contextsPage) error(e.message); }); }, 5000);

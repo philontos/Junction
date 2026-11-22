@@ -2,6 +2,7 @@ import { $, nodeBase } from "../core/dom.js";
 import { state } from "../core/state.js";
 import { duringAutoFollow } from "./mobile.js";
 import { devicePath } from "../../cloud/device-routing.js";
+import { watchLocalSession } from "../../cloud/local-session.js";
 
 let switcher, panel, list, advanced, hostList, hooks;
 let devices = [], loading = false, failure = "", expired = false, pending;
@@ -59,7 +60,7 @@ function renderDevices() {
     const status = element("div", "cloud-device-message", failure);
     status.setAttribute("role", "status");
     const retry = element(expired ? "a" : "button", "cloud-menu-action", text(expired ? "expired" : "retry"));
-    if (expired) retry.href = direct ? "/local/open" : "/";
+    if (expired) { retry.href = direct ? "/local/open" : "/"; retry.dataset.themeLink = ""; }
     else { retry.type = "button"; retry.onclick = () => refreshDevices(true); }
     list.append(status, retry);
     return;
@@ -68,6 +69,7 @@ function renderDevices() {
     const current = device.id === switcher.dataset.deviceId;
     const row = element("a", "cloud-device-option" + (current ? " current" : ""));
     row.dataset.deviceId = device.id;
+    row.dataset.themeLink = "";
     if (device.online) row.href = direct && current ? "/" : cloudOrigin + devicePath(device.id, switcher.dataset.userId);
     else { row.setAttribute("aria-disabled", "true"); row.tabIndex = -1; }
     if (current) row.setAttribute("aria-current", "location");
@@ -193,7 +195,7 @@ export function initCloudWorkspace(callbacks) {
   const add = element("button", "cloud-menu-action cloud-add-ssh"); add.type = "button";
   add.onclick = () => { switcher.open = false; window.openDiscoveryModal(); };
   advanced.append(add); panel.append(advanced); switcher.append(panel);
-  const manage = element('a', 'cloud-menu-action'); manage.href = cloudOrigin + '/devices';
+  const manage = element('a', 'cloud-menu-action'); manage.href = cloudOrigin + '/devices'; manage.dataset.themeLink = '';
   manage.textContent = I18N.lang === 'zh' ? '连接或管理设备 →' : 'Manage devices →'; panel.append(manage);
   panel.addEventListener("click", remember, true);
   panel.addEventListener("auxclick", remember, true);
@@ -205,16 +207,11 @@ export function initCloudWorkspace(callbacks) {
   }, true);
   repaintCloudWorkspace(); refreshDevices(true);
   setInterval(() => { if (!document.hidden && !switcher.open) refreshDevices(); }, 15000);
-  if (direct) setInterval(async () => {
-    if (document.hidden) return;
-    try {
-      const response = await fetch('/local/status');
-      if (response.status === 401) {
-        const task = validTask(state.selectedTaskId) ? '?task=' + encodeURIComponent(state.selectedTaskId) : '';
-        location.replace('/local/open' + task);
-      }
-    } catch { /* The terminal already handles a temporary node restart. */ }
-  }, 30000);
+  if (direct) watchLocalSession(switcher.dataset.deviceId, () => {
+    remember();
+    const task = validTask(state.selectedTaskId) ? '?task=' + encodeURIComponent(state.selectedTaskId) : '';
+    location.replace(Theme.url('/local/open' + task));
+  });
 }
 
 // Only re-attach a still-live task belonging to this user, node and host. Never

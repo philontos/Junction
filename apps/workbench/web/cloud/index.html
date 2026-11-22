@@ -5,27 +5,25 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#1a1613">
   <title>Context · Junction</title>
-  <script>try{var _t=localStorage.getItem("theme");document.documentElement.dataset.theme=_t==="light"?"light":"dark";if(_t==="light"){var _m=document.querySelector('meta[name="theme-color"]');if(_m)_m.content="#f5f0e8";}}catch(e){document.documentElement.dataset.theme="dark";}</script>
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/css/app.css">
 <link rel="stylesheet" href="/css/navigation.css">
-<link rel="icon" type="image/svg+xml" href="/assets/junction.svg">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/cloud/style.css">
   <script defer src="/page-load.js"></script>
   <link rel="stylesheet" href="/css/junction.css">
   <script src="/i18n.js"></script>
-  <script src="/theme.js"></script>
   <script type="module" src="/cloud/app.js"></script>
 </head>
 <body class="cloud-portal" data-page-loading>
   <div id="boot" role="status" aria-label="加载中"><div class="spinner"></div></div>
   <header>
-    <a class="brand" href="/" aria-label="Junction"><span class="junction-symbol" aria-hidden="true"></span><span class="junction-wordmark">junction</span></a>
-    <nav class="primary-nav" aria-label="主导航" id="primary-nav" hidden><a id="context-nav" href="/contexts">Context</a><a id="workbench-nav" href="/devices">工作台</a></nav>
+    <a class="brand" href="/" aria-label="Junction"><img class="brand-logo brand-logo-dark" src="/assets/junction-wordmark.png" alt="" aria-hidden="true"><img class="brand-logo brand-logo-light" src="/assets/junction-wordmark-light.png" alt="" aria-hidden="true"></a>
+    <nav class="primary-nav" aria-label="主导航" id="primary-nav" hidden><a id="context-nav" href="/contexts" data-theme-link>Context</a><a id="workbench-nav" href="/devices" data-theme-link>工作台</a></nav>
     <div class="header-actions"><div id="account" hidden><span id="username"></span><button id="logout" class="sec">退出</button></div><button id="theme-toggle" class="sec" type="button" aria-label="切换主题"></button></div>
   </header>
   <main class="portal-main">
-    <section id="context-space" hidden aria-label="Context 共享空间"></section>
+    <section id="context-space" hidden aria-label="Context 共享空间"><div class="heading context-intro"><div><h1>Context</h1><p>汇聚工作上下文，让任务从这里继续。</p></div></div><div class="portal-section-loading" role="status"><span class="spinner" aria-hidden="true"></span><span>加载中…</span></div></section>
     <section id="auth" class="auth" hidden>
       <h1 id="auth-title">登录 Junction</h1>
       <p id="auth-description">连接你的设备，继续工作。</p>
@@ -38,7 +36,7 @@
     </section>
     <section id="workspace" hidden>
       <div class="heading"><div><h1>工作台</h1><p>选择执行设备，进入任务与仓库。</p></div><button id="install" class="primary">＋ 连接这台电脑</button></div>
-      <div id="devices" class="devices"></div>
+      <div id="devices" class="devices"><div class="portal-section-loading" role="status"><span class="spinner" aria-hidden="true"></span><span>读取设备…</span></div></div>
       <p id="local-detection" class="note" role="status" hidden>本机识别被浏览器阻止，请允许访问本地网络后重试。<button id="retry-local" class="text" type="button">重新识别</button></p>
       <section id="setup" class="setup" hidden>
         <div class="setup-heading"><h2 id="setup-title">连接这台电脑</h2><button id="close-setup" class="text" aria-label="关闭安装面板">关闭</button></div>
@@ -47,7 +45,7 @@
         <div class="setup-status" role="status"><span class="dot waiting"></span><span id="setup-status">等待执行安装命令</span></div>
         <progress id="setup-progress" max="6" value="0" aria-label="安装进度" hidden></progress>
         <p id="setup-detail" class="note">请在 10 分钟内开始；开始后可在 24 小时内继续。</p>
-        <div class="setup-actions"><button id="keep-binding" class="sec" type="button" hidden>保留原账号</button><button id="switch-binding" class="primary" type="button" hidden>切换到当前账号</button><button id="retry-install" class="sec" type="button" hidden>重新生成命令</button><a id="setup-enter" class="enter" hidden>进入工作台 →</a></div>
+        <div class="setup-actions"><button id="keep-binding" class="sec" type="button" hidden>保留原账号</button><button id="switch-binding" class="primary" type="button" hidden>切换到当前账号</button><button id="retry-install" class="sec" type="button" hidden>重新生成命令</button><a data-theme-link id="setup-enter" class="enter" hidden>进入工作台 →</a></div>
         <p id="setup-resume" class="note">中断后再次执行即可继续。系统授权在本机确认；Agent 安装和登录由你选择。</p>
       </section>
       <p class="footnote">任务在所选设备执行，共享 Context 保存在 Junction。</p>

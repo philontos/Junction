@@ -60,6 +60,8 @@
 .cloud-portal .auth-switch button { color: var(--accent); padding: 4px; }
 .cloud-portal .error { padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--red) 6%, var(--surface)); color: var(--red-text); }
 .cloud-portal .loading { text-align: center; color: var(--faint); }
+.portal-section-loading { grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; gap: 12px; min-height: 260px; color: var(--muted); font-size: 13px; }
+.portal-section-loading .spinner { width: 22px; height: 22px; border-width: 2px; }
 @media (max-width: 760px) {
   .cloud-portal header { gap: 8px; padding: 10px 12px; }
   .cloud-portal .header-actions, .cloud-portal #account { gap: 7px; }

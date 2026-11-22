@@ -4,15 +4,23 @@ import { discoverLocalDevice } from './local-discovery.js';
 import { devicePath } from './device-routing.js';
 import { withContext } from './context-link.js';
 
-export async function openContextSpace(user) {
-  initJunction({}, {
-    mount: document.getElementById('context-space'),
+let initialized = false, refreshing;
+export function openContextSpace(user) {
+  if (refreshing) return refreshing;
+  if (!initialized) {
+    const mount = document.getElementById('context-space'); mount.replaceChildren();
+    initJunction({}, {
+    mount,
+    cacheKey: 'junction-context-cards:' + user,
     request: (path, options = {}) => api('/hub/context' + path, {
       ...options, signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
     }),
     continueContext: (meta, target, actions, valid) => chooseDevice(user, meta, target, actions, valid),
-  });
-  return openJunction();
+    });
+    initialized = true;
+  }
+  refreshing = openJunction().finally(() => { refreshing = null; });
+  return refreshing;
 }
 
 function chooseDevice(user, meta, target, actions, valid) {
@@ -25,7 +33,7 @@ function chooseDevice(user, meta, target, actions, valid) {
   const select = document.createElement('select'); select.setAttribute('aria-label', '执行设备'); select.disabled = true;
   select.append(new Option('正在读取设备…', '')); label.append(select);
   note.textContent = '下一步选择 Agent 和工作目录。任务在所选设备执行。';
-  const manage = document.createElement('a'); manage.className = 'context-manage-link'; manage.href = withContext('/devices', reference); manage.textContent = '连接或管理设备';
+  const manage = document.createElement('a'); manage.className = 'context-manage-link'; manage.dataset.themeLink = '';  manage.href = withContext('/devices', reference); manage.textContent = '连接或管理设备';
   const error = document.createElement('p'); error.className = 'jx-warning'; error.hidden = true; error.setAttribute('role', 'alert');
   const retry = document.createElement('button'); retry.className = 'sec'; retry.textContent = '重新读取'; retry.hidden = true;
   target.append(label, note, manage, error, retry);
@@ -58,7 +66,7 @@ function chooseDevice(user, meta, target, actions, valid) {
   submit.onclick = () => {
     if (!select.value || submit.disabled) return;
     submit.disabled = true; submit.textContent = '正在进入工作台…';
-    location.assign(withContext(devicePath(select.value, user), reference));
+    location.assign(Theme.url(withContext(devicePath(select.value, user), reference)));
   };
   load();
 }

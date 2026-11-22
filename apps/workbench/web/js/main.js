@@ -162,7 +162,9 @@ Promise.all([loadRepos(initialRequest), loadHosts(initialRequest), loadTasks(ini
   syncReadWaiting();
   const reference = contextReference(new URLSearchParams(location.search));
   if (reference) {
-    if (await openPinnedContext(reference)) {
+    const opening = openPinnedContext(reference);
+    window.PageLoad.ready();
+    if (await opening) {
       const url = new URL(location.href); url.searchParams.delete('context'); url.searchParams.delete('revision');
       history.replaceState(null, '', url.pathname + url.search);
     }

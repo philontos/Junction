@@ -29,6 +29,23 @@ function contextCopy(meta) {
   const overview = meta.revision.normalized?.extensions?.["junction.overview/1"];
   return { title: overview?.title || meta.title, summary: overview?.summary || "" };
 }
+function saveCardCache() {
+  if (!settings.cacheKey) return;
+  // Only card summaries survive document navigation. Conversation, environment
+  // details and credentials are never stored here; opening a cached card reads
+  // its pinned revision again through the current account's authorization.
+  const items = listItems.map(meta => {
+    const r = meta.revision, copy = contextCopy(meta), ext = r.normalized?.extensions || {};
+    const workspace = ext['switchyard.workspace/1'] || ext['switchyard.capture/1'];
+    return { id: meta.id, title: meta.title, owner_id: meta.owner_id, owner_name: meta.owner_name, _cached: true,
+      revision: { id: r.id, number: r.number, provider: r.provider, created_at: r.created_at,
+        normalized: { extensions: { 'junction.overview/1': copy, 'switchyard.workspace/1': { repo_name: workspace?.repo_name, branch: workspace?.branch } } } } };
+  });
+  try {
+    const value = JSON.stringify({ at: Date.now(), items, cursor: listCursor });
+    if (value.length < 500000) sessionStorage.setItem(settings.cacheKey, value);
+  } catch { /* Caching is optional in storage-restricted browsers. */ }
+}
 function cardFact(kind, text) {
   const fact = el("span", undefined, `jx-card-fact jx-card-${kind}`);
   const icon = el("span", undefined, `jx-fact-icon jx-icon-${kind}`); icon.setAttribute("aria-hidden", "true");
@@ -85,14 +102,21 @@ export async function openJunction(taskId = null) {
   return loading;
 }
 export async function openPinnedContext(reference) {
+  const epoch = ++generation, d = detailRoot(L('继续任务', 'Continue task'));
+  selectedContext = { cid: reference.context, rid: reference.revision };
+  d.append(note(L('正在读取此版本…', 'Loading this revision…')));
   try {
     const [meta, currentStatus] = await Promise.all([
       call(`/contexts/${reference.context}/revisions/${reference.revision}`), call('/status'), loadAgentCatalog(),
     ]);
+    if (epoch !== generation) return false;
     status = currentStatus;
     openDetail(meta);
     return true;
-  } catch (error) { await openJunction(); showError(error, 'jx-error'); return false; }
+  } catch (error) {
+    if (epoch === generation) { d.replaceChildren(button(L('重新读取', 'Retry'), () => openPinnedContext(reference))); showError(error); }
+    return false;
+  }
 }
 async function showConnection(known) {
   const epoch = ++generation;
@@ -157,10 +181,10 @@ function renderContextList() {
     const copy = contextCopy(item);
     const version = JSON.stringify([I18N.lang, r.id, copy, r.provider, contextOwner(item), workspace?.repo_name, workspace?.branch]);
     const previous = existing.get(item.id);
-    if (previous?.dataset.version === version) { cards.push(previous); continue; }
+    if (previous?.dataset.version === version) { previous.querySelector('.jx-card').contextMeta = item; cards.push(previous); continue; }
     const group = el("div", undefined, "jx-context-card");
     group.dataset.contextId = item.id; group.dataset.version = version;
-    const card = button("", () => openDetail(item), "jx-card");
+    const card = button("", () => openDetail(card.contextMeta), "jx-card"); card.contextMeta = item;
     card.dataset.contextId = item.id;
     card.setAttribute("aria-label", `${L("预览并接续", "Preview and continue")}: ${copy.title}`);
     const heading = el("span", undefined, "jx-card-heading"), title = el("strong", copy.title);
@@ -231,12 +255,16 @@ async function loadList(append = false) {
     status = currentStatus;
     listItems = [...new Map([...(append ? listItems : []), ...page.items].map(item => [item.id, item])).values()];
     listCursor = page.next_cursor; listReady = true;
+    saveCardCache();
     renderContextList();
     $("jx-more").hidden = !listCursor;
   } catch (e) {
     if (request !== listRequest) return;
     controller.abort();
-    if ([401, 403].includes(e.status)) { listReady = false; listItems = []; listCursor = null; }
+    if ([401, 403].includes(e.status)) {
+      listReady = false; listItems = []; listCursor = null;
+      try { if (settings.cacheKey) sessionStorage.removeItem(settings.cacheKey); } catch {}
+    }
     if (!listReady) list.replaceChildren(button(L("重新加载", "Retry"), () => loadList()));
     if (junctionIsOpen()) showError(e, "jx-error");
   } finally {
@@ -286,8 +314,16 @@ function versionList(item) {
   };
   return details;
 }
-function openDetail(meta) {
+async function openDetail(meta) {
   if (launchingContext) return;
+  if (meta._cached) {
+    const epoch = ++generation, d = detailRoot(L('Context 预览', 'Context preview'));
+    selectedContext = { cid: meta.id, rid: meta.revision.id };
+    d.append(el('h3', contextCopy(meta).title), note(L('正在读取此版本…', 'Loading this revision…')));
+    try { const current = await call(base(meta)); if (epoch === generation) return openDetail(current); }
+    catch (error) { if (epoch === generation) showError(error); }
+    return;
+  }
   const epoch = ++generation;
   selectedContext = { cid: meta.id, rid: meta.revision.id };
   // Lists already carry the complete revision header. Render it in one frame;
@@ -553,6 +589,13 @@ function showPublish() {
 export function initJunction(callbacks, options = {}) {
   hooks = callbacks;
   settings = options;
+  if (settings.cacheKey) try {
+    const cached = JSON.parse(sessionStorage.getItem(settings.cacheKey));
+    if (cached && Date.now() - cached.at < 15 * 60 * 1000 && Array.isArray(cached.items)
+      && cached.items.every(m => typeof m.id === 'string' && typeof m.title === 'string' && m.revision?.id && m.revision.normalized)) {
+      listItems = cached.items.map(m => ({ ...m, _cached: true })); listReady = true; listCursor = cached.cursor;
+    }
+  } catch {}
   const modal = el("div"); modal.id = "junction-modal"; modal.hidden = true;
   modal.innerHTML = `<section class="jx-shell" role="dialog" aria-modal="true" aria-labelledby="jx-heading">
     <div class="jx-head"><h2 id="jx-heading"></h2><span class="jx-spacer"></span><button id="jx-connect" class="sec"></button><button id="jx-refresh" class="sec"></button><button class="sec" id="jx-close" aria-label="Close">×</button></div>
@@ -614,6 +657,7 @@ export function initJunction(callbacks, options = {}) {
   $("jx-connect").onclick = () => showConnection();
   $("jx-refresh").onclick = () => loadList();
   $("jx-more").textContent = L("加载更多", "Load more"); $("jx-more").onclick = () => loadList(true);
+  if (listReady) renderContextList();
   if (settings.mount) return;
   $("junction-nav").textContent = 'Context';
   if (!$("junction-nav").dataset.cloudContext) $("junction-nav").onclick = event => { event.preventDefault(); openJunction(); };

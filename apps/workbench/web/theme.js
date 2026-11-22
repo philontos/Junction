@@ -1,21 +1,13 @@
-// Theme toggle — light vs dark. Mirrors i18n.js: a plain <script> (no build
-// step) loaded before the app modules, exposing a global `Theme`. The actual
-// colors live in css/app.css as tokens under :root and :root[data-theme="light"];
-// this module just flips document.documentElement's `data-theme` and remembers
-// the choice in localStorage.
-//
-// NO-FLASH: index.html sets `data-theme` from localStorage in an inline <head>
-// script before the stylesheet applies, so the first paint is already correct.
-// init() below re-derives the same value (idempotent) and is the canonical place
-// the default ("dark") is defined.
-//
-// The terminal's colors are NOT CSS — xterm paints to a canvas from a JS theme
-// object — so terminal.js can't read these tokens. The app wires Theme.onChange
-// (see main.js) to re-skin open terminals on switch, paralleling I18N.onChange.
+// Shared by the portal, login transitions and workbench. Load before styles so
+// the first paint uses the incoming theme, even across cloud/loopback origins.
+// Colors live in css/app.css; Theme.onChange also re-skins the xterm canvases.
 
 (function () {
   const KEY = "theme";
   const DEFAULT = "dark";
+  let initialized = false;
+  let memoryTheme = null;
+  const valid = value => value === "light" || value === "dark";
   // browser-chrome color per theme = each theme's --bg (see app.css tokens). Duplicated
   // here because <meta theme-color> takes a literal, not a CSS var — keep in sync.
   const CHROME = { dark: "#1a1613", light: "#f5f0e8" };
@@ -31,32 +23,78 @@
     if (m) m.content = CHROME[current()];
   }
 
-  function set(next) {
-    if (next !== "light" && next !== "dark") return;
-    if (next === current()) return;
+  function apply(next) {
+    const changed = next !== current();
     document.documentElement.dataset.theme = next;
     applyChrome();
-    try { localStorage.setItem(KEY, next); } catch (_) {}
-    if (typeof Theme.onChange === "function") Theme.onChange(next);
+    refreshLinks();
+    if (changed && typeof Theme.onChange === "function") Theme.onChange(next);
+  }
+
+  function set(next) {
+    if (!valid(next)) return;
+    try { localStorage.setItem(KEY, next); memoryTheme = null; } catch (_) { memoryTheme = next; }
+    apply(next);
   }
 
   function toggle() { set(current() === "light" ? "dark" : "light"); }
 
-  // Resolve the initial theme from storage before the app renders. The default
-  // is dark, so existing users see no change until they opt in.
+  function savedTheme() {
+    if (memoryTheme) return memoryTheme;
+    try {
+      const saved = localStorage.getItem(KEY);
+      return valid(saved) ? saved : DEFAULT;
+    } catch (_) { return current(); }
+  }
+
+  // Carry only a display preference. Keep login codes, confirmation nonces and
+  // task selections intact; none of these URLs grant additional permissions.
+  function url(target) {
+    const next = new URL(target, location.href);
+    const fragment = new URLSearchParams(next.hash.slice(1));
+    fragment.set(KEY, current());
+    next.hash = fragment.toString();
+    return next.href;
+  }
+
+  function refreshLinks() {
+    for (const link of document.querySelectorAll("a[data-theme-link][href]")) link.href = url(link.href);
+  }
+
   function init() {
-    let saved = null;
-    try { saved = localStorage.getItem(KEY); } catch (_) {}
-    document.documentElement.dataset.theme = saved === "light" ? "light" : DEFAULT;
-    applyChrome();
+    if (initialized) return;
+    initialized = true;
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    const incoming = fragment.get(KEY);
+    if (fragment.has(KEY)) {
+      fragment.delete(KEY);
+      const remaining = fragment.toString();
+      history.replaceState(history.state, "", location.pathname + location.search + (remaining ? "#" + remaining : ""));
+    }
+    if (valid(incoming)) set(incoming);
+    else apply(savedTheme());
   }
 
   const Theme = {
     set,
     toggle,
     init,
+    url,
     onChange: null, // app sets this to re-skin terminals on switch
     get theme() { return current(); },
   };
   window.Theme = Theme;
+  init();
+  document.addEventListener("DOMContentLoaded", refreshLinks);
+  // Include new-tab and context-menu navigation, including dynamically added
+  // device links, without intercepting the browser's normal navigation.
+  for (const event of ["click", "auxclick", "contextmenu"]) document.addEventListener(event, e => {
+    const link = e.target.closest?.("a[data-theme-link][href]");
+    if (link) link.href = url(link.href);
+  }, true);
+  window.addEventListener("storage", event => {
+    try { if (event.storageArea !== localStorage) return; } catch (_) { return; }
+    if (event.key === KEY || event.key === null) { memoryTheme = null; apply(savedTheme()); }
+  });
+  window.addEventListener("pageshow", () => apply(savedTheme()));
 })();
