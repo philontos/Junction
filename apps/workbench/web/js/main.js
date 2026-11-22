@@ -5,7 +5,8 @@
 //   2. wire language-switch re-rendering;
 //   3. run the boot sequence (init terminal + selects, first data load);
 //   4. register global listeners (modal backdrop / Esc) and pollers.
-import { initJunction, closeJunction, junctionIsOpen } from "./features/junction.js";
+import { initJunction, closeJunction, junctionIsOpen, openPinnedContext } from "./features/junction.js";
+import { contextReference } from "../cloud/context-link.js";
 import { initCloudWorkspace, repaintCloudWorkspace, restoreCloudWorkspace } from "./features/cloud-workspace.js";
 import { $ } from "./core/dom.js";
 import { toast } from "./core/feedback.js";
@@ -156,10 +157,16 @@ csMount("t-provider", onProviderChange);
 // reveal the UI once the first data render lands — a smooth fade, not an abrupt pop-in
 const firstFleet=loadFleet();
 const initialRequest = { signal: AbortSignal.timeout(15000) };
-Promise.all([loadRepos(initialRequest), loadHosts(initialRequest), loadTasks(initialRequest)]).then(loaded => {
+Promise.all([loadRepos(initialRequest), loadHosts(initialRequest), loadTasks(initialRequest)]).then(async loaded => {
   if (loaded.some(ok => !ok)) { window.PageLoad.error(t("workspace.failed")); return; }
   syncReadWaiting();
-  restoreCloudWorkspace(firstFleet).catch(e => console.warn("workspace restore failed", e));
+  const reference = contextReference(new URLSearchParams(location.search));
+  if (reference) {
+    if (await openPinnedContext(reference)) {
+      const url = new URL(location.href); url.searchParams.delete('context'); url.searchParams.delete('revision');
+      history.replaceState(null, '', url.pathname + url.search);
+    }
+  } else restoreCloudWorkspace(firstFleet).catch(e => console.warn("workspace restore failed", e));
   window.PageLoad.ready();
 }).catch(() => window.PageLoad.error(t("workspace.failed")));
 refreshProviders().catch(() => {});

@@ -2,8 +2,15 @@ const $ = id => document.getElementById(id);
 import { installationView } from './install-progress.js';
 import { devicePath, forgetLocalDevice } from './device-routing.js';
 import { discoverLocalDevice } from './local-discovery.js';
+import { contextReference, withContext, safeWorkspaceReturn } from './context-link.js';
 import { reconcileChildren } from '../js/core/keyed-list.js';
+I18N.init();
 Theme.init();
+const contextsPage = location.pathname !== '/devices';
+const continuation = contextReference(new URLSearchParams(location.search));
+document.title = (contextsPage ? 'Context' : '工作台') + ' · Junction';
+$('workbench-nav').href = withContext('/devices', continuation);
+$(contextsPage ? 'context-nav' : 'workbench-nav').setAttribute('aria-current', 'page');
 function renderThemeToggle() {
   const toLight = Theme.theme === 'dark';
   $('theme-toggle').textContent = toLight ? '☀️' : '🌙';
@@ -29,9 +36,9 @@ async function api(route, body, method = 'POST') {
 }
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function auth() {
-  signedIn = false; $('auth').hidden = false; $('workspace').hidden = true; $('account').hidden = true;
+  signedIn = false; $('auth').hidden = false; $('workspace').hidden = true; $('account').hidden = true; $('context-space').hidden = true; $('primary-nav').hidden = true;
   const activating=authMode==='activate', registering=authMode==='register';
-  $('auth-title').textContent=activating ? '设置你的登录密码' : registering ? '创建 Switchyard 账号' : '登录 Switchyard';
+  $('auth-title').textContent=activating ? '设置你的登录密码' : registering ? '创建 Junction 账号' : '登录 Junction';
   $('auth-description').textContent=activating ? '设置后，即可安装节点并进入工作台。' : registering ? '连接自己的设备，共享工作 Context。' : '连接你的设备，继续工作。';
   $('user-label').hidden=activating; $('user').required=!activating;
   $('user').maxLength=registering ? 32 : 64; $('user').minLength=registering ? 3 : 1;
@@ -50,10 +57,17 @@ async function workspace(user, username = user) {
   signedIn = true; currentUser = user; $('username').textContent = username;
   installationKey='switchyard-install:'+user;
   try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
-  const next = new URLSearchParams(location.search).get('next');
-  if (next && /^\/(?:local\/open\/[0-9a-f-]{36}|workspace\/[0-9a-f-]{36}\/)(?:\?task=(?:[1-9]\d*|n[1-9]\d*%3A[1-9]\d*))?$/.test(next)) { navigating = true; location.replace(next); return; }
+  const next = safeWorkspaceReturn(new URLSearchParams(location.search).get('next'));
+  if (next) { navigating = true; location.replace(next); return; }
+  if (contextsPage && !setupCode) {
+    const { openContextSpace } = await import('./contexts.js');
+    await openContextSpace(user);
+    $('auth').hidden = true; $('context-space').hidden = false; $('account').hidden = false; $('primary-nav').hidden = false;
+    return;
+  }
+  if (contextsPage) { navigating = true; location.replace('/devices'); return; }
   await refresh();
-  if (!navigating) { $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; window.PageLoad.fade($('workspace')); }
+  if (!navigating) { $('auth').hidden = true; $('workspace').hidden = false; $('account').hidden = false; $('primary-nav').hidden = false; window.PageLoad.fade($('workspace')); }
 }
 function renderInstallation(record) {
   const view=installationView(record);
@@ -77,7 +91,7 @@ function renderInstallation(record) {
   }
   $('setup-enter').hidden=!view.complete;
   if(view.complete){
-    $('setup-enter').href='/local/open/'+encodeURIComponent(record.device_id);
+    $('setup-enter').href=withContext('/local/open/'+encodeURIComponent(record.device_id), continuation);
     $('setup-enter').textContent='开始工作 →';
     $('command').parentElement.hidden=true; $('setup-help').hidden=true;
   }
@@ -91,7 +105,7 @@ function openInstalledLocal(record, items) {
   try { sessionStorage.removeItem(installationKey); } catch {}
   $('setup-status').textContent = '连接成功 · 正在打开本机工作台';
   navigating = true;
-  location.replace('/local/open/' + encodeURIComponent(record.device_id));
+  location.replace(withContext('/local/open/' + encodeURIComponent(record.device_id), continuation));
 }
 const computer = '<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></svg>';
 async function refresh() {
@@ -130,7 +144,8 @@ async function refresh() {
     card.querySelector('.device-name').textContent = d.name;
     const enter = card.querySelector('a');
     if (d.online) {
-      enter.href = devicePath(d.id, currentUser);
+      enter.href = withContext(devicePath(d.id, currentUser), continuation);
+      if (continuation) enter.textContent = '在此设备继续 →';
     }
     else { enter.setAttribute('aria-disabled', 'true'); enter.textContent = '设备离线'; }
     card.querySelector('button').onclick = async () => {
@@ -198,4 +213,4 @@ $('copy').onclick = async () => {
 try { const current = await api('session'); registrationOpen=current.registration_open===true; if (setupCode || !current.user_id) auth(); else await workspace(current.user_id,current.username); }
 catch (e) { auth(); error(e.message); }
 finally { if (!navigating) window.PageLoad.ready(); }
-setInterval(() => { if (signedIn && !document.hidden) refresh().catch(e => error(e.message)); }, 5000);
+setInterval(() => { if (signedIn && !contextsPage && !document.hidden) refresh().catch(e => error(e.message)); }, 5000);

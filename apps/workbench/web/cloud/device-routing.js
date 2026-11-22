@@ -1,5 +1,6 @@
 // Browser-local routing preference, never an execution credential. Ownership
 // and one-use login are still checked by the gateway and the selected node.
+import { withContext } from './context-link.js';
 const key = user => 'switchyard-local-device:' + user;
 const pendingKey = 'switchyard-local-confirmation';
 const uuid = value => typeof value === 'string' && /^[0-9a-f-]{36}$/.test(value);
@@ -30,13 +31,13 @@ export function forgetLocalDevice(user, device) {
   remembered.delete(user);
   try { localStorage.removeItem(key(user)); } catch {}
 }
-export function beginLocalConfirmation(user, device, origin, task) {
+export function beginLocalConfirmation(user, device, origin, task, context) {
   if (!user || !uuid(device) || !localOrigin(origin)) return '';
   const known = localDevice(user);
   if (known?.device === device && known.origin === origin) return '';
   const nonce = crypto.randomUUID();
   try {
-    sessionStorage.setItem(pendingKey, JSON.stringify({ nonce, user, device, origin, task: validTask(task) ? task : null, expires: Date.now() + 120000 }));
+    sessionStorage.setItem(pendingKey, JSON.stringify({ nonce, user, device, origin, task: validTask(task) ? task : null, context, expires: Date.now() + 120000 }));
     return nonce;
   } catch { return ''; } // Storage restrictions must not block local work.
 }
@@ -48,5 +49,5 @@ export function confirmLocalDevice(nonce, device, user) {
   // Only the same tab that initiated the login can confirm it. The callback
   // runs after the loopback node has accepted its own device-bound login code.
   rememberLocalDevice(user, device, pending.origin);
-  return pending.origin + '/local/open' + (validTask(pending.task) ? '?task=' + encodeURIComponent(pending.task) : '');
+  return withContext(pending.origin + '/local/open' + (validTask(pending.task) ? '?task=' + encodeURIComponent(pending.task) : ''), pending.context);
 }

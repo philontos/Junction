@@ -1,4 +1,4 @@
-/* Reuse Switchyard's theme, wordmark, typography and controls from app.css.
+/* Reuse Junction's theme, typography and controls from app.css.
    Only the device portal's layout lives here. */
 .cloud-portal { min-height: 100dvh; height: auto; overflow: auto; }
 .cloud-portal [hidden] { display: none !important; }
@@ -7,7 +7,7 @@
 .cloud-portal .header-actions button { flex: none; white-space: nowrap; }
 .cloud-portal #account { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .cloud-portal #username { color: var(--muted); font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
-.cloud-portal main { width: 100%; max-width: 1040px; margin: 32px auto; padding: 0 24px 24px; }
+.cloud-portal .portal-main, .cloud-portal > main { width: 100%; max-width: 1180px; margin: 40px auto; padding: 0 32px 32px; }
 .cloud-portal h1 { margin: 0; font-size: 20px; line-height: 1.4; font-weight: 600; letter-spacing: 0; }
 .cloud-portal h2 { margin: 0; font-size: 14px; color: var(--text); letter-spacing: 0; text-transform: none; }
 .cloud-portal p { color: var(--muted); }
@@ -64,7 +64,7 @@
   .cloud-portal header { gap: 8px; padding: 10px 12px; }
   .cloud-portal .header-actions, .cloud-portal #account { gap: 7px; }
   .cloud-portal #username { max-width: 80px; font-size: 11px; }
-  .cloud-portal main { margin: 24px auto; padding: 0 16px 20px; }
+  .cloud-portal .portal-main, .cloud-portal > main { margin: 24px auto; padding: 0 16px 20px; }
   .cloud-portal .heading { gap: 12px; }
   .cloud-portal .heading h1 { font-size: 18px; }
   .cloud-portal .devices { grid-template-columns: 1fr; }

@@ -11,7 +11,8 @@ const L = (zh, en) => I18N.lang === "zh" ? zh : en;
 let hooks, status, listCursor, generation = 0, listRequest = 0, activeShare = null, shareDismissTimer;
 let selectedContext = null, launchingContext = false, connectingJunction = false;
 let listController, listItems = [], listReady = false;
-const call = (url, options = {}) => api("/api/junction" + url, options);
+let settings = {};
+const call = (url, options = {}) => settings.request ? settings.request(url, options) : api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const base = meta => `/contexts/${meta.id}/revisions/${meta.revision.id}`;
 function el(tag, text, cls) { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
@@ -39,12 +40,13 @@ function closeContextDialog(restoreFocus = true) {
   if (!contextDialogIsOpen()) return true;
   ++generation;
   $("jx-task-modal").hidden = true;
+  if (settings.mount) { document.querySelector('body > header').inert = false; document.body.classList.remove('context-dialog-open'); }
   $("junction-modal").inert = false;
   $("junction-modal").removeAttribute("aria-hidden");
   $("jx-detail").replaceChildren(); $("jx-task-submit-slot").replaceChildren();
   if (restoreFocus) {
     const card = [...$("jx-list").querySelectorAll(".jx-card")].find(b => b.dataset.contextId === selectedContext?.cid);
-    (card || $("jx-refresh")).focus({ preventScroll: true });
+    (card || ($("junction-modal").hidden ? $("junction-nav") : $("jx-refresh")))?.focus({ preventScroll: true });
   }
   return true;
 }
@@ -53,6 +55,7 @@ function detailRoot(title = L("新建任务", "New task")) {
   $("jx-task-modal").dataset.view = "task";
   $("jx-task-heading").textContent = title;
   $("jx-task-modal").hidden = false;
+  if (settings.mount) { document.querySelector('body > header').inert = true; document.body.classList.add('context-dialog-open'); }
   if (opening) $("jx-task-close").focus({ preventScroll: true });
   $("junction-modal").inert = true;
   $("junction-modal").setAttribute("aria-hidden", "true");
@@ -63,10 +66,11 @@ function detailRoot(title = L("新建任务", "New task")) {
 }
 export function closeJunction() {
   if (!closeContextDialog(false)) return;
+  if (settings.mount) return;
   $("junction-modal").hidden = true;
   generation++; listRequest++; listController?.abort();
 }
-export function junctionIsOpen() { return !$("junction-modal").hidden; }
+export function junctionIsOpen() { return !$("junction-modal").hidden || contextDialogIsOpen(); }
 export async function openJunction(taskId = null) {
   if (taskId) return shareTask(taskId);
   if (!closeContextDialog(false)) return;
@@ -79,6 +83,16 @@ export async function openJunction(taskId = null) {
   const loading = loadList();
   $("junction-modal").hidden = false;
   return loading;
+}
+export async function openPinnedContext(reference) {
+  try {
+    const [meta, currentStatus] = await Promise.all([
+      call(`/contexts/${reference.context}/revisions/${reference.revision}`), call('/status'), loadAgentCatalog(),
+    ]);
+    status = currentStatus;
+    openDetail(meta);
+    return true;
+  } catch (error) { await openJunction(); showError(error, 'jx-error'); return false; }
 }
 async function showConnection(known) {
   const epoch = ++generation;
@@ -199,7 +213,7 @@ async function loadList(append = false) {
     $("jx-more").replaceChildren(spinner, document.createTextNode(L("加载中…", "Loading…")));
   }
   try {
-    if (!append) {
+    if (!append && !settings.mount) {
       const connection = await call("/connection", options);
       if (request !== listRequest) return;
       if (!connection.configured) {
@@ -210,8 +224,8 @@ async function loadList(append = false) {
     }
     const [page, currentStatus] = await Promise.all([
       call("/contexts" + (cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""), options),
-      append ? status : call("/status", options),
-      loadAgentCatalog(),
+      append || settings.mount ? status : call("/status", options),
+      settings.mount ? null : loadAgentCatalog(),
     ]);
     if (request !== listRequest) return;
     status = currentStatus;
@@ -289,22 +303,27 @@ function openDetail(meta) {
   source.append(el("span", `${L("共享者", "Shared by")}: ${contextOwner(meta)} · v${r.number} · ${agentName(r.provider)}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`, "jx-meta"));
   d.append(source);
   d.append(el("div", undefined, "jx-continuation"));
-  showContinue(meta);
+  if (!settings.mount) showContinue(meta);
   $("jx-task-modal").dataset.view = "context";
   const reader = createContextReader(meta, { request: path => call(base(meta) + path), valid: () => epoch === generation });
   reader.element.hidden = true; d.append(reader.element);
   const navigation = $("jx-task-navigation"); navigation.hidden = false;
-  const continuation = d.querySelector(".jx-continuation"), submit = $("jx-task-submit");
+  const continuation = d.querySelector(".jx-continuation");
   const proceed = button(L("继续此任务", "Continue this task"), () => setMode("task"), "primary"); proceed.hidden = true;
   $("jx-task-submit-slot").append(proceed);
-  const modeButtons = {}, positions = { task: 0, reader: 0 }; let currentMode = "task";
+  const modeButtons = {}, positions = { task: 0, reader: 0 }; let currentMode = "task", continuationReady = !settings.mount;
   function setMode(mode) {
     if (launchingContext) return;
     positions[currentMode] = d.scrollTop; currentMode = mode;
     continuation.hidden = mode !== "task"; reader.element.hidden = mode !== "reader";
+    if (mode === "task" && !continuationReady) {
+      continuationReady = true;
+      settings.continueContext(meta, continuation, $("jx-task-submit-slot"), () => epoch === generation);
+    }
+    const submit = $("jx-task-submit");
     if (submit) submit.hidden = mode !== "task";
     proceed.hidden = mode !== "reader";
-    $("jx-task-heading").textContent = mode === "reader" ? L("Context 预览", "Context preview") : L("新建任务", "New task");
+    $("jx-task-heading").textContent = mode === "reader" ? L("Context 预览", "Context preview") : settings.mount ? L("选择执行设备", "Choose a device") : L("新建任务", "New task");
     for (const [key, b] of Object.entries(modeButtons)) b.setAttribute("aria-pressed", String(key === mode));
     d.scrollTop = positions[mode];
     if (mode === "reader") reader.activate();
@@ -362,6 +381,7 @@ function openDetail(meta) {
       finally { loading = false; }
     };
   }
+  if (settings.mount) setMode('reader');
 }
 function showContinue(meta) {
   const target = $("jx-detail").querySelector(".jx-continuation"); target.replaceChildren();
@@ -530,16 +550,24 @@ function showPublish() {
   for (const task of tasks) d.append(button(task.title, () => shareTask(task.id), "jx-card"));
   if (!tasks.length) d.append(note(L("还没有可共享的 Agent 任务。", "No agent tasks to share yet.")));
 }
-export function initJunction(callbacks) {
+export function initJunction(callbacks, options = {}) {
   hooks = callbacks;
+  settings = options;
   const modal = el("div"); modal.id = "junction-modal"; modal.hidden = true;
   modal.innerHTML = `<section class="jx-shell" role="dialog" aria-modal="true" aria-labelledby="jx-heading">
     <div class="jx-head"><h2 id="jx-heading"></h2><span class="jx-spacer"></span><button id="jx-connect" class="sec"></button><button id="jx-refresh" class="sec"></button><button class="sec" id="jx-close" aria-label="Close">×</button></div>
     <div class="jx-search-bar"><label class="jx-search-field"><span class="jx-search-icon" aria-hidden="true"></span><input id="jx-search" type="search" autocomplete="off" spellcheck="false"></label><span id="jx-count" role="status" aria-live="polite" aria-atomic="true"></span></div>
     <p id="jx-error" class="jx-warning" role="alert" hidden></p>
-    <div class="jx-body"><main id="jx-library"><div id="jx-list"></div><button id="jx-more" class="sec" hidden></button></main><div id="jx-library-loading" class="jx-loading" role="status" aria-hidden="true"><div class="spinner" aria-hidden="true"></div><span id="jx-loading-label"></span></div></div>
+    <div class="jx-body"><div id="jx-library"><div id="jx-list"></div><button id="jx-more" class="sec" hidden></button></div><div id="jx-library-loading" class="jx-loading" role="status" aria-hidden="true"><div class="spinner" aria-hidden="true"></div><span id="jx-loading-label"></span></div></div>
   </section>`;
-  document.body.append(modal);
+  (settings.mount || document.body).append(modal);
+  if (settings.mount) {
+    modal.className = 'context-page';
+    const shell = modal.firstElementChild; shell.setAttribute('role', 'region'); shell.removeAttribute('aria-modal');
+    const heading = modal.querySelector('#jx-heading'), title = el('h1', 'Context'); title.id = heading.id; heading.replaceWith(title);
+    const intro = el('div', undefined, 'context-intro'); title.before(intro); intro.append(title, el('p', L('汇聚工作上下文，让任务从这里继续。', 'Shared knowledge. A starting point for your next task.')));
+    modal.querySelector('#jx-connect').hidden = true; modal.querySelector('#jx-close').hidden = true;
+  }
   const taskModal = el("div"); taskModal.id = "jx-task-modal"; taskModal.hidden = true;
   taskModal.innerHTML = `<section class="jx-shell jx-task-shell" role="dialog" aria-modal="true" aria-labelledby="jx-task-heading" tabindex="-1">
     <div class="jx-head"><h2 id="jx-task-heading"></h2><span class="jx-spacer"></span><button id="jx-task-close" class="sec" type="button">×</button></div>
@@ -557,7 +585,7 @@ export function initJunction(callbacks) {
   feedback.setAttribute("role", "status"); feedback.setAttribute("aria-live", "polite"); feedback.setAttribute("aria-atomic", "true");
   feedback.innerHTML = `<span id="jx-share-label"></span><progress id="jx-share-progress" max="3" value="0" aria-labelledby="jx-share-label"></progress><p id="jx-share-error" hidden></p>`;
   document.body.append(feedback);
-  $("jx-heading").textContent = L("共享 Context", "Shared contexts");
+  $("jx-heading").textContent = settings.mount ? 'Context' : L("共享 Context", "Shared contexts");
   $("jx-search").placeholder = L("搜索标题或用户名", "Search titles or people");
   $("jx-search").setAttribute("aria-label", $("jx-search").placeholder);
   $("jx-search").oninput = () => { renderContextList(); $("jx-library").scrollTop = 0; };
@@ -586,8 +614,9 @@ export function initJunction(callbacks) {
   $("jx-connect").onclick = () => showConnection();
   $("jx-refresh").onclick = () => loadList();
   $("jx-more").textContent = L("加载更多", "Load more"); $("jx-more").onclick = () => loadList(true);
-  $("junction-nav").textContent = L("共享 Context", "Shared contexts");
-  $("junction-nav").onclick = () => openJunction();
+  if (settings.mount) return;
+  $("junction-nav").textContent = 'Context';
+  if (!$("junction-nav").dataset.cloudContext) $("junction-nav").onclick = event => { event.preventDefault(); openJunction(); };
   $("term-share-context").textContent = L("共享", "Share");
   $("term-share-context").title = L("共享当前 Context", "Share this context");
   $("term-share-context").onclick = () => {

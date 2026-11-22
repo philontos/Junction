@@ -18,7 +18,7 @@ window.PageLoad = (() => {
     const retry = document.createElement('button'); retry.className = 'sec'; retry.textContent = '重新加载'; retry.onclick = () => location.reload();
     boot.replaceChildren(text, retry);
     const origin = document.querySelector('meta[name="switchyard-cloud-origin"]')?.content;
-    if (origin) { const home = document.createElement('a'); home.className = 'sec'; home.href = origin + '/'; home.textContent = '返回工作台'; boot.append(home); }
+    if (origin) { const home = document.createElement('a'); home.className = 'sec'; home.href = origin + '/devices'; home.textContent = '返回工作台'; boot.append(home); }
   }
   function fade(element) {
     if (!complete || matchMedia('(prefers-reduced-motion: reduce)').matches) return;

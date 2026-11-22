@@ -82,7 +82,9 @@ test('local workbench: cloud ownership, one-use login, direct HTTP/PTY, offline 
   assert.equal((await fetch(localUrl + '/api/test', { headers: { Cookie: auth, Origin: cloud } })).status, 403);
   const html = await (await request('/')).text();
   assert.match(html, /switchyard-base" content=""/); assert.match(html, /data-mode="local"/);
-  assert.ok(html.includes(`id="workspace-home" class="sec workspace-home" href="${cloud}/"`));
+  assert.ok(html.includes(`id="junction-nav" href="${cloud}/contexts" data-cloud-context="true"`));
+  assert.ok(html.includes('id="workbench-nav" href="/" aria-current="page"'));
+  assert.doesNotMatch(html, /switchyard-wordmark|aria-label="Switchyard"/);
   assert.doesNotMatch(html, /workspace-cloud-return|workspace-local-open/);
   assert.match(html, /data-page-loading/);
   const returnPath = '/workspace/' + device.device_id + '/?task=n2%3A21';

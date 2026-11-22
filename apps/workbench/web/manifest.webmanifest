@@ -1,6 +1,7 @@
 {
-  "name": "Switchyard",
-  "short_name": "Switchyard",
+  "name": "Junction",
+  "short_name": "Junction",
+  "icons": [{"src":"/assets/junction.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}],
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1613",

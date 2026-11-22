@@ -193,6 +193,8 @@ export function initCloudWorkspace(callbacks) {
   const add = element("button", "cloud-menu-action cloud-add-ssh"); add.type = "button";
   add.onclick = () => { switcher.open = false; window.openDiscoveryModal(); };
   advanced.append(add); panel.append(advanced); switcher.append(panel);
+  const manage = element('a', 'cloud-menu-action'); manage.href = cloudOrigin + '/devices';
+  manage.textContent = I18N.lang === 'zh' ? '连接或管理设备 →' : 'Manage devices →'; panel.append(manage);
   panel.addEventListener("click", remember, true);
   panel.addEventListener("auxclick", remember, true);
   switcher.addEventListener("toggle", () => { if (switcher.open) refreshDevices(true); });

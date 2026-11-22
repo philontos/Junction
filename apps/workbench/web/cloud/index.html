@@ -4,23 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#1a1613">
-  <title>Switchyard · 我的设备</title>
+  <title>Context · Junction</title>
   <script>try{var _t=localStorage.getItem("theme");document.documentElement.dataset.theme=_t==="light"?"light":"dark";if(_t==="light"){var _m=document.querySelector('meta[name="theme-color"]');if(_m)_m.content="#f5f0e8";}}catch(e){document.documentElement.dataset.theme="dark";}</script>
   <link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/navigation.css">
+<link rel="icon" type="image/svg+xml" href="/assets/junction.svg">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/cloud/style.css">
   <script defer src="/page-load.js"></script>
+  <link rel="stylesheet" href="/css/junction.css">
+  <script src="/i18n.js"></script>
   <script src="/theme.js"></script>
   <script type="module" src="/cloud/app.js"></script>
 </head>
 <body class="cloud-portal" data-page-loading>
   <div id="boot" role="status" aria-label="加载中"><div class="spinner"></div></div>
   <header>
-    <a class="brand" href="/" aria-label="Switchyard"><img class="brand-logo brand-logo-dark" src="/assets/switchyard-wordmark.png" alt="" aria-hidden="true"><img class="brand-logo brand-logo-light" src="/assets/switchyard-wordmark-light.png" alt="" aria-hidden="true"></a>
+    <a class="brand" href="/" aria-label="Junction"><span class="junction-symbol" aria-hidden="true"></span><span class="junction-wordmark">junction</span></a>
+    <nav class="primary-nav" aria-label="主导航" id="primary-nav" hidden><a id="context-nav" href="/contexts">Context</a><a id="workbench-nav" href="/devices">工作台</a></nav>
     <div class="header-actions"><div id="account" hidden><span id="username"></span><button id="logout" class="sec">退出</button></div><button id="theme-toggle" class="sec" type="button" aria-label="切换主题"></button></div>
   </header>
-  <main>
+  <main class="portal-main">
+    <section id="context-space" hidden aria-label="Context 共享空间"></section>
     <section id="auth" class="auth" hidden>
-      <h1 id="auth-title">登录 Switchyard</h1>
+      <h1 id="auth-title">登录 Junction</h1>
       <p id="auth-description">连接你的设备，继续工作。</p>
       <form id="auth-form">
         <label id="user-label">账号<input id="user" name="username" autocomplete="username" required maxlength="64" placeholder="你的账号"></label>
@@ -30,7 +37,7 @@
       <p id="auth-switch" class="auth-switch" hidden><span id="auth-switch-label">还没有账号？</span><button id="auth-toggle" class="text" type="button">注册账号</button></p>
     </section>
     <section id="workspace" hidden>
-      <div class="heading"><div><h1>工作台</h1><p>选择设备，继续工作。</p></div><button id="install" class="primary">＋ 连接这台电脑</button></div>
+      <div class="heading"><div><h1>工作台</h1><p>选择执行设备，进入任务与仓库。</p></div><button id="install" class="primary">＋ 连接这台电脑</button></div>
       <div id="devices" class="devices"></div>
       <p id="local-detection" class="note" role="status" hidden>本机识别被浏览器阻止，请允许访问本地网络后重试。<button id="retry-local" class="text" type="button">重新识别</button></p>
       <section id="setup" class="setup" hidden>

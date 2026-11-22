@@ -8,7 +8,7 @@ const legacy = [
 ];
 const catalogs = new Map(), pending = new Map();
 export const agentCatalog = (hostId = null) => catalogs.get(hostId) || legacy;
-export const agentName = id => agentCatalog().find(a => a.id === id)?.name || id || "Agent";
+export const agentName = id => agentCatalog().find(a => a.id === id)?.name || ({ pi: 'Pi' })[id] || id || "Agent";
 export const canShareAgent = id => !!agentCatalog().find(a => a.id === id)?.sharing;
 
 export async function loadAgentCatalog(hostId = null) {

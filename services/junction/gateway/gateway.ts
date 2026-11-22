@@ -10,6 +10,7 @@ import { CloudError, CloudStore, digest } from './store.js';
 import { TunnelBroker } from './tunnel.js';
 import { fail, proxyHttp, proxyUpgrade } from '../../../packages/node-transport/proxy.js';
 import { junctionProvisioner } from './registration.js';
+import { readContext } from './context-read.js';
 import { localEntryHtml, workspaceHtml } from '../../../apps/workbench/server/cloud/workspace.js';
 
 export interface GatewayConfig { root: string; data: string; origin: string; junctionPort: number; bundle?: string; registrationTokenFile?: string }
@@ -142,6 +143,11 @@ export function createGateway(config: GatewayConfig) {
   });
   app.delete('/hub/devices/:id', (req,res) => {csrf(req);store.revoke(req.params.id,user(req).id);broker.disconnect(req.params.id);res.json({ok:true});});
 
+  app.use('/hub/context', async (req,res) => {
+    try { await readContext(req, res, config.junctionPort, store.user(user(req).id)!); }
+    catch (error) { fail(res, error); }
+  });
+
   // Device credentials are scoped at this gateway. Junction retains its own
   // identity/authorization model; owner credentials never leave the gateway.
   app.use('/v1', (req,res) => {
@@ -185,7 +191,7 @@ export function createGateway(config: GatewayConfig) {
   // Public shell only: the browser checks its same-tab nonce and authenticated
   // account before remembering a routing preference. This grants no API access.
   app.get('/local/connected', (_req,res) => res.type('html').send(localEntryHtml(config.root,origin,'','confirm')));
-  app.get('/', (_req,res) => res.sendFile(path.join(config.root,'web/cloud/index.html')));
+  app.get(['/', '/contexts', '/devices'], (_req,res) => res.sendFile(path.join(config.root,'web/cloud/index.html')));
   app.get('/install.sh', (_req,res) => {
     const script=fs.readFileSync(path.join(config.root,'scripts/cloud-install.sh'),'utf8').replaceAll('__SWITCHYARD_ORIGIN__',origin);
     res.type('text/plain').send(script);
