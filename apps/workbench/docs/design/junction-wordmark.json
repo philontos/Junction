@@ -1,33 +1,25 @@
 {
   "name": "Junction wordmark",
-  "revision": 2,
-  "generator": "Built-in image_gen",
-  "references": [
-    "7ed89d7:apps/workbench/web/assets/junction-wordmark-light.png",
-    "apps/workbench/web/assets/switchyard-wordmark-light.png"
-  ],
-  "prompt_set": [
-    {
-      "step": "Interleave charcoal and terracotta across letter strokes",
-      "prompt": "Use case: logo-brand / style-transfer.\nAsset type: the actual transparent PNG header wordmark of a software workbench.\nInputs: image 1 is the current Junction wordmark to redesign; image 2 is the original Switchyard style reference.\nPrimary request: redesign \"Junction\" to feel more lively, fluid and individually drawn. Keep the rounded geometric monoline family of Switchyard, but give the strokes distinctive curved turns, a few diagonal joins and subtle flowing connections. It should feel like paths meeting and switching, with clearly readable letters, not a generic typeset font and not cursive handwriting.\nText verbatim: \"Junction\" — capital J, lowercase u n c t i o n, eight letters.\nColor: warm dark charcoal #2e271f and terracotta orange #d97757. Thread orange through several separated portions of the LETTER STROKES across the whole word, about 25–30% orange overall: for example a sweeping part of the J, a diagonal curve in an n, the t crossbar, and part of the o or final n. Let charcoal and orange exchange within letters with a couple of clean, intentional tiny crossing gaps. The i dot may also be orange, but orange must NOT be confined to that dot or to a single letter. Maintain clear visual rhythm and sophistication; no rainbow.\nComposition: one horizontal wordmark, same approximate letter height, wide readable proportions and centered placement as image 1. The artwork should occupy almost the entire canvas width. Keep the letter strokes consistently crisp and readable in a 150 x 27 pixel web header. Truly transparent alpha background including holes between and inside letters. Flat solid colors, no gradients, texture, speckles, shadow, halo, outlines, extra icons, tagline, checkerboard, background panel or mockup.\nOutput one high-resolution transparent PNG only."
+  "revision": 3,
+  "format": "SVG",
+  "construction": "Original geometric monoline paths; rounded terminals, consistent 4.8-unit stroke, terracotta i dot. No fonts, raster images, filters or external resources.",
+  "reference": "Rounded geometric Switchyard wordmark supplied by the user",
+  "view_box": "0 2 248 48",
+  "variants": {
+    "light": {
+      "stroke": "#302b25",
+      "accent": "#c86643",
+      "asset": "apps/workbench/web/assets/junction-wordmark-light.svg"
     },
-    {
-      "step": "Refine the letterforms",
-      "prompt": "Use case: logo-brand / style-transfer.\nEdit target: the attached Junction wordmark, whose charcoal/terracotta colors are already interleaved.\nPrimary change: redraw the letter shapes to be visibly more lively and custom, with the playful engineered character of a railway junction. The last version still looks too much like a conventional rounded font. Keep the exact readable spelling \"Junction\", but introduce a graceful angled finish to J, a slightly leaning u, distinct diagonal joins through the n shoulders, a gently swept c, an extended off-center t crossbar, and a tiny intentional break in o. Use just two or three elegant connected/overlapping stroke moments across neighboring letters, with tiny transparent separation gaps so they remain readable. This is refined geometric lettering, not cursive, not a script font, and not decorative swashes.\nKeep the dark warm charcoal #2e271f with terracotta #d97757 distributed THROUGH sections of letter strokes across J, n, t and o/final n; about one quarter to one third orange. Preserve the deliberate diagonal color transitions. The orange must remain distributed, not just the i dot.\nOne horizontal wordmark for a 150 x 27px web header. Keep approximately the same overall bounds, weight and centered canvas placement as the input. Fully transparent background including all letter counters. Clean flat solid fills and crisp monoline edges; no gradients, shadows, texture, noise, speckles, checkerboard, frame, icon, tagline or extra text. Output one transparent PNG."
-    },
-    {
-      "step": "Create the matching dark-theme variant",
-      "prompt": "Use case: logo-brand / precise-object-edit. Edit the supplied final Junction wordmark into its dark-theme variant. Preserve the EXACT letter shapes, diagonal stroke joins, small gap in o, spacing, two-color segmentation, positions, canvas dimensions and transparent margins. Change ONLY the dark charcoal fills to solid warm ivory #ece6dd. Preserve all terracotta #d97757 sections and the dot in the exact same places. No redesign or new stroke shapes. Keep all transparent regions completely transparent with clean edges, including letter interiors. Flat crisp solid colors only: remove rather than introduce speckles, halos, texture or noise; no gradients. No dark background, white background, checkerboard, added elements or mockup. One transparent PNG readable against #1a1613. Text remains exactly \"Junction\"."
+    "dark": {
+      "stroke": "#ece6dd",
+      "accent": "#d97757",
+      "asset": "apps/workbench/web/assets/junction-wordmark.svg"
     }
-  ],
-  "variants": [
-    {
-      "theme": "light",
-      "asset": "apps/workbench/web/assets/junction-wordmark-light.png"
-    },
-    {
-      "theme": "dark",
-      "asset": "apps/workbench/web/assets/junction-wordmark.png"
-    }
-  ]
+  },
+  "display": {
+    "desktop": "150 × 30 CSS px, object-fit: contain",
+    "mobile": "120 × 26 CSS px; 100 × 22 on narrow phones"
+  },
+  "legacy": "Previous PNG assets remain available for cached older pages; current pages use SVG."
 }

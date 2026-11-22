@@ -299,8 +299,8 @@ body { margin: 0; font: 13px/1.55 -apple-system, "SF Pro Text", system-ui, "Ping
 }
 header { padding: 12px 18px; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 600; flex: none; display: flex; align-items: center; gap: 10px; }
 .brand { display: inline-flex; align-items: center; flex: none; height: 30px; text-decoration: none; }
-/* Crop the transparent canvas padding while retaining the generated artwork. */
-.brand-logo { display: block; width: 150px; height: 30px; object-fit: cover; object-position: center; }
+/* Outlined vector wordmark: crisp at any density, no font or bitmap dependency. */
+.brand-logo { display: block; width: 150px; height: 30px; object-fit: contain; object-position: left center; }
 .brand-logo-light { display: none; }
 :root[data-theme="light"] .brand-logo-dark { display: none; }
 :root[data-theme="light"] .brand-logo-light { display: block; }
