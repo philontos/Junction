@@ -1,28 +1,44 @@
 #junction-modal[hidden], #junction-modal [hidden], #jx-task-modal[hidden], #jx-task-modal [hidden] { display: none; }
 #junction-modal { position: fixed; inset: 0; z-index: 230; background: #0009; display: flex; align-items: center; justify-content: center; padding: 24px; animation: jx-enter .25s ease; }
-/* The same library and reader also form a first-class cloud page. */
-#junction-modal.context-page { position: static; display: block; padding: 0; background: transparent; animation: none; }
+/* One library layout on cloud and device pages: intro, toolbar, collection. */
+#junction-modal.context-page { position: static; display: flex; flex: 1; align-items: stretch; justify-content: flex-start; padding: 0; background: transparent; animation: none; }
 .context-page > .jx-shell { width: 100%; height: auto; min-height: 420px; border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible; }
-.context-page .jx-head { border: 0; padding: 0 0 28px; align-items: center; }
+.context-page .jx-head { border: 0; padding: 0 0 26px; align-items: center; }
 .cloud-portal .context-intro h1 { font-size: 28px; letter-spacing: -.7px; line-height: 1.3; }
 .context-intro p { margin: 8px 0 0; font-size: 13px; font-weight: 400; color: var(--muted); }
-.context-page .jx-search-bar { padding: 0 0 24px; }
-.context-page .jx-search-field { max-width: 420px; }
-.context-page .jx-body { min-height: 320px; }
+.context-page .jx-search-bar { padding: 0 0 20px; gap: 12px; flex-wrap: wrap; }
+.context-page .jx-search-field { max-width: 340px; margin: 0 0 0 auto; }
+.context-page #jx-search { background: var(--surface); }
+.jx-scopes { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
+.jx-scopes button { border: 1px solid transparent; border-radius: 6px; padding: 7px 13px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.jx-scopes button:hover { color: var(--text); }
+.jx-scopes button[aria-pressed=true] { background: var(--surface); color: var(--text); border-color: var(--border); box-shadow: 0 1px 3px #00000008; }
+.jx-collection { flex: 1; display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--surface-2) 45%, var(--bg)); }
+.jx-collection-heading { display: flex; align-items: center; gap: 10px; padding: 20px 22px 0; }
+.jx-collection-heading h2 { margin: 0; font-size: 12px; line-height: 1.5; letter-spacing: 0; text-transform: none; color: var(--muted); font-weight: 500; }
+.jx-collection-heading #jx-count { font-size: 11px; color: var(--faint); }
+.context-page .jx-body { min-height: 280px; margin: 18px 22px 22px; }
 .context-page #jx-library { padding: 0; overflow: visible; }
-.context-page .jx-loading { background: var(--bg); }
-.context-page #jx-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.context-page .jx-card { min-height: 168px; background: var(--surface); }
-.context-page .jx-empty { grid-column: 1 / -1; padding: 80px 24px; border: 1px dashed var(--border); border-radius: 12px; text-align: center; }
+.context-page .jx-loading { background: transparent; }
+.context-page #jx-list { grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 16px; }
+.context-page .jx-card { min-height: 172px; background: var(--surface); }
+.context-page .jx-empty { grid-column: 1 / -1; padding: 64px 20px; text-align: center; }
+.context-page .jx-empty p { margin: 0 0 8px; }
+.context-page .jx-empty .jx-note { font-size: 12px; color: var(--faint); }
 .context-manage-link { display: inline-block; margin-top: 10px; color: var(--accent-text); font-size: 12px; text-decoration: none; }
 .context-manage-link:hover { text-decoration: underline; }
-.cloud-portal.context-dialog-open { overflow: hidden; }
-@media (max-width: 1000px) { .context-page #jx-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 600px) {
-  .context-page #jx-list { grid-template-columns: 1fr; }
-  .context-page .jx-head { padding-bottom: 20px; }
+@media (max-width: 760px) {
+  .context-page .jx-head { padding-bottom: 22px; }
   .cloud-portal .context-intro h1 { font-size: 24px; }
   .context-intro p { font-size: 12px; }
+  .context-page .jx-search-bar { gap: 10px; }
+  .jx-scopes { width: 100%; background: transparent; padding: 0 0 10px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+  .jx-scopes button { padding: 7px 10px; }
+  .context-page .jx-search-field { max-width: none; margin: 0; }
+  .jx-collection-heading { padding: 16px 14px 0; }
+  .context-page .jx-body { margin: 14px; }
+  .context-page #jx-list { gap: 12px; }
+  .context-page .jx-context-card .jx-card { padding: 14px; }
 }
 @keyframes jx-enter { from { opacity: 0; } to { opacity: 1; } }
 .jx-shell { display: flex; flex-direction: column; width: min(1000px, 100%); height: min(720px, 92dvh); min-height: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; box-shadow: 0 24px 90px #0006; }

@@ -4,6 +4,7 @@
 // modal, and delete. Shells (local + remote) live in the per-machine Shells group
 // (rendered here, created via addLocalTask in tasks.js).
 import { $, api, nodeBase } from "../core/dom.js";
+import { readWorkbenchData } from "../core/workbench-data.js";
 import { refreshCloudHosts } from "./cloud-workspace.js";
 import { hideLoading, showLoading, toast } from "../core/feedback.js";
 import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
@@ -41,7 +42,7 @@ const listScrollByHost = new Map(); // host id -> #m-list scrollTop for this ses
 // lists the active machine's repos + tasks. loadHosts/loadRepos/loadTasks all
 // funnel through rerender() — the single re-render hub. ----
 export async function loadHosts(options = {}) {
-  const hs = await api("/api/hosts", options).catch(() => null);
+  const hs = await readWorkbenchData("/api/hosts", options).catch(() => null);
   if (!hs) return false;
   state.hostsById = Object.fromEntries(hs.map(h => [h.id, h]));
   hostsOrder = hs.map(h => h.id);   // API order: local machine first

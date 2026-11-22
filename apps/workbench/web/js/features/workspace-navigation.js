@@ -44,6 +44,7 @@ export function initWorkspaceNavigation(hooks) {
   }
   const device = document.getElementById('cloud-device-switcher');
   initJunction(hooks, { mount, managed: !!device,
+    userId: device?.dataset.userId,
     cacheKey: device ? 'junction-context-cards:' + device.dataset.userId : undefined,
     showWorkbench: () => show('workbench', true),
   });

@@ -1,3 +1,4 @@
+import { readWorkbenchData } from "../core/workbench-data.js";
 import { agentCatalog, loadAgentCatalog, requireAgent } from "../core/agents.js";
 // Tasks: the dispatch-task modal, the live/archived card lists, task lifecycle
 // (archive / remove-worktree / delete), and connect() which attaches the dock
@@ -777,7 +778,7 @@ export function taskCard(t, online, orderKey = null) {
 // for any session, even one whose card is filtered out of the current machine),
 // then re-render. The 4s poller calls this; rerender() (hosts.js) builds col2.
 export async function loadTasks(options = {}) {
-  const tasks = await api("/api/tasks", options).catch(() => null);
+  const tasks = await readWorkbenchData("/api/tasks", options).catch(() => null);
   if (!tasks) return false;
   tasksById = Object.fromEntries(tasks.map(t => [t.id, t]));
   taskOrder = tasks.map(t => t.id);          // preserve the API's id-DESC order

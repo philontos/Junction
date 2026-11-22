@@ -3,6 +3,7 @@ import { devicePath, preferredDevice, rememberWorkspace } from './device-routing
 import { discoverLocalDevice } from './local-discovery.js';
 import { contextReference, withContext, safeWorkspaceReturn } from './context-link.js';
 import { reconcileChildren } from '../js/core/keyed-list.js';
+import { preloadWorkbenchAssets } from './workbench-preload.js';
 I18N.init();
 Theme.init();
 function renderThemeToggle() {
@@ -127,7 +128,7 @@ async function openWorkbench(epoch) {
 }
 function showPage(pathname = location.pathname, query = location.search, push = false) {
   const epoch = ++routeEpoch;
-  positions.set(contextsPage ? '/contexts' : '/workbench', scrollY);
+  positions.set(contextsPage ? '/contexts' : '/workbench', $('portal-main').scrollTop);
   if (push) history.pushState(null, '', pathname + query);
   contextsPage = pathname !== '/workbench';
   continuation = contextReference(new URLSearchParams(query));
@@ -137,7 +138,7 @@ function showPage(pathname = location.pathname, query = location.search, push = 
   }
   $('auth').hidden = true; $('account').hidden = $('primary-nav').hidden = $('portal-device-switcher').hidden = false;
   $('context-space').hidden = !contextsPage; $('workspace-entry').hidden = contextsPage;
-  error(); window.scrollTo(0, positions.get(contextsPage ? '/contexts' : '/workbench') || 0);
+  error(); $('portal-main').scrollTop = positions.get(contextsPage ? '/contexts' : '/workbench') || 0;
   const loading = contextsPage ? contextUI.then(m => m.openContextSpace(currentUser)) : openWorkbench(epoch);
   loading.catch(e => { if (epoch === routeEpoch) error(e.message); });
   if (pathname === '/devices') showDevices();
@@ -145,6 +146,7 @@ function showPage(pathname = location.pathname, query = location.search, push = 
 }
 async function workspace(user, username = user) {
   signedIn = true; currentUser = user; $('username').textContent = username;
+  preloadWorkbenchAssets();
   const next = safeWorkspaceReturn(new URLSearchParams(location.search).get('next'));
   if (next) { navigating = true; location.replace(Theme.url(next)); return; }
   showPage(setupCode ? '/devices' : location.pathname, location.search, !!setupCode);

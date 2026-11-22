@@ -1,13 +1,15 @@
 /* Reuse Junction's theme, typography and controls from app.css.
    Only the device portal's layout lives here. */
-.cloud-portal { min-height: 100dvh; height: auto; overflow: auto; }
+.cloud-portal { height: 100dvh; overflow: hidden; }
 .cloud-portal [hidden] { display: none !important; }
 .cloud-portal :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .cloud-portal .header-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .cloud-portal .header-actions button { flex: none; white-space: nowrap; }
 .cloud-portal #account { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .cloud-portal #username { color: var(--muted); font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
-.cloud-portal .portal-main, .cloud-portal > main { width: 100%; max-width: 1180px; margin: 40px auto; padding: 0 32px 32px; }
+.cloud-portal .portal-main { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 32px; }
+.cloud-portal #context-space { width: 100%; max-width: 1436px; min-height: 100%; margin: 0 auto; display: flex; flex-direction: column; }
+.cloud-portal.context-dialog-open .portal-main { overflow: hidden; }
 .cloud-portal h1 { margin: 0; font-size: 20px; line-height: 1.4; font-weight: 600; letter-spacing: 0; }
 .cloud-portal h2 { margin: 0; font-size: 14px; color: var(--text); letter-spacing: 0; text-transform: none; }
 .cloud-portal p { color: var(--muted); }
@@ -32,7 +34,7 @@
   .cloud-portal header { gap: 8px; padding: 10px 12px; }
   .cloud-portal .header-actions, .cloud-portal #account { gap: 7px; }
   .cloud-portal #username { max-width: 80px; font-size: 11px; }
-  .cloud-portal .portal-main, .cloud-portal > main { margin: 24px auto; padding: 0 16px 20px; }
+  .cloud-portal .portal-main { padding: 24px 16px; }
   .cloud-portal .heading { gap: 12px; }
   .cloud-portal .heading h1 { font-size: 18px; }
   .cloud-portal button, .cloud-portal .enter { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }

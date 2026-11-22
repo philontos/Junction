@@ -1,6 +1,7 @@
 import { devicePath, localDevice } from './device-routing.js';
 import { discoverLocalDevice } from './local-discovery.js';
 import { contextReference, withContext, withView } from './context-link.js';
+import { preloadWorkbenchData } from '../js/core/workbench-data.js';
 
 const workspace = document.getElementById('cloud-device-switcher');
 try {
@@ -17,6 +18,7 @@ try {
     const params = new URLSearchParams(location.search);
     location.replace(Theme.url(withView(withContext(devicePath(workspace.dataset.deviceId, workspace.dataset.userId, params.get('task')), contextReference(params)), params.get('view'))));
   } else {
+    preloadWorkbenchData();
     await import('../js/main.js');
   }
 } catch (error) { window.PageLoad.error(error.message || '页面加载失败，请重试。'); }

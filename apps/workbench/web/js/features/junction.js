@@ -10,7 +10,7 @@ import { createContextReader } from "./junction-reader.js";
 const L = (zh, en) => I18N.lang === "zh" ? zh : en;
 let hooks, status, listCursor, generation = 0, listRequest = 0, activeShare = null, shareDismissTimer;
 let selectedContext = null, launchingContext = false, connectingJunction = false;
-let listController, listItems = [], listReady = false;
+let listController, listItems = [], listReady = false, listScope = 'all';
 let settings = {};
 const call = (url, options = {}) => settings.request ? settings.request(url, options) : api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -55,6 +55,7 @@ function cardFact(kind, text) {
 function setDialogInert(open) {
   if (!settings.mount) return;
   document.querySelector('body > header').inert = open;
+  document.querySelector('.primary-nav').inert = open;
   document.body.classList.toggle('context-dialog-open', open);
   const workbench = document.querySelector('.workspace-surfaces > .wrap');
   if (workbench) workbench.inert = open || workbench.parentElement.dataset.view !== 'workbench';
@@ -183,6 +184,7 @@ function renderContextList() {
   const normalize = value => String(value || "").normalize("NFKC").toLowerCase();
   const terms = normalize($("jx-search").value).trim().split(/\s+/).filter(Boolean);
   const matches = listItems.filter(item => {
+    if (listScope === 'mine' && item.owner_id !== settings.userId) return false;
     const text = normalize([contextCopy(item).title, item.title, item.owner_name, item.owner_id].join(" "));
     return terms.every(term => text.includes(term));
   });
@@ -215,13 +217,14 @@ function renderContextList() {
   }
   if (!matches.length) {
     const empty = el("div", undefined, "jx-empty");
-    empty.append(el("p", terms.length ? L("未找到匹配的 Context", "No matching contexts") : L("还没有共享的 Context", "No shared contexts yet")));
+    empty.append(el("p", terms.length ? L("未找到匹配的 Context", "No matching contexts") : listScope === 'mine' ? L("你还没有共享 Context", "You haven't shared a context yet") : L("还没有共享的 Context", "No shared contexts yet")));
+    if (!terms.length) empty.append(note(L("在工作台完成一段工作后，点击「共享」即可保存在这里。", "Use Share in the workbench to save your work here.")));
     if (terms.length && listCursor) empty.append(note(L("可加载更多，或换个关键词。", "Load more, or try another search.")));
     cards.push(empty);
   }
   reconcileChildren(list, cards);
   const count = $("jx-count");
-  count.textContent = terms.length ? `${matches.length} / ${listItems.length}` : `${listItems.length} ${listCursor ? L("已加载", "loaded") : L("个", "contexts")}`;
+  count.textContent = terms.length || listScope !== 'all' ? `${matches.length} / ${listItems.length}` : `${listItems.length} ${listCursor ? L("已加载", "loaded") : L("个", "contexts")}`;
   count.title = terms.length ? L("匹配数 / 已加载数", "Matches / loaded contexts") : L("已加载的 Context", "Loaded contexts");
   count.setAttribute("aria-label", L(`已加载 ${listItems.length} 个 Context，匹配 ${matches.length} 个`, `${listItems.length} contexts loaded, ${matches.length} matches`));
 }
@@ -620,8 +623,26 @@ export function initJunction(callbacks, options = {}) {
     modal.className = 'context-page';
     const shell = modal.firstElementChild; shell.setAttribute('role', 'region'); shell.removeAttribute('aria-modal');
     const heading = modal.querySelector('#jx-heading'), title = el('h1', 'Context'); title.id = heading.id; heading.replaceWith(title);
-    const intro = el('div', undefined, 'context-intro'); title.before(intro); intro.append(title, el('p', L('汇聚工作上下文，让任务从这里继续。', 'Shared knowledge. A starting point for your next task.')));
+    const intro = el('div', undefined, 'context-intro'); title.before(intro); intro.append(title, el('p', L('共享工作上下文，接续每一段进展。', 'Shared work, ready to continue.')));
     modal.querySelector('#jx-connect').hidden = !!settings.continueContext || !!settings.managed; modal.querySelector('#jx-close').hidden = true;
+    const toolbar = modal.querySelector('.jx-search-bar');
+    const scopes = el('div', undefined, 'jx-scopes'); scopes.setAttribute('role', 'group'); scopes.setAttribute('aria-label', L('共享范围', 'Shared contexts'));
+    for (const [value, label] of [['all', L('全部共享', 'All contexts')], ['mine', L('我共享的', 'Shared by me')]]) {
+      if (value === 'mine' && !settings.userId) continue;
+      const scope = el('button', label); scope.type = 'button'; scope.dataset.scope = value; scope.setAttribute('aria-pressed', String(listScope === value));
+      scope.onclick = () => {
+        listScope = value;
+        for (const b of scopes.children) b.setAttribute('aria-pressed', String(b === scope));
+        renderContextList();
+      };
+      scopes.append(scope);
+    }
+    toolbar.prepend(scopes); toolbar.append(modal.querySelector('#jx-refresh'));
+    const collection = el('section', undefined, 'jx-collection'); collection.setAttribute('aria-labelledby', 'jx-collection-title');
+    const collectionHead = el('div', undefined, 'jx-collection-heading');
+    const label = el('h2', L('共享记录', 'Shared contexts')); label.id = 'jx-collection-title';
+    collectionHead.append(label, modal.querySelector('#jx-count')); collection.append(collectionHead);
+    const body = modal.querySelector('.jx-body'); body.before(collection); collection.append(body);
   }
   const taskModal = el("div"); taskModal.id = "jx-task-modal"; taskModal.hidden = true;
   taskModal.innerHTML = `<section class="jx-shell jx-task-shell" role="dialog" aria-modal="true" aria-labelledby="jx-task-heading" tabindex="-1">
@@ -672,7 +693,7 @@ export function initJunction(callbacks, options = {}) {
   $("jx-more").textContent = L("加载更多", "Load more"); $("jx-more").onclick = () => loadList(true);
   if (listReady) renderContextList();
   if (settings.continueContext) return;
-  $("junction-nav").textContent = 'Context';
+  ($("junction-nav").querySelector('.primary-nav-label') || $("junction-nav")).textContent = 'Context';
   if (!settings.mount) $("junction-nav").onclick = event => { event.preventDefault(); openJunction(); };
   $("term-share-context").textContent = L("共享", "Share");
   $("term-share-context").title = L("共享当前 Context", "Share this context");

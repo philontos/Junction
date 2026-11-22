@@ -19,12 +19,16 @@
 <link rel="stylesheet" href="/vendor/xterm.css" />
 <link rel="stylesheet" href="/css/app.css" />
 <link rel="stylesheet" href="/css/navigation.css" />
+<link rel="modulepreload" href="/js/main.js" />
+<link rel="modulepreload" href="/js/core/workbench-data.js" />
 <link rel="stylesheet" href="/css/junction.css" />
 <script defer src="/page-load.js"></script>
 </head>
 <body data-page-loading>
 <div id="boot" role="status" aria-label="加载中"><div class="spinner"></div></div>
-<header><a class="brand" href="/" aria-label="Junction"><img class="brand-logo brand-logo-dark" src="/assets/junction-wordmark.png" alt="" aria-hidden="true"><img class="brand-logo brand-logo-light" src="/assets/junction-wordmark-light.png" alt="" aria-hidden="true"></a><nav class="primary-nav" aria-label="主导航"><a id="workbench-nav" href="/" aria-current="page" data-i18n="workspace.home">工作台</a><a id="junction-nav" href="/?view=contexts">Context</a></nav><span style="flex:1"></span><button id="onboarding-btn" class="sec onboarding-nav" onclick="openOnboardingModal()"><span id="onboarding-nav-dot" class="onboarding-nav-dot pending" aria-hidden="true"></span><span class="onboarding-nav-label" data-i18n="onboarding.nav"></span></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
+<header><a class="brand" href="/" aria-label="Junction"><img class="brand-logo brand-logo-dark" src="/assets/junction-wordmark.png" alt="" aria-hidden="true"><img class="brand-logo brand-logo-light" src="/assets/junction-wordmark-light.png" alt="" aria-hidden="true"></a><span style="flex:1"></span><button id="onboarding-btn" class="sec onboarding-nav" onclick="openOnboardingModal()"><span id="onboarding-nav-dot" class="onboarding-nav-dot pending" aria-hidden="true"></span><span class="onboarding-nav-label" data-i18n="onboarding.nav"></span></button><button id="theme-toggle" class="sec" onclick="Theme.toggle()"></button><button id="lang-toggle" class="sec" onclick="I18N.setLang(I18N.lang === 'zh' ? 'en' : 'zh')"></button></header>
+<div class="product-layout">
+<nav class="primary-nav" aria-label="主导航"><a id="workbench-nav" href="/" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M9 9v11"/></svg><span class="primary-nav-label" data-i18n="workspace.home">工作台</span></a><a id="junction-nav" href="/?view=contexts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><span class="primary-nav-label">Context</span></a></nav>
 <div class="wrap">
   <div id="m-rail" class="rail"></div>
   <div id="m-list" class="list"></div>
@@ -96,6 +100,8 @@
     </div>
   </div>
 </div>
+
+</div><!-- product-layout -->
 
 <div id="loading"><div class="spinner"></div><div id="loading-text"></div></div>
 

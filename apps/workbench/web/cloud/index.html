@@ -21,10 +21,12 @@
   <div id="boot" role="status" aria-label="加载中"><div class="spinner"></div></div>
   <header>
     <a class="brand" href="/" aria-label="Junction"><img class="brand-logo brand-logo-dark" src="/assets/junction-wordmark.png" alt="" aria-hidden="true"><img class="brand-logo brand-logo-light" src="/assets/junction-wordmark-light.png" alt="" aria-hidden="true"></a>
-    <nav class="primary-nav" aria-label="主导航" id="primary-nav" hidden><a id="workbench-nav" href="/workbench" data-theme-link>工作台</a><a id="context-nav" href="/contexts" data-theme-link>Context</a></nav>
+
     <div class="header-actions"><details id="portal-device-switcher" class="cloud-switcher" hidden><summary class="cloud-current" aria-label="切换设备"><span class="cloud-dot" id="portal-device-dot"></span><span class="cloud-current-name" id="portal-device-name">选择设备</span><span class="cloud-caret" aria-hidden="true"></span></summary><div class="cloud-device-panel"><div class="cloud-device-heading">切换设备</div><div id="portal-device-list"></div><button id="manage-devices" class="cloud-menu-action">设备接入与配置</button></div></details><div id="account" hidden><span id="username"></span><button id="logout" class="sec">退出</button></div><button id="theme-toggle" class="sec" type="button" aria-label="切换主题"></button></div>
   </header>
-  <main class="portal-main">
+  <div class="product-layout">
+    <nav class="primary-nav" aria-label="主导航" id="primary-nav" hidden><a id="workbench-nav" href="/workbench" data-theme-link><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M9 9v11"/></svg><span class="primary-nav-label">工作台</span></a><a id="context-nav" href="/contexts" data-theme-link><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><span class="primary-nav-label">Context</span></a></nav>
+  <main class="portal-main" id="portal-main">
     <section id="context-space" hidden aria-label="Context 共享空间"><div class="heading context-intro"><div><h1>Context</h1><p>汇聚工作上下文，让任务从这里继续。</p></div></div><div class="portal-section-loading" role="status"><span class="spinner" aria-hidden="true"></span><span>加载中…</span></div></section>
     <section id="auth" class="auth" hidden>
       <h1 id="auth-title">登录 Junction</h1>
@@ -41,5 +43,6 @@
     </section>
     <p id="error" class="error" role="alert" hidden></p>
   </main>
+  </div>
 </body>
 </html>

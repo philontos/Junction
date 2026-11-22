@@ -3,6 +3,7 @@
 // hosts.js imports repoGroupHead from here. That import cycle is fine: both are
 // hoisted functions only called at runtime, never during module evaluation.
 import { $, api } from "../core/dom.js";
+import { readWorkbenchData } from "../core/workbench-data.js";
 import { toast } from "../core/feedback.js";
 import { confirmDialog } from "../core/dialog.js";
 import { repoDetailsData } from "../core/repo-details.js";
@@ -43,7 +44,7 @@ function repoStatusText(r) {
 }
 
 export async function loadRepos(options = {}) {
-  const r = await api("/api/repos", options).catch(() => null);
+  const r = await readWorkbenchData("/api/repos", options).catch(() => null);
   if (!r) return false; // server transiently down — keep the current view
   state.repos = r;
   rerender();

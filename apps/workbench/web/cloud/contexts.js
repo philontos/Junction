@@ -11,6 +11,7 @@ export function openContextSpace(user) {
     const mount = document.getElementById('context-space'); mount.replaceChildren();
     initJunction({}, {
     mount,
+    userId: user,
     cacheKey: 'junction-context-cards:' + user,
     request: (path, options = {}) => api('/hub/context' + path, {
       ...options, signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
