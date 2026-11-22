@@ -191,7 +191,7 @@ export function createGateway(config: GatewayConfig) {
   // Public shell only: the browser checks its same-tab nonce and authenticated
   // account before remembering a routing preference. This grants no API access.
   app.get('/local/connected', (_req,res) => res.type('html').send(localEntryHtml(config.root,origin,'','confirm')));
-  app.get(['/', '/contexts', '/devices'], (_req,res) => res.sendFile(path.join(config.root,'web/cloud/index.html')));
+  app.get(['/', '/contexts', '/devices', '/workbench'], (_req,res) => res.sendFile(path.join(config.root,'web/cloud/index.html')));
   app.get('/install.sh', (_req,res) => {
     const script=fs.readFileSync(path.join(config.root,'scripts/cloud-install.sh'),'utf8').replaceAll('__SWITCHYARD_ORIGIN__',origin);
     res.type('text/plain').send(script);

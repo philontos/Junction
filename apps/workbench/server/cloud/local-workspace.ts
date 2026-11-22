@@ -129,7 +129,14 @@ export function createLocalWorkspace(config: Config) {
   app.use('/api', (req, res) => proxyHttp(req, res, req.originalUrl, net.connect(config.upstreamPort, '127.0.0.1')));
   app.get('/', (req, res) => {
     const user = session(req);
-    if (!user) { res.redirect('/local/open' + (validTask(req.query.task) ? '?task=' + encodeURIComponent(req.query.task) : '')); return; }
+    if (!user) {
+      const query = new URLSearchParams();
+      if (validTask(req.query.task)) query.set('task', req.query.task);
+      if (req.query.view === 'contexts') query.set('view', 'contexts');
+      const uuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+      if (uuid(req.query.context) && uuid(req.query.revision)) { query.set('context', req.query.context); query.set('revision', req.query.revision); }
+      res.redirect('/local/open' + (query.size ? '?' + query : '')); return;
+    }
     res.type('html').send(workspaceHtml(config.root, { deviceId: config.deviceId, deviceName: config.deviceName, userId: user.user_id, cloudOrigin: origin, local: true }));
   });
   app.use('/vendor/highlight', express.static(path.dirname(createRequire(import.meta.url).resolve('@highlightjs/cdn-assets/package.json'))));

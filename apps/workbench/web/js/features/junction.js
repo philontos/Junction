@@ -52,12 +52,19 @@ function cardFact(kind, text) {
   fact.title = kind === "owner" ? `${L("共享者", "Shared by")}: ${text}` : text;
   fact.append(icon, el("span", text)); return fact;
 }
+function setDialogInert(open) {
+  if (!settings.mount) return;
+  document.querySelector('body > header').inert = open;
+  document.body.classList.toggle('context-dialog-open', open);
+  const workbench = document.querySelector('.workspace-surfaces > .wrap');
+  if (workbench) workbench.inert = open || workbench.parentElement.dataset.view !== 'workbench';
+}
 function closeContextDialog(restoreFocus = true) {
   if (launchingContext || connectingJunction) return false;
   if (!contextDialogIsOpen()) return true;
   ++generation;
   $("jx-task-modal").hidden = true;
-  if (settings.mount) { document.querySelector('body > header').inert = false; document.body.classList.remove('context-dialog-open'); }
+  setDialogInert(false);
   $("junction-modal").inert = false;
   $("junction-modal").removeAttribute("aria-hidden");
   $("jx-detail").replaceChildren(); $("jx-task-submit-slot").replaceChildren();
@@ -72,7 +79,7 @@ function detailRoot(title = L("新建任务", "New task")) {
   $("jx-task-modal").dataset.view = "task";
   $("jx-task-heading").textContent = title;
   $("jx-task-modal").hidden = false;
-  if (settings.mount) { document.querySelector('body > header').inert = true; document.body.classList.add('context-dialog-open'); }
+  setDialogInert(true);
   if (opening) $("jx-task-close").focus({ preventScroll: true });
   $("junction-modal").inert = true;
   $("junction-modal").setAttribute("aria-hidden", "true");
@@ -87,7 +94,12 @@ export function closeJunction() {
   $("junction-modal").hidden = true;
   generation++; listRequest++; listController?.abort();
 }
-export function junctionIsOpen() { return !$("junction-modal").hidden || contextDialogIsOpen(); }
+export function junctionIsOpen() { return contextDialogIsOpen() || (!settings.mount && !$("junction-modal").hidden); }
+export function refreshJunction() {
+  // A background warm-up must never dismiss a preview or continuation form.
+  $("junction-modal").hidden = false;
+  return loadList();
+}
 export async function openJunction(taskId = null) {
   if (taskId) return shareTask(taskId);
   if (!closeContextDialog(false)) return;
@@ -111,7 +123,7 @@ export async function openPinnedContext(reference) {
     ]);
     if (epoch !== generation) return false;
     status = currentStatus;
-    openDetail(meta);
+    openDetail(meta, "task");
     return true;
   } catch (error) {
     if (epoch === generation) { d.replaceChildren(button(L('重新读取', 'Retry'), () => openPinnedContext(reference))); showError(error); }
@@ -237,19 +249,19 @@ async function loadList(append = false) {
     $("jx-more").replaceChildren(spinner, document.createTextNode(L("加载中…", "Loading…")));
   }
   try {
-    if (!append && !settings.mount) {
+    if (!append && !settings.continueContext) {
       const connection = await call("/connection", options);
       if (request !== listRequest) return;
       if (!connection.configured) {
         listReady = false; listItems = []; listCursor = null; list.replaceChildren();
         list.append(button(L("连接 Junction", "Connect Junction"), () => showConnection(), "jx-empty sec"));
-        return showConnection(connection);
+        return settings.mount ? undefined : showConnection(connection);
       }
     }
     const [page, currentStatus] = await Promise.all([
       call("/contexts" + (cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""), options),
-      append || settings.mount ? status : call("/status", options),
-      settings.mount ? null : loadAgentCatalog(),
+      append || settings.continueContext ? status : call("/status", options),
+      settings.continueContext ? null : loadAgentCatalog(),
     ]);
     if (request !== listRequest) return;
     status = currentStatus;
@@ -266,7 +278,7 @@ async function loadList(append = false) {
       try { if (settings.cacheKey) sessionStorage.removeItem(settings.cacheKey); } catch {}
     }
     if (!listReady) list.replaceChildren(button(L("重新加载", "Retry"), () => loadList()));
-    if (junctionIsOpen()) showError(e, "jx-error");
+    if (settings.mount || junctionIsOpen()) showError(e, "jx-error");
   } finally {
     if (request === listRequest) {
       list.setAttribute("aria-busy", "false");
@@ -314,13 +326,13 @@ function versionList(item) {
   };
   return details;
 }
-async function openDetail(meta) {
+async function openDetail(meta, initialMode = settings.mount ? "reader" : "task") {
   if (launchingContext) return;
   if (meta._cached) {
     const epoch = ++generation, d = detailRoot(L('Context 预览', 'Context preview'));
     selectedContext = { cid: meta.id, rid: meta.revision.id };
     d.append(el('h3', contextCopy(meta).title), note(L('正在读取此版本…', 'Loading this revision…')));
-    try { const current = await call(base(meta)); if (epoch === generation) return openDetail(current); }
+    try { const current = await call(base(meta)); if (epoch === generation) return openDetail(current, initialMode); }
     catch (error) { if (epoch === generation) showError(error); }
     return;
   }
@@ -339,7 +351,7 @@ async function openDetail(meta) {
   source.append(el("span", `${L("共享者", "Shared by")}: ${contextOwner(meta)} · v${r.number} · ${agentName(r.provider)}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`, "jx-meta"));
   d.append(source);
   d.append(el("div", undefined, "jx-continuation"));
-  if (!settings.mount) showContinue(meta);
+  if (!settings.continueContext) showContinue(meta);
   $("jx-task-modal").dataset.view = "context";
   const reader = createContextReader(meta, { request: path => call(base(meta) + path), valid: () => epoch === generation });
   reader.element.hidden = true; d.append(reader.element);
@@ -347,7 +359,7 @@ async function openDetail(meta) {
   const continuation = d.querySelector(".jx-continuation");
   const proceed = button(L("继续此任务", "Continue this task"), () => setMode("task"), "primary"); proceed.hidden = true;
   $("jx-task-submit-slot").append(proceed);
-  const modeButtons = {}, positions = { task: 0, reader: 0 }; let currentMode = "task", continuationReady = !settings.mount;
+  const modeButtons = {}, positions = { task: 0, reader: 0 }; let currentMode = "task", continuationReady = !settings.continueContext;
   function setMode(mode) {
     if (launchingContext) return;
     positions[currentMode] = d.scrollTop; currentMode = mode;
@@ -359,7 +371,7 @@ async function openDetail(meta) {
     const submit = $("jx-task-submit");
     if (submit) submit.hidden = mode !== "task";
     proceed.hidden = mode !== "reader";
-    $("jx-task-heading").textContent = mode === "reader" ? L("Context 预览", "Context preview") : settings.mount ? L("选择执行设备", "Choose a device") : L("新建任务", "New task");
+    $("jx-task-heading").textContent = mode === "reader" ? L("Context 预览", "Context preview") : settings.continueContext ? L("选择执行设备", "Choose a device") : L("新建任务", "New task");
     for (const [key, b] of Object.entries(modeButtons)) b.setAttribute("aria-pressed", String(key === mode));
     d.scrollTop = positions[mode];
     if (mode === "reader") reader.activate();
@@ -389,11 +401,11 @@ async function openDetail(meta) {
       if (local) {
         await hooks.loadTasks();
         if (!hooks.allTasks().some(t => t.id === w.source.task_id)) throw new Error(L("原任务已移除，仍可通过快照接续。", "The source task was removed; continue from this snapshot instead."));
-        closeJunction(); hooks.connect(w.source.task_id);
+        closeJunction(); settings.showWorkbench?.(); hooks.connect(w.source.task_id);
       } else {
         await hooks.loadFleet();
         if (!state.fleet[host.id]?.tasks?.some(t => t.id === w.source.task_id)) throw new Error(L("原设备离线或原任务不可用，仍可拉取这份 Context。", "Source device or task unavailable. This context remains readable."));
-        closeJunction(); hooks.connectNode(host.id, w.source.task_id);
+        closeJunction(); settings.showWorkbench?.(); hooks.connectNode(host.id, w.source.task_id);
       }
     }));
   }
@@ -417,7 +429,7 @@ async function openDetail(meta) {
       finally { loading = false; }
     };
   }
-  if (settings.mount) setMode('reader');
+  setMode(initialMode);
 }
 function showContinue(meta) {
   const target = $("jx-detail").querySelector(".jx-continuation"); target.replaceChildren();
@@ -528,7 +540,7 @@ function showContinue(meta) {
         result = await readShareStream(response, updateProgress, "任务创建");
       } else result = await send("/continue", body);
     } catch (error) { setBusy(false); showError(error); void hooks.loadRepos(); return; }
-    setBusy(false); closeJunction();
+    setBusy(false); closeJunction(); settings.showWorkbench?.();
     try {
       await hooks.loadRepos(); await hooks.loadTasks(); hooks.connect(result.id); toast(L("已创建接续任务", "Continuation task created"), "success");
     } catch {
@@ -569,7 +581,7 @@ async function shareTask(taskId) {
     if (result.status === "failed") throw new Error(L("原始记录已保存，但未解析出可接续的对话。", "The original was saved, but no readable conversation was found."));
     job.done = true;
     renderShare(job);
-    if (junctionIsOpen()) loadList().catch(() => {});
+    if (listReady) loadList().catch(() => {});
   } catch (e) {
     job.error = e.message || L("共享结果未确认，可以重试。", "Sharing was not confirmed. You can retry.");
     renderShare(job);
@@ -609,7 +621,7 @@ export function initJunction(callbacks, options = {}) {
     const shell = modal.firstElementChild; shell.setAttribute('role', 'region'); shell.removeAttribute('aria-modal');
     const heading = modal.querySelector('#jx-heading'), title = el('h1', 'Context'); title.id = heading.id; heading.replaceWith(title);
     const intro = el('div', undefined, 'context-intro'); title.before(intro); intro.append(title, el('p', L('汇聚工作上下文，让任务从这里继续。', 'Shared knowledge. A starting point for your next task.')));
-    modal.querySelector('#jx-connect').hidden = true; modal.querySelector('#jx-close').hidden = true;
+    modal.querySelector('#jx-connect').hidden = !!settings.continueContext || !!settings.managed; modal.querySelector('#jx-close').hidden = true;
   }
   const taskModal = el("div"); taskModal.id = "jx-task-modal"; taskModal.hidden = true;
   taskModal.innerHTML = `<section class="jx-shell jx-task-shell" role="dialog" aria-modal="true" aria-labelledby="jx-task-heading" tabindex="-1">
@@ -638,6 +650,7 @@ export function initJunction(callbacks, options = {}) {
     if (e.target === modal) closeJunction();
   };
   document.addEventListener("keydown", e => {
+    if (document.querySelector("dialog[open]")) return;
     if (contextDialogIsOpen()) {
       if (e.key === "Escape") {
         e.preventDefault(); e.stopPropagation(); closeContextDialog();
@@ -658,9 +671,9 @@ export function initJunction(callbacks, options = {}) {
   $("jx-refresh").onclick = () => loadList();
   $("jx-more").textContent = L("加载更多", "Load more"); $("jx-more").onclick = () => loadList(true);
   if (listReady) renderContextList();
-  if (settings.mount) return;
+  if (settings.continueContext) return;
   $("junction-nav").textContent = 'Context';
-  if (!$("junction-nav").dataset.cloudContext) $("junction-nav").onclick = event => { event.preventDefault(); openJunction(); };
+  if (!settings.mount) $("junction-nav").onclick = event => { event.preventDefault(); openJunction(); };
   $("term-share-context").textContent = L("共享", "Share");
   $("term-share-context").title = L("共享当前 Context", "Share this context");
   $("term-share-context").onclick = () => {

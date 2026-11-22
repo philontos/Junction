@@ -5,7 +5,8 @@
 //   2. wire language-switch re-rendering;
 //   3. run the boot sequence (init terminal + selects, first data load);
 //   4. register global listeners (modal backdrop / Esc) and pollers.
-import { initJunction, closeJunction, junctionIsOpen, openPinnedContext } from "./features/junction.js";
+import { closeJunction, junctionIsOpen, openPinnedContext } from "./features/junction.js";
+import { initWorkspaceNavigation } from "./features/workspace-navigation.js";
 import { contextReference } from "../cloud/context-link.js";
 import { initCloudWorkspace, repaintCloudWorkspace, restoreCloudWorkspace } from "./features/cloud-workspace.js";
 import { $ } from "./core/dom.js";
@@ -158,7 +159,8 @@ csMount("t-provider", onProviderChange);
 const firstFleet=loadFleet();
 const initialRequest = { signal: AbortSignal.timeout(15000) };
 Promise.all([loadRepos(initialRequest), loadHosts(initialRequest), loadTasks(initialRequest)]).then(async loaded => {
-  if (loaded.some(ok => !ok)) { window.PageLoad.error(t("workspace.failed")); return; }
+  if (loaded.some(ok => !ok)) { navigation.ready(t("workspace.failed")); return; }
+  navigation.ready();
   syncReadWaiting();
   const reference = contextReference(new URLSearchParams(location.search));
   if (reference) {
@@ -170,9 +172,14 @@ Promise.all([loadRepos(initialRequest), loadHosts(initialRequest), loadTasks(ini
     }
   } else restoreCloudWorkspace(firstFleet).catch(e => console.warn("workspace restore failed", e));
   window.PageLoad.ready();
-}).catch(() => window.PageLoad.error(t("workspace.failed")));
+  // Warm summaries after the first workbench render; never block navigation.
+  void navigation.warm();
+}).catch(() => navigation.ready(t("workspace.failed")));
 refreshProviders().catch(() => {});
-initJunction({ allTasks, loadTasks, loadRepos, connect, loadFleet, connectNode });
+const navigation = initWorkspaceNavigation({ allTasks, loadTasks, loadRepos, connect, loadFleet, connectNode });
+// The shell and cached Context are usable immediately; task preparation stays
+// inside the workbench surface and cannot delay navigation to the library.
+window.PageLoad.ready();
 initOnboarding();             // independent: slow VPN/DNS checks never block the local dashboard
 setInterval(async () => { await loadTasks(); syncReadWaiting(); }, 4000);
 setInterval(loadHosts, 5000);   // refresh machine liveness dots
@@ -186,7 +193,7 @@ $("host-modal").addEventListener("click", e => { if (e.target.id === "host-modal
 $("onboarding-modal").addEventListener("click", e => { if (e.target.id === "onboarding-modal") closeOnboardingModal(); });
 $("discovery-modal").addEventListener("click", e => { if (e.target.id === "discovery-modal") closeDiscoveryModal(); });
 document.addEventListener("keydown", e => {
-  if (e.key !== "Escape") return;
+  if (e.key !== "Escape" || e.defaultPrevented || document.querySelector("dialog[open]")) return;
   if (junctionIsOpen()) { closeJunction(); return; }
   if (document.querySelector(".cs.open")) { Object.values(Selects).forEach(s => s.close()); return; }
   if (isCodeViewOpen()) { closeCodeView(); return; }

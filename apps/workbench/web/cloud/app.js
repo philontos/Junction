@@ -1,16 +1,10 @@
 const $ = id => document.getElementById(id);
-import { installationView } from './install-progress.js';
-import { devicePath, forgetLocalDevice } from './device-routing.js';
+import { devicePath, preferredDevice, rememberWorkspace } from './device-routing.js';
 import { discoverLocalDevice } from './local-discovery.js';
 import { contextReference, withContext, safeWorkspaceReturn } from './context-link.js';
 import { reconcileChildren } from '../js/core/keyed-list.js';
 I18N.init();
 Theme.init();
-let contextsPage = location.pathname !== '/devices';
-let continuation = contextReference(new URLSearchParams(location.search));
-document.title = (contextsPage ? 'Context' : '工作台') + ' · Junction';
-$('workbench-nav').href = withContext('/devices', continuation);
-$(contextsPage ? 'context-nav' : 'workbench-nav').setAttribute('aria-current', 'page');
 function renderThemeToggle() {
   const toLight = Theme.theme === 'dark';
   $('theme-toggle').textContent = toLight ? '☀️' : '🌙';
@@ -21,11 +15,15 @@ Theme.onChange = renderThemeToggle;
 $('theme-toggle').onclick = () => Theme.toggle();
 renderThemeToggle();
 const setupCode = new URLSearchParams(location.hash.slice(1)).get('setup');
-if (location.hash) history.replaceState(null, '', location.pathname);
-let signedIn = false, installationId = '', installationKey = '', lastDevices = '', refreshing = false;
+if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+let signedIn = false, currentUser = '', navigating = false;
 let registrationOpen = false, authMode = setupCode ? 'activate' : 'login';
-let decidingBinding = '';
-let currentUser = '', navigating = false, retryDiscovery = false;
+let contextsPage = location.pathname !== '/workbench';
+let continuation = contextReference(new URLSearchParams(location.search));
+let directory = [], directoryReady = false, directoryRequest, menuSignature = '', directoryError = '';
+let routeEpoch = 0, managerPromise, managerReference;
+const contextUI = import('./contexts.js');
+const positions = new Map();
 async function api(route, body, method = 'POST') {
   let response;
   try { response = await fetch('/hub/' + route, {signal:AbortSignal.timeout(15000), ...(body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })}); }
@@ -36,7 +34,7 @@ async function api(route, body, method = 'POST') {
 }
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function auth() {
-  signedIn = false; $('auth').hidden = false; $('workspace').hidden = true; $('account').hidden = true; $('context-space').hidden = true; $('primary-nav').hidden = true;
+  signedIn = false; $('auth').hidden = false; $('workspace-entry').hidden = true; $('portal-device-switcher').hidden = true; $('account').hidden = true; $('context-space').hidden = true; $('primary-nav').hidden = true;
   const activating=authMode==='activate', registering=authMode==='register';
   $('auth-title').textContent=activating ? '设置你的登录密码' : registering ? '创建 Junction 账号' : '登录 Junction';
   $('auth-description').textContent=activating ? '设置后，即可安装节点并进入工作台。' : registering ? '连接自己的设备，共享工作 Context。' : '连接你的设备，继续工作。';
@@ -53,139 +51,121 @@ function auth() {
   $('auth-switch-label').textContent=registering ? '已有账号？' : '还没有账号？';
   $('auth-toggle').textContent=registering ? '返回登录' : '注册账号';
 }
-const contextUI = import('./contexts.js');
-const positions = new Map();
-let routeEpoch = 0;
+
+function enterDevice(device, reference = continuation) {
+  rememberWorkspace(currentUser, device.id);
+  navigating = true;
+  location.assign(Theme.url(withContext(devicePath(device.id, currentUser), reference)));
+}
+function showDevices(event) {
+  managerReference = event?.detail?.context ? event.detail : continuation;
+  $('portal-device-switcher').open = false;
+  managerPromise ||= import('./device-manager.js').then(({ createDeviceManager }) => createDeviceManager(currentUser, {
+    getReference: () => managerReference,
+    onDevices(items) { directory = items; directoryReady = true; renderDirectory(); },
+  }));
+  managerPromise.then(manager => manager.open()).catch(e => { managerPromise = null; error(e.message); });
+}
+window.addEventListener('junction:manage-devices', showDevices);
+function renderDirectory() {
+  const selected = preferredDevice(directory, currentUser);
+  $('portal-device-name').textContent = selected?.name || '选择设备';
+  $('portal-device-dot').classList.toggle('online', !!selected?.online);
+  const signature = JSON.stringify([directory.map(d => [d.id, d.name, !!d.online]), selected?.id, directoryReady, directoryError, continuation]);
+  if (signature === menuSignature) return;
+  menuSignature = signature;
+  const list = $('portal-device-list');
+  const rows = [];
+  for (const device of directory) {
+    const row = document.createElement('a'); row.className = 'cloud-device-option'; row.dataset.themeLink = '';
+    row.classList.toggle('current', device.id === selected?.id);
+    if (device.online) row.href = withContext(devicePath(device.id, currentUser), continuation);
+    else { row.setAttribute('aria-disabled', 'true'); row.tabIndex = -1; }
+    const dot = document.createElement('span'); dot.className = 'cloud-dot' + (device.online ? ' online' : '');
+    const info = document.createElement('span'); info.className = 'cloud-option-info';
+    const name = document.createElement('span'); name.className = 'cloud-option-name'; name.textContent = device.name;
+    const status = document.createElement('span'); status.className = 'cloud-option-status'; status.textContent = device.online ? '在线' : '离线';
+    info.append(name, status); row.append(dot, info);
+    row.onclick = event => {
+      if (!device.online) { event.preventDefault(); return; }
+      if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); enterDevice(device);
+    };
+    rows.push(row);
+  }
+  if (!rows.length) {
+    const note = document.createElement('div'); note.className = 'cloud-device-message';
+    note.textContent = directoryError || (directoryReady ? '还没有连接设备' : '正在读取设备…'); rows.push(note);
+  }
+  reconcileChildren(list, rows);
+}
+function refreshDirectory() {
+  return directoryRequest ||= (async () => {
+    try {
+      const { items } = await api('devices');
+      // Identity checks run independently of Context. Never route a confirmed
+      // local device through the relay just because discovery is still pending.
+      const discovery = await discoverLocalDevice(currentUser, items);
+      directory = items; directoryReady = true;
+      directoryError = discovery.blocked ? '请允许浏览器访问本地网络后重试。' : '';
+      renderDirectory();
+    } catch (e) { directoryError = e.message; renderDirectory(); }
+    finally { directoryRequest = null; }
+  })();
+}
+async function openWorkbench(epoch) {
+  $('workspace-entry-action').hidden = true;
+  $('workspace-entry-status').textContent = '正在打开工作设备…';
+  if (!directoryReady) await refreshDirectory();
+  if (epoch !== routeEpoch || contextsPage) return;
+  const device = preferredDevice(directory, currentUser);
+  if (device?.online && !directoryError) { enterDevice(device); return; }
+  $('workspace-entry-status').textContent = directoryError || (directory.length ? '设备暂时离线，连接后即可继续工作。' : '连接一台设备，即可创建任务。');
+  $('workspace-entry-action').textContent = directoryError ? '重试连接' : '连接设备';
+  $('workspace-entry-action').hidden = false;
+  $('workspace-entry-action').onclick = directoryError ? () => { directoryReady = false; void openWorkbench(routeEpoch); } : showDevices;
+}
 function showPage(pathname = location.pathname, query = location.search, push = false) {
   const epoch = ++routeEpoch;
-  positions.set(contextsPage ? '/contexts' : '/devices', scrollY);
+  positions.set(contextsPage ? '/contexts' : '/workbench', scrollY);
   if (push) history.pushState(null, '', pathname + query);
-  contextsPage = pathname !== '/devices';
+  contextsPage = pathname !== '/workbench';
   continuation = contextReference(new URLSearchParams(query));
   document.title = (contextsPage ? 'Context' : '工作台') + ' · Junction';
-  $('context-nav').toggleAttribute('aria-current', contextsPage);
-  $('workbench-nav').toggleAttribute('aria-current', !contextsPage);
-  $(contextsPage ? 'context-nav' : 'workbench-nav').setAttribute('aria-current', 'page');
-  $('workbench-nav').href = withContext('/devices', continuation);
-  $('auth').hidden = true; $('account').hidden = $('primary-nav').hidden = false;
-  $('context-space').hidden = !contextsPage; $('workspace').hidden = contextsPage;
-  error();
-  const section = $(contextsPage ? 'context-space' : 'workspace');
-  if (push) window.PageLoad.fade(section);
-  window.scrollTo(0, positions.get(contextsPage ? '/contexts' : '/devices') || 0);
-  // Navigation renders synchronously. Data refreshes in the existing section;
-  // a pending response never changes the selected route or clears old cards.
-  const loading = contextsPage ? contextUI.then(m => m.openContextSpace(currentUser)) : refresh();
+  for (const [id, active] of [['context-nav', contextsPage], ['workbench-nav', !contextsPage]]) {
+    if (active) $(id).setAttribute('aria-current', 'page'); else $(id).removeAttribute('aria-current');
+  }
+  $('auth').hidden = true; $('account').hidden = $('primary-nav').hidden = $('portal-device-switcher').hidden = false;
+  $('context-space').hidden = !contextsPage; $('workspace-entry').hidden = contextsPage;
+  error(); window.scrollTo(0, positions.get(contextsPage ? '/contexts' : '/workbench') || 0);
+  const loading = contextsPage ? contextUI.then(m => m.openContextSpace(currentUser)) : openWorkbench(epoch);
   loading.catch(e => { if (epoch === routeEpoch) error(e.message); });
+  if (pathname === '/devices') showDevices();
+  renderDirectory();
 }
 async function workspace(user, username = user) {
   signedIn = true; currentUser = user; $('username').textContent = username;
-  installationKey='switchyard-install:'+user;
-  try { installationId=sessionStorage.getItem(installationKey) || ''; } catch {}
   const next = safeWorkspaceReturn(new URLSearchParams(location.search).get('next'));
   if (next) { navigating = true; location.replace(Theme.url(next)); return; }
   showPage(setupCode ? '/devices' : location.pathname, location.search, !!setupCode);
+  void refreshDirectory();
 }
 document.addEventListener('click', event => {
   const link = event.target.closest('a[href]');
   if (!signedIn || !link || event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target) return;
   const url = new URL(link.href);
-  if (url.origin !== location.origin || !['/', '/contexts', '/devices'].includes(url.pathname)) return;
+  if (url.origin !== location.origin || !['/', '/contexts', '/devices', '/workbench'].includes(url.pathname)) return;
   event.preventDefault();
+  if (url.pathname === '/devices') { showDevices(); return; }
   if (url.pathname === location.pathname && url.search === location.search) return;
   showPage(url.pathname, url.search, true);
 });
+$('manage-devices').onclick = showDevices;
+$('portal-device-switcher').addEventListener('toggle', () => { if ($('portal-device-switcher').open) void refreshDirectory(); });
+document.addEventListener('click', event => { if (!$('portal-device-switcher').contains(event.target)) $('portal-device-switcher').open = false; });
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && $('portal-device-switcher').open) { $('portal-device-switcher').open = false; $('portal-device-switcher').querySelector('summary').focus(); } });
 window.addEventListener('popstate', () => { if (signedIn) showPage(); });
-window.addEventListener('pageshow', event => { if (event.persisted && signedIn) showPage(); });
-function renderInstallation(record) {
-  const view=installationView(record);
-  $('setup').hidden=false;
-  $('setup-status').textContent=view.title;
-  $('setup-status').previousElementSibling.className='dot '+view.tone;
-  $('setup-detail').textContent=view.detail;
-  $('setup-progress').hidden=record.status==='pending' || record.issue.startsWith('account');
-  $('setup-progress').value=view.progress;
-  if(!$('command').textContent)$('command').parentElement.hidden=true;
-  const conflict=record.account_conflict;
-  $('setup-title').textContent=conflict?'确认设备归属':'连接这台电脑';
-  $('setup-resume').hidden=record.issue.startsWith('account') || view.complete;
-  $('keep-binding').hidden=$('switch-binding').hidden=!conflict;
-  $('keep-binding').textContent=decidingBinding==='keep-account'?'正在保留…':'保留原账号';
-  $('switch-binding').textContent=decidingBinding==='rebind'?'正在切换…':conflict?`切换到 ${conflict.to_username}`:'切换到当前账号';
-  $('keep-binding').disabled=$('switch-binding').disabled=!!decidingBinding;
-  $('retry-install').hidden=conflict || record.issue==='account_kept' || !(view.retry || (!$('command').textContent && !view.complete));
-  if(conflict || record.issue==='account_kept' || record.issue==='account_changed'){
-    $('command').parentElement.hidden=true; $('setup-help').hidden=true;
-  }
-  $('setup-enter').hidden=!view.complete;
-  if(view.complete){
-    $('setup-enter').href=withContext('/local/open/'+encodeURIComponent(record.device_id), continuation);
-    $('setup-enter').textContent='开始工作 →';
-    $('command').parentElement.hidden=true; $('setup-help').hidden=true;
-  }
-}
-function openInstalledLocal(record, items) {
-  // An online device is not proof that it belongs to this browser's computer.
-  // Only continue the installation initiated in this tab; never guess from the
-  // device list. Wait for the local listener's advertised capability as well.
-  if (document.hidden || !installationView(record).complete || !items.some(d => d.id === record.device_id && d.online && d.local_workspace)) return;
-  installationId = '';
-  try { sessionStorage.removeItem(installationKey); } catch {}
-  $('setup-status').textContent = '连接成功 · 正在打开本机工作台';
-  navigating = true;
-  location.replace(Theme.url(withContext('/local/open/' + encodeURIComponent(record.device_id), continuation)));
-}
-const computer = '<svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8M12 16v5"/></svg>';
-async function refresh() {
-  if (!signedIn || refreshing || navigating) return;
-  refreshing=true;
-  try {
-  const id=installationId;
-  const [{items}, installation] = await Promise.all([api('devices'),id ? api('installations/'+id) : null]);
-  if(installation && installationId===id){
-    renderInstallation(installation);
-    openInstalledLocal(installation,items);
-  }
-  if (navigating) return;
-  const discovery = await discoverLocalDevice(currentUser, items, { retry: retryDiscovery });
-  retryDiscovery = false;
-  const local = discovery.local?.device;
-  $('install').hidden = items.some(d => d.id === local);
-  $('local-detection').hidden = !discovery.blocked;
-  const signature = JSON.stringify([local, continuation, items.map(d => [d.id, d.name, !!d.online])]);
-  if (signature === lastDevices) return;
-  lastDevices = signature;
-  const existing = new Map([...$('devices').children].map(card => [card.dataset.deviceId, card]));
-  const cards = [];
-  if (!items.length) {
-    const empty = document.createElement('div'); empty.className = 'empty';
-    empty.innerHTML = '<strong>把你的电脑接入工作台</strong><p>安装一次本机节点，之后打开这个网页就能继续工作。</p>';
-    cards.push(empty);
-  }
-  for (const d of items) {
-    const key = JSON.stringify([d.name, !!d.online, d.id === local, continuation]);
-    const previous = existing.get(d.id);
-    if (previous?.dataset.version === key) { cards.push(previous); continue; }
-    const card = document.createElement('article'); card.className = 'device';
-    card.dataset.deviceId = d.id; card.dataset.version = key;
-    card.innerHTML = `<div class="device-title"><span class="device-icon">${computer}</span><div><div class="device-name"></div><div class="status"><span class="dot ${d.online ? 'online' : ''}"></span>${d.id === local ? '本机 · ' : ''}${d.online ? '在线' : '离线 · 等待节点连接'}</div></div></div><div class="device-actions"><a class="enter ${d.online ? '' : 'offline'}">开始工作 →</a><button class="text">解除绑定</button></div>`;
-    card.querySelector('.device-name').textContent = d.name;
-    const enter = card.querySelector('a'); enter.dataset.themeLink = '';
-    if (d.online) {
-      enter.href = withContext(devicePath(d.id, currentUser), continuation);
-      if (continuation) enter.textContent = '在此设备继续 →';
-    }
-    else { enter.setAttribute('aria-disabled', 'true'); enter.textContent = '设备离线'; }
-    card.querySelector('button').onclick = async () => {
-      if (!confirm(`解除「${d.name}」的绑定？云端将不能再控制它，本机任务仍会保留。`)) return;
-      try { await api('devices/' + d.id, {}, 'DELETE'); forgetLocalDevice(currentUser, d.id); await refresh(); } catch (e) { error(e.message); }
-    };
-    cards.push(card);
-    window.PageLoad.fade(card);
-  }
-  reconcileChildren($('devices'), cards);
-  } finally { refreshing=false; }
-}
+window.addEventListener('pageshow', event => { if (event.persisted && signedIn) { navigating = false; showPage(); void refreshDirectory(); } });
 $('auth-form').onsubmit = async event => {
   event.preventDefault(); error(); $('submit').disabled = true; $('auth-toggle').disabled=true;
   const label=$('submit').textContent;
@@ -196,49 +176,8 @@ $('auth-form').onsubmit = async event => {
   } catch (e) { error(e.message); } finally { $('submit').disabled = false; $('auth-toggle').disabled=false; $('submit').textContent=label; $('auth-form').removeAttribute('aria-busy'); }
 };
 $('auth-toggle').onclick = () => { authMode=authMode==='login' ? 'register' : 'login'; $('password').value=''; error(); auth(); $('user').focus(); };
-$('logout').onclick = async () => { try { await api('logout', {}); try { sessionStorage.removeItem(installationKey); sessionStorage.removeItem('junction-context-cards:'+currentUser); } catch {} location.href = '/'; } catch (e) { error(e.message); } };
-$('install').onclick = async () => {
-  error(); $('install').disabled = true;
-  try {
-    const { code, origin, installation_id } = await api('pairings', {});
-    installationId=installation_id;
-    try { sessionStorage.setItem(installationKey,installationId); } catch {}
-    // Only the non-secret status ID is kept across reloads. The one-use code
-    // is claimed by the installer within ten minutes, never stored in the web.
-    $('command').textContent = `curl -fsS '${origin}/install.sh' | bash -s -- '${code}'`;
-    $('command').parentElement.hidden = false; $('setup-help').hidden = false; $('setup').hidden = false;
-    renderInstallation(await api('installations/'+installationId));
-  } catch (e) { error(e.message); } finally { $('install').disabled = false; }
-};
-$('retry-install').onclick = () => $('install').click();
-$('retry-local').onclick = async () => {
-  retryDiscovery = true; $('retry-local').disabled = true;
-  try { await refresh(); } catch (e) { error(e.message); }
-  finally { $('retry-local').disabled = false; }
-};
-async function decideBinding(action) {
-  if(decidingBinding || !installationId)return;
-  const labels=[$('keep-binding').textContent,$('switch-binding').textContent];
-  decidingBinding=action;error();
-  $('keep-binding').disabled=$('switch-binding').disabled=$('install').disabled=$('close-setup').disabled=true;
-  $(action==='rebind'?'switch-binding':'keep-binding').textContent=action==='rebind'?'正在切换…':'正在保留…';
-  const id=installationId;
-  try {await api('installations/'+id+'/'+action,{});}
-  catch(e){error(e.message);}
-  finally {
-    decidingBinding='';$('keep-binding').textContent=labels[0];$('switch-binding').textContent=labels[1];
-    $('keep-binding').disabled=$('switch-binding').disabled=$('install').disabled=$('close-setup').disabled=false;
-    await refresh().catch(e=>error(e.message));
-  }
-}
-$('keep-binding').onclick=()=>decideBinding('keep-account');
-$('switch-binding').onclick=()=>decideBinding('rebind');
-$('close-setup').onclick = () => { $('setup').hidden = true; installationId=''; try { sessionStorage.removeItem(installationKey); } catch {} };
-$('copy').onclick = async () => {
-  try { await navigator.clipboard.writeText($('command').textContent); $('copy').textContent = '已复制'; setTimeout(() => { $('copy').textContent = '复制命令'; }, 1500); }
-  catch { error('请选中命令复制到本机终端。'); }
-};
+$('logout').onclick = async () => { try { await api('logout', {}); try { sessionStorage.removeItem('switchyard-install:'+currentUser); sessionStorage.removeItem('junction-context-cards:'+currentUser); } catch {} location.href = '/'; } catch (e) { error(e.message); } };
 try { const current = await api('session'); registrationOpen=current.registration_open===true; if (setupCode || !current.user_id) auth(); else await workspace(current.user_id,current.username); }
 catch (e) { auth(); error(e.message); }
 finally { if (!navigating) window.PageLoad.ready(); }
-setInterval(() => { if (signedIn && !contextsPage && !document.hidden) refresh().catch(e => { if (!contextsPage) error(e.message); }); }, 5000);
+setInterval(() => { if (signedIn && !document.hidden) void refreshDirectory(); }, 15000);

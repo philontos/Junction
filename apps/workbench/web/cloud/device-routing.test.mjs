@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { localDevice, devicePath, beginLocalConfirmation, confirmLocalDevice, forgetLocalDevice } from './device-routing.js';
+import { localDevice, devicePath, beginLocalConfirmation, confirmLocalDevice, forgetLocalDevice, preferredDevice, rememberWorkspace } from './device-routing.js';
 const a = '11111111-1111-1111-1111-111111111111', b = '22222222-2222-2222-2222-222222222222';
 const origin = 'http://127.0.0.1:64324';
 function storage(t) {
@@ -45,4 +45,15 @@ test('blocked browser storage does not prevent an authenticated local session', 
   assert.equal(confirmLocalDevice(nonce, a, 'alice'), origin + '/local/open');
   sessionStorage.setItem = () => { throw Error('blocked'); };
   assert.equal(beginLocalConfirmation('alice', a, origin), '');
+});
+
+test('workspace preference is account-scoped and must still exist in the owned device directory', t => {
+  storage(t);
+  const items = [{ id: a, online: true }, { id: b, online: true }];
+  rememberWorkspace('alice', b);
+  assert.equal(preferredDevice(items, 'alice').id, b);
+  assert.equal(preferredDevice(items, 'bob').id, a);
+  assert.equal(preferredDevice([items[0]], 'alice').id, a);
+  assert.equal(preferredDevice([items[0], { id: b, online: false }], 'alice').id, a);
+  assert.equal(preferredDevice([], 'alice'), null);
 });

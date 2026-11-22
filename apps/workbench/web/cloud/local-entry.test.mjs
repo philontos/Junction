@@ -93,3 +93,11 @@ test('rejected one-use credentials show the error and are never automatically re
   assert.equal(elements.get('entry-error').textContent, '链接已失效');
   assert.equal(ready, true);
 });
+
+test('local recovery retains the Context surface as well as the selected task', async () => {
+  url.search = '?task=48&view=contexts';
+  await run();
+  const target = new URL(redirects[0]);
+  assert.equal(target.searchParams.get('view'), 'contexts');
+  assert.equal(target.searchParams.get('task'), '48');
+});

@@ -1,6 +1,6 @@
 import { devicePath, localDevice } from './device-routing.js';
 import { discoverLocalDevice } from './local-discovery.js';
-import { contextReference, withContext } from './context-link.js';
+import { contextReference, withContext, withView } from './context-link.js';
 
 const workspace = document.getElementById('cloud-device-switcher');
 try {
@@ -15,7 +15,7 @@ try {
     // Resolve the device before importing the app: a bookmarked cloud URL must
     // never briefly render or attach a relayed terminal for this computer.
     const params = new URLSearchParams(location.search);
-    location.replace(Theme.url(withContext(devicePath(workspace.dataset.deviceId, workspace.dataset.userId, params.get('task')), contextReference(params))));
+    location.replace(Theme.url(withView(withContext(devicePath(workspace.dataset.deviceId, workspace.dataset.userId, params.get('task')), contextReference(params)), params.get('view'))));
   } else {
     await import('../js/main.js');
   }

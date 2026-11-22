@@ -1,11 +1,12 @@
 import { beginLocalConfirmation, confirmLocalDevice, validTask } from './device-routing.js';
-import { contextReference, withContext } from './context-link.js';
+import { contextReference, withContext, withView } from './context-link.js';
 import { beginLocalRecovery, clearLocalRecovery } from './local-session.js';
 const meta = name => document.querySelector(`meta[name="${name}"]`).content;
 const mode = meta('local-entry-mode'), device = meta('switchyard-device-id');
 const cloudOrigin = meta('switchyard-cloud-origin');
 const fragment = new URLSearchParams(location.hash.slice(1));
 const task = fragment.get('task') || new URLSearchParams(location.search).get('task');
+const view = new URLSearchParams(location.search).get('view');
 const context = contextReference(new URLSearchParams(location.search));
 // Remove the one-use credential before loading the workbench or navigating.
 if (location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -13,8 +14,8 @@ const retry = document.getElementById('entry-retry');
 if (validTask(task)) {
   const url = new URL(retry.href); url.searchParams.set('task', task); retry.href = url.href;
 }
-retry.href = withContext(retry.href, context);
-const destination = withContext('/' + (validTask(task) ? '?task=' + encodeURIComponent(task) : ''), context);
+retry.href = withView(withContext(retry.href, context), view);
+const destination = withView(withContext('/' + (validTask(task) ? '?task=' + encodeURIComponent(task) : ''), context), view);
 async function request(url, body) {
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   const result = await response.json();
@@ -31,9 +32,9 @@ try {
     const grant = await request('/hub/devices/' + device + '/local-access', { task_id: validTask(task) ? task : undefined });
     const url = new URL(grant.url);
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.pathname !== '/local/open' || url.username || url.password || new URLSearchParams(url.hash.slice(1)).get('device') !== device) throw new Error('节点返回了无效的本机地址。');
-    const nonce = beginLocalConfirmation(grant.user_id, device, url.origin, task, context);
+    const nonce = beginLocalConfirmation(grant.user_id, device, url.origin, task, context, view);
     if (nonce) { const params = new URLSearchParams(url.hash.slice(1)); params.set('confirm', nonce); url.hash = params.toString(); }
-    location.replace(Theme.url(withContext(url.href, context)));
+    location.replace(Theme.url(withView(withContext(url.href, context), view)));
   } else if (fragment.get('code')) {
     await request('/local/session', { code: fragment.get('code'), device_id: fragment.get('device') });
     if (fragment.get('confirm')) location.replace(Theme.url(cloudOrigin + '/local/connected#' + new URLSearchParams({ confirm: fragment.get('confirm'), device })));

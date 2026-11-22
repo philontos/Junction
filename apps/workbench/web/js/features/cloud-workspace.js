@@ -1,7 +1,8 @@
 import { $, nodeBase } from "../core/dom.js";
 import { state } from "../core/state.js";
 import { duringAutoFollow } from "./mobile.js";
-import { devicePath } from "../../cloud/device-routing.js";
+import { devicePath, rememberWorkspace } from "../../cloud/device-routing.js";
+import { withView } from "../../cloud/context-link.js";
 import { watchLocalSession } from "../../cloud/local-session.js";
 
 let switcher, panel, list, advanced, hostList, hooks;
@@ -174,6 +175,7 @@ export function initCloudWorkspace(callbacks) {
   direct = switcher.dataset.mode === "local";
   cloudOrigin = direct ? document.querySelector('meta[name="switchyard-cloud-origin"]')?.content || "" : "";
   hooks = callbacks;
+  rememberWorkspace(switcher.dataset.userId, switcher.dataset.deviceId);
   storageKey = "switchyard-workspace:" + switcher.dataset.userId + ":" + (direct ? switcher.dataset.deviceId : nodeBase());
   try { saved = JSON.parse(sessionStorage.getItem(storageKey)); } catch {}
   const query = new URLSearchParams(location.search), task = query.get('task');
@@ -196,7 +198,32 @@ export function initCloudWorkspace(callbacks) {
   add.onclick = () => { switcher.open = false; window.openDiscoveryModal(); };
   advanced.append(add); panel.append(advanced); switcher.append(panel);
   const manage = element('a', 'cloud-menu-action'); manage.href = cloudOrigin + '/devices'; manage.dataset.themeLink = '';
-  manage.textContent = I18N.lang === 'zh' ? '连接或管理设备 →' : 'Manage devices →'; panel.append(manage);
+  manage.textContent = I18N.lang === 'zh' ? '设备接入与配置' : 'Device settings';
+  if (direct) {
+    // Account management requires the cloud browser session. Keep local PTYs
+    // open rather than passing account authority into a device credential.
+    manage.target = '_blank'; manage.rel = 'noopener';
+    manage.title = I18N.lang === 'zh' ? '在云端打开设备设置，当前工作保持不变' : 'Open cloud settings; keep this workspace running';
+    manage.textContent += ' ↗';
+    manage.onclick = () => { switcher.open = false; };
+  } else {
+    let manager;
+    manage.onclick = async event => {
+      if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); switcher.open = false;
+      try {
+        manager ||= import('../../cloud/device-manager.js').then(({ createDeviceManager }) => createDeviceManager(switcher.dataset.userId, {
+          onDevices(items) { devices = items; renderDevices(); repaintCurrent(); },
+          onEnter(url, id) {
+            if (id === switcher.dataset.deviceId) { manager.then(m => m.close()); return; }
+            location.assign(Theme.url(url));
+          },
+        }));
+        (await manager).open();
+      } catch { manager = null; window.open(Theme.url(manage.href), '_blank', 'noopener'); }
+    };
+  }
+  panel.append(manage);
   panel.addEventListener("click", remember, true);
   panel.addEventListener("auxclick", remember, true);
   switcher.addEventListener("toggle", () => { if (switcher.open) refreshDevices(true); });
@@ -210,7 +237,7 @@ export function initCloudWorkspace(callbacks) {
   if (direct) watchLocalSession(switcher.dataset.deviceId, () => {
     remember();
     const task = validTask(state.selectedTaskId) ? '?task=' + encodeURIComponent(state.selectedTaskId) : '';
-    location.replace(Theme.url('/local/open' + task));
+    location.replace(Theme.url(withView('/local/open' + task, new URLSearchParams(location.search).get('view'))));
   });
 }
 

@@ -17,40 +17,6 @@
 .cloud-portal button:disabled { cursor: wait; opacity: .55; }
 .cloud-portal .text { background: transparent; border-color: transparent; color: var(--muted); }
 .cloud-portal .text:hover { background: var(--surface-2); color: var(--text); }
-.cloud-portal .devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.cloud-portal .device { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
-.cloud-portal .device-title { display: flex; align-items: center; gap: 11px; min-width: 0; }
-.cloud-portal .device-title > div { min-width: 0; }
-.cloud-portal .device-icon { width: 36px; height: 36px; flex: none; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); display: grid; place-items: center; color: var(--muted); }
-.cloud-portal .device-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
-.cloud-portal .status { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); margin-top: 4px; }
-.cloud-portal .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; display: inline-block; background: var(--faint); }
-.cloud-portal .dot.online { background: var(--green); }
-.cloud-portal .dot.waiting { background: var(--amber); }
-.cloud-portal .dot.failed { background: var(--red); }
-.cloud-portal .device-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; }
-.cloud-portal .enter { padding: 5px 10px; border: 1px solid #d9775744; border-radius: 6px; background: #d9775714; color: var(--accent-text); font-size: 12px; font-weight: 500; text-decoration: none; cursor: pointer; transition: background .12s, border-color .12s; }
-.cloud-portal .enter:hover { background: #d9775724; border-color: #d9775766; }
-.cloud-portal .enter.offline { pointer-events: none; color: var(--faint); background: var(--surface-2); border-color: var(--border); }
-.cloud-portal .device-actions .text { font-size: 11px; padding: 5px 6px; }
-.cloud-portal .empty { padding: 40px 20px; border: 1px dashed var(--border); border-radius: 8px; }
-.cloud-portal .empty strong { display: block; margin-bottom: 6px; color: var(--muted); font-weight: 500; }
-.cloud-portal .empty p { margin: 0; font-size: 12px; color: var(--faint); }
-.cloud-portal .setup { padding: 18px; margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
-.cloud-portal .setup-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.cloud-portal .command { display: flex; align-items: center; gap: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
-.cloud-portal .command code { flex: 1; min-width: 0; font: 12px/1.7 Menlo, Consolas, monospace; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; -webkit-touch-callout: default; }
-.cloud-portal .command button { flex: none; }
-.cloud-portal .setup-status { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--muted); }
-.cloud-portal #setup-progress { display: block; width: 100%; height: 5px; margin-top: 12px; border: 0; border-radius: 4px; overflow: hidden; appearance: none; background: var(--surface-2); accent-color: var(--accent); }
-.cloud-portal #setup-progress::-webkit-progress-bar { background: var(--surface-2); }
-.cloud-portal #setup-progress::-webkit-progress-value { background: var(--accent); }
-.cloud-portal #setup-progress::-moz-progress-bar { background: var(--accent); }
-.cloud-portal .setup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.cloud-portal .setup-actions:has(> [hidden]):not(:has(> :not([hidden]))) { display: none; }
-.cloud-portal .note, .cloud-portal .footnote { font-size: 11px; color: var(--faint); }
-.cloud-portal .note { margin-bottom: 0; }
-.cloud-portal .footnote { margin-top: 16px; }
 .cloud-portal .auth { max-width: 380px; margin: 32px auto; padding: 24px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .cloud-portal .auth p { margin: 8px 0 24px; font-size: 12px; }
 .cloud-portal label { display: block; margin-top: 16px; color: var(--muted); font-size: 12px; }
@@ -69,11 +35,18 @@
   .cloud-portal .portal-main, .cloud-portal > main { margin: 24px auto; padding: 0 16px 20px; }
   .cloud-portal .heading { gap: 12px; }
   .cloud-portal .heading h1 { font-size: 18px; }
-  .cloud-portal .devices { grid-template-columns: 1fr; }
   .cloud-portal button, .cloud-portal .enter { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
-  .cloud-portal .device { gap: 20px; }
-  .cloud-portal .command { flex-direction: column; align-items: stretch; gap: 12px; }
-  .cloud-portal .setup { padding: 16px; }
   .cloud-portal input { font-size: 16px; }
   .cloud-portal .auth { margin: 12px auto; padding: 20px; }
+}
+
+.workspace-entry { min-height: 55dvh; display: grid; place-items: center; text-align: center; }
+.workspace-entry-content { max-width: 420px; }
+.workspace-entry p { margin: 12px 0 20px; font-size: 13px; }
+.cloud-portal header .cloud-switcher { max-width: 260px; }
+@media (max-width: 760px) {
+  .cloud-portal header { flex-wrap: wrap; }
+  .cloud-portal .header-actions { width: 100%; }
+  .cloud-portal header .cloud-switcher { order: 0; flex: 1; max-width: none; }
+  .cloud-portal .cloud-device-panel { left: 0; right: auto; width: min(320px, calc(100vw - 24px)); }
 }
