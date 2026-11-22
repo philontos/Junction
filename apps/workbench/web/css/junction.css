@@ -137,6 +137,8 @@
 .jx-task-shell .jx-section { margin: 10px 0; }
 .jx-task-shell .jx-context-info { border-top: 1px solid var(--border); padding-top: 4px; margin-bottom: 0; }
 .jx-task-actions { flex-shrink: 0; border-top: 1px solid var(--border); padding: 14px 24px; }
+#jx-task-modal[data-view=context] #jx-task-submit-slot { width: 160px; flex-shrink: 0; }
+#jx-task-modal[data-view=context] #jx-task-submit-slot > button { width: 100%; min-height: 36px; }
 #jx-task-error { margin: 12px 24px 0; flex-shrink: 0; }
 @media(max-width: 700px) {
   #jx-task-modal { padding: 12px; }
@@ -148,9 +150,9 @@
 
 .jx-description { white-space: pre-wrap; }
 #jx-task-modal[data-view=context] .jx-task-shell { width: min(700px, 100%); height: min(860px, 92dvh); }
-.jx-mode-navigation { display: flex; flex-shrink: 0; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.jx-mode-navigation button { padding: 12px 0; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font-size: 13px; }
-.jx-mode-navigation button[aria-pressed=true] { color: var(--accent-text); border-bottom-color: var(--accent); }
+.jx-mode-navigation { display: flex; flex-shrink: 0; padding: 0 24px; border-bottom: 1px solid var(--border); }
+.jx-mode-navigation button { padding: 12px 0; border: 0; background: none; color: var(--muted); font-size: 13px; }
+.jx-mode-navigation button:hover { color: var(--accent-text); }
 .jx-reader { min-width: 0; padding-bottom: 8px; }
 .jx-reader-stats { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 4px 0 18px; color: var(--muted); font-size: 11px; }
 .jx-reader-stats strong { font-size: 14px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }

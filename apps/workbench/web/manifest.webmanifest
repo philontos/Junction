@@ -4,5 +4,6 @@
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1613",
-  "theme_color": "#1a1613"
+  "theme_color": "#1a1613",
+  "icons": [{ "src": "/assets/junction-favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }

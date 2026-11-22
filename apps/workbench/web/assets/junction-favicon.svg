@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>Junction</title>
+  <rect x="1" y="1" width="62" height="62" rx="16" fill="#f5f0e8"/>
+  <!-- The wordmark's J, optically weighted for browser tabs. -->
+  <defs><clipPath id="j-turn"><path d="M0 34 31 24v26H0Z"/></clipPath></defs>
+  <g transform="translate(17 6)" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke="#302b25" d="M7 7h20v26c0 7-4 11-11 11h-2C7 44 3 40 3 34"/>
+    <path stroke="#c86643" clip-path="url(#j-turn)" d="M7 7h20v26c0 7-4 11-11 11h-2C7 44 3 40 3 34"/>
+  </g>
+</svg>

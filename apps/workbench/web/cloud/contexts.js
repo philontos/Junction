@@ -33,7 +33,7 @@ function chooseDevice(user, meta, target, actions, valid) {
   const label = document.createElement('label'); label.className = 'jx-field'; label.textContent = '执行设备';
   const select = document.createElement('select'); select.setAttribute('aria-label', '执行设备'); select.disabled = true;
   select.append(new Option('正在读取设备…', '')); label.append(select);
-  note.textContent = '下一步选择 Agent 和工作目录。任务在所选设备执行。';
+  note.textContent = '下一步选择 Agent，任务在所选设备执行。';
   const manage = document.createElement('a'); manage.className = 'context-manage-link'; manage.dataset.themeLink = '';  manage.href = withContext('/devices', reference); manage.textContent = '连接或管理设备';
   manage.onclick = event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); window.dispatchEvent(new CustomEvent('junction:manage-devices', { detail: reference })); };
   const error = document.createElement('p'); error.className = 'jx-warning'; error.hidden = true; error.setAttribute('role', 'alert');

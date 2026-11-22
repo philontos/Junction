@@ -328,7 +328,7 @@ function versionList(item) {
   };
   return details;
 }
-async function openDetail(meta, initialMode = settings.mount ? "reader" : "task") {
+async function openDetail(meta, initialMode = "reader") {
   if (launchingContext) return;
   if (meta._cached) {
     const epoch = ++generation, d = detailRoot(L('Context 预览', 'Context preview'));
@@ -353,33 +353,39 @@ async function openDetail(meta, initialMode = settings.mount ? "reader" : "task"
   source.append(el("span", `${L("共享者", "Shared by")}: ${contextOwner(meta)} · v${r.number} · ${agentName(r.provider)}${w ? ` · ${w.repo_name} / ${w.branch}` : ""}`, "jx-meta"));
   d.append(source);
   d.append(el("div", undefined, "jx-continuation"));
-  if (!settings.continueContext) showContinue(meta);
   $("jx-task-modal").dataset.view = "context";
   const reader = createContextReader(meta, { request: path => call(base(meta) + path), valid: () => epoch === generation });
   reader.element.hidden = true; d.append(reader.element);
-  const navigation = $("jx-task-navigation"); navigation.hidden = false;
+  const navigation = $("jx-task-navigation");
   const continuation = d.querySelector(".jx-continuation");
-  const proceed = button(L("继续此任务", "Continue this task"), () => setMode("task"), "primary"); proceed.hidden = true;
+  const proceed = button(L("继续此任务", "Continue this task"), () => setMode("task"), "primary");
+  proceed.id = "jx-context-continue";
+  proceed.disabled = r.status === "failed";
+  if (proceed.disabled) proceed.title = L("记录解析失败，暂时无法接续。", "This record could not be parsed and cannot be continued.");
   $("jx-task-submit-slot").append(proceed);
-  const modeButtons = {}, positions = { task: 0, reader: 0 }; let currentMode = "task", continuationReady = !settings.continueContext;
+  const back = button(L("← 返回预览", "← Back to preview"), () => setMode("reader"), "");
+  navigation.append(back);
+  const positions = { task: 0, reader: 0 }; let currentMode = "reader", continuationReady = false;
   function setMode(mode) {
     if (launchingContext) return;
     positions[currentMode] = d.scrollTop; currentMode = mode;
     continuation.hidden = mode !== "task"; reader.element.hidden = mode !== "reader";
     if (mode === "task" && !continuationReady) {
       continuationReady = true;
-      settings.continueContext(meta, continuation, $("jx-task-submit-slot"), () => epoch === generation);
+      if (settings.continueContext) settings.continueContext(meta, continuation, $("jx-task-submit-slot"), () => epoch === generation);
+      else showContinue(meta);
     }
     const submit = $("jx-task-submit");
     if (submit) submit.hidden = mode !== "task";
     proceed.hidden = mode !== "reader";
+    navigation.hidden = mode !== "task";
     $("jx-task-heading").textContent = mode === "reader" ? L("Context 预览", "Context preview") : settings.continueContext ? L("选择执行设备", "Choose a device") : L("新建任务", "New task");
-    for (const [key, b] of Object.entries(modeButtons)) b.setAttribute("aria-pressed", String(key === mode));
     d.scrollTop = positions[mode];
     if (mode === "reader") reader.activate();
-  }
-  for (const [key, label] of [["task", L("继续任务", "Continue task")], ["reader", L("浏览 Context", "Browse context")]]) {
-    const b = button(label, () => setMode(key), ""); b.setAttribute("aria-pressed", String(key === "task")); modeButtons[key] = b; navigation.append(b);
+    // The preview tabs never replace the footer or reset a task draft. Only the
+    // explicit continuation action enters setup, within this same pinned record.
+    if (navigation.contains(document.activeElement) && mode === "reader") proceed.focus({ preventScroll: true });
+    else if (document.activeElement === proceed && mode === "task") back.focus({ preventScroll: true });
   }
   const details = el("section", undefined, "jx-context-information");
   details.append(el("h3", L("记录信息", "Record information")));
