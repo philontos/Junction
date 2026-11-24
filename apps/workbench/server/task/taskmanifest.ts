@@ -14,6 +14,7 @@ import { execFileSync } from "node:child_process";
 import type Database from "better-sqlite3";
 import type { Task, TaskReference } from "../core/db.js";
 import { getOwnedRepo, localHostId } from "../core/ownership.js";
+import { taskControlDir, taskCwd } from "./workspace.js";
 import {
   kimiWorkspaceAgentContent,
   kimiWorkspaceAgentPath,
@@ -46,7 +47,7 @@ export interface TaskReferenceIndex {
     alias: "primary";
     repo_id: number;
     repo_name: string | null;
-    path: ".";
+    path: string;
     mode: "editable";
   };
   references: Array<{
@@ -56,7 +57,7 @@ export interface TaskReferenceIndex {
     requested_ref: string;
     resolved_commit: string;
     path: string;
-    layout: "task-local" | "legacy-external";
+    layout: "task-local" | "task-control" | "legacy-external";
     mode: "reference";
   }>;
 }
@@ -90,11 +91,11 @@ export function taskReferenceIndex(
       alias: "primary",
       repo_id: task.repo_id,
       repo_name: primaryName ?? null,
-      path: ".",
+      path: task.kind === "directory" ? taskCwd(task) : ".",
       mode: "editable",
     },
     references: references.map((reference) => {
-      const local = pathIsInside(task.worktree_path, reference.worktree_path);
+      const local = !!task.worktree_path && pathIsInside(task.worktree_path, reference.worktree_path);
       return {
         alias: reference.alias,
         repo_id: reference.repo_id,
@@ -104,7 +105,7 @@ export function taskReferenceIndex(
         path: local
           ? slashPath(path.relative(task.worktree_path, reference.worktree_path)) || "."
           : reference.worktree_path,
-        layout: local ? "task-local" : "legacy-external",
+        layout: local ? "task-local" : task.kind === "directory" ? "task-control" : "legacy-external",
         mode: "reference",
       };
     }),
@@ -145,22 +146,25 @@ function ensureTaskMetadataExcluded(taskWorktree: string): void {
 }
 
 function writeTaskWorkspaceFiles(
+  dataDir: string,
   task: Task,
   references: TaskReferenceManifest[],
   primaryName?: string,
 ): void {
-  if (task.kind !== "repo" || !task.worktree_path) return;
+  if (task.kind !== "repo" && task.kind !== "directory") return;
+  const control = taskControlDir(dataDir, task);
+  if (!control) return;
   try {
-    if (!fs.statSync(task.worktree_path).isDirectory()) return;
+    if (!fs.statSync(control).isDirectory()) return;
   } catch {
     return;
   }
-  ensureTaskMetadataExcluded(task.worktree_path);
+  if (task.kind === "repo") ensureTaskMetadataExcluded(control);
   writeAtomic(
-    taskReferenceManifestPath(task.worktree_path),
+    taskReferenceManifestPath(control),
     JSON.stringify(taskReferenceIndex(task, references, primaryName), null, 2) + "\n",
   );
-  writeAtomic(kimiWorkspaceAgentPath(task.worktree_path), kimiWorkspaceAgentContent());
+  if (task.kind === "repo") writeAtomic(kimiWorkspaceAgentPath(control), kimiWorkspaceAgentContent());
 }
 
 /** Write (or overwrite) a task's manifest — the single durable record of it. */
@@ -197,7 +201,7 @@ export function writeTaskManifest(
       mode: "reference",
     })),
   }, null, 2));
-  writeTaskWorkspaceFiles(task, references, primaryName);
+  writeTaskWorkspaceFiles(dataDir, task, references, primaryName);
 }
 
 /** Re-project the DB's task row + normalized reference rows into the durable

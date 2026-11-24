@@ -9,7 +9,7 @@ import { initSchema } from "../core/schema.js";
 import { getOwnedTask, listOwnedTasks, legacyOwnershipReport } from "../core/ownership.js";
 import { createDirectoryTask, directoryCwd, directoryDestination, type DirectoryEnv } from "./directory.js";
 import { taskControlDir } from "./workspace.js";
-import { adoptTaskManifests, readTaskManifests, removeTaskManifest } from "./taskmanifest.js";
+import { adoptTaskManifests, readTaskManifests, removeTaskManifest, writeTaskManifestFromDb } from "./taskmanifest.js";
 import { cleanupTask, deleteTaskRecord, resumeTask } from "./lifecycle.js";
 import { agentArgv } from "../session/agent.js";
 import { writeHandoff, handoffPrompt } from "../junction/handoff.js";
@@ -49,6 +49,57 @@ test("missing and file destinations are rejected before inserting any task", asy
   await assert.rejects(createDirectoryTask(f.env, { agent: "codex", cwd: path.join(f.cwd, "absent") }), /不存在/);
   await assert.rejects(directoryCwd(path.join(f.cwd, "keep.txt")), /不存在/);
   assert.equal(listOwnedTasks(f.db).length, 0);
+});
+
+test("directory Refs are isolated from a shared cwd, manifested before launch and preserved on resume", async t => {
+  const f = fixture(t);
+  f.db.prepare("INSERT INTO repos(id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (1,1,'docs','https://fixture/docs','main','/fixture.git','ready')").run();
+  f.env.setupReference = async ({ worktree }) => {
+    fs.mkdirSync(worktree, { recursive: true }); fs.writeFileSync(path.join(worktree, "guide.txt"), "pinned");
+    return "a".repeat(40);
+  };
+  const removed: string[] = [];
+  f.env.removeReference = async (_mirror, target) => { removed.push(target); fs.rmSync(target, { recursive: true }); };
+  const refs = (id: number) => JSON.parse(fs.readFileSync(path.join(f.dataDir, "tasks", String(id), ".tdsp/refs.json"), "utf8"));
+  f.env.start = async task => {
+    const manifest = refs(task.id);
+    assert.equal(manifest.primary.path, fs.realpathSync(f.cwd));
+    assert.equal(manifest.references[0].resolved_commit, "a".repeat(40));
+    assert.equal(manifest.references[0].mode, "reference");
+    assert.equal(fs.readFileSync(path.join(manifest.references[0].path, "guide.txt"), "utf8"), "pinned");
+  };
+  const options = { agent: "codex" as const, cwd: f.cwd, references: [{ repo_id: 1, alias: "docs" }] };
+  const a = await createDirectoryTask(f.env, options), b = await createDirectoryTask(f.env, options);
+  const first = refs(a.id).references[0].path, second = refs(b.id).references[0].path;
+  assert.notEqual(first, second);
+  assert.ok(first.startsWith(path.join(f.dataDir, "tasks", String(a.id))));
+  assert.deepEqual(fs.readdirSync(f.cwd), ["keep.txt"]);
+  const resumed = await resumeTask({ db: f.db, exists: async p => fs.existsSync(p), hasSession: async () => false,
+    startSession: task => f.env.start(task, options), writeManifest: id => writeTaskManifestFromDb(f.dataDir, f.db, id),
+  }, a.id);
+  assert.equal(resumed.ok, true); assert.equal(refs(a.id).references[0].path, first);
+  const cleaned = await cleanupTask({ db: f.db, killSession: async () => {}, removeWorktree: f.env.removeReference,
+    writeManifest: id => writeTaskManifestFromDb(f.dataDir, f.db, id),
+  }, a.id);
+  assert.equal(cleaned.ok, true); assert.deepEqual(removed, [first]);
+  assert.equal(fs.existsSync(first), false); assert.equal(fs.existsSync(second), true);
+  assert.deepEqual(refs(a.id).references, []); assert.deepEqual(fs.readdirSync(f.cwd), ["keep.txt"]);
+  await assert.rejects(createDirectoryTask(f.env, { ...options, references: [{ repo_id: 999 }] }), /not found/);
+  assert.equal(listOwnedTasks(f.db).length, 2);
+});
+
+test("failed directory dispatch removes its prepared Refs without touching user files", async t => {
+  const f = fixture(t);
+  f.db.exec("INSERT INTO repos(id,host_id,name,git_url,default_branch,mirror_path,status) VALUES (1,1,'docs','https://fixture/docs','main','/fixture.git','ready')");
+  let snapshot = "";
+  f.env.setupReference = async ({ worktree }) => { snapshot = worktree; fs.mkdirSync(worktree, { recursive: true }); return "a".repeat(40); };
+  f.env.removeReference = async (_mirror, target) => { fs.rmSync(target, { recursive: true }); };
+  f.env.start = async () => { throw new Error("Agent launch failed"); };
+  await assert.rejects(createDirectoryTask(f.env, { agent: "codex", cwd: f.cwd, references: [{ repo_id: 1 }] }), /Agent launch failed/);
+  assert.equal(fs.existsSync(snapshot), false);
+  assert.equal((f.db.prepare("SELECT count(*) AS n FROM task_references").get() as any).n, 0);
+  assert.deepEqual(fs.readdirSync(f.cwd), ["keep.txt"]);
+  assert.equal(listOwnedTasks(f.db)[0].status, "error");
 });
 
 test("automatic tasks allocate separate workspaces before preparing or starting an agent", async t => {

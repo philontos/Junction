@@ -50,6 +50,60 @@ test("bad account and resource references fail before accessing credentials", ()
     assert.throws(() => readConfig(file), /凭据/);
   } finally { fs.rmSync(dir, { recursive: true }); }
 });
+
+test("snapshot hydrates messages concurrently with a bound, preserving content and original order", async () => {
+  const { dir, config } = fixture();
+  let active = 0, peak = 0;
+  const limits = new Map<string, string | null>();
+  const fetcher: typeof fetch = async input => {
+    const url = new URL(String(input));
+    const resource = url.pathname.split("/").at(-1)!;
+    let value: any;
+    if (resource === rid) value = { revision: { message_count: 12, turn_count: 0,
+      normalized: { schema_version: "junction.context/1", session: {} } } };
+    else if (resource === "content") {
+      active++; peak = Math.max(peak, active);
+      const id = url.pathname.split("/").at(-2)!;
+      await new Promise(resolve => setTimeout(resolve, id === "m0" ? 25 : 2));
+      active--;
+      value = { text: JSON.stringify([{ kind: "text", text: id }]), next_offset: null };
+    } else {
+      limits.set(resource, url.searchParams.get("limit"));
+      value = { items: resource === "messages" ? Array.from({ length: 12 }, (_, i) => ({ id: `m${i}`, content_truncated: true })) : [], next_cursor: null };
+    }
+    return new Response(JSON.stringify(value));
+  };
+  try {
+    const result = await new JunctionClient(config, "owner", fetcher).snapshot(cid, rid);
+    assert.equal(peak, 4);
+    assert.deepEqual(result.normalized.session.messages.map((m: any) => m.content[0].text), Array.from({ length: 12 }, (_, i) => `m${i}`));
+    assert.equal(limits.get("messages"), "50"); assert.equal(limits.get("turns"), "100");
+    assert.equal(limits.get("diagnostics"), "100");
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});
+
+test("a failed snapshot cancels parallel content downloads", async () => {
+  const { dir, config } = fixture();
+  let aborted = 0;
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith(rid)) return Response.json({ revision: { message_count: 2, turn_count: 0,
+      normalized: { schema_version: "junction.context/1", session: {} } } });
+    if (url.pathname.endsWith("/messages")) return Response.json({ items: [{ id: "m1", content_truncated: true }, { id: "m2", content_truncated: true }], next_cursor: null });
+    if (url.pathname.includes("m1/content")) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return Response.json({ error: { detail: "Access revoked" } }, { status: 404 });
+    }
+    if (url.pathname.includes("m2/content")) return new Promise((_, reject) => {
+      init!.signal!.addEventListener("abort", () => { aborted++; reject(new Error("aborted")); }, { once: true });
+    });
+    return Response.json({ items: [], next_cursor: null });
+  };
+  try {
+    await assert.rejects(new JunctionClient(config, "owner", fetcher).snapshot(cid, rid), /Access revoked/);
+    assert.equal(aborted, 1);
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});
 test("snapshot retains the native record index and rejects an incomplete download", async () => {
   const { dir, config } = fixture();
   let expected = 2;

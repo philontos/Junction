@@ -531,7 +531,7 @@ app.delete("/api/repos/:id", async (req, res) => {
 });
 
 // ---------- tasks ----------
-app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, managed_workspaces: true, context_repository_setup: true, workspace: workspaceLayout(DATA_DIR, localRunner.workspaceRoot), agents: agentCatalog(), home: os.homedir() }));
+app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, managed_workspaces: true, context_repository_setup: true, context_references: true, directory_references: true, workspace: workspaceLayout(DATA_DIR, localRunner.workspaceRoot), agents: agentCatalog(), home: os.homedir() }));
 app.get("/api/tasks", async (_req, res) => {
   const tasks = listOwnedTasks(db);
   const withLive = await Promise.all(
@@ -580,7 +580,7 @@ function repoTaskEnvFor(): RepoTaskEnv {
 async function addReferenceOnThisNode(taskId: number, input: any) {
   const repoEnv = repoTaskEnvFor();
   return addTaskReference({
-    db,
+    db, dataDir: DATA_DIR,
     exists: (target) => localRunner.exists(target),
     setupReference: repoEnv.setupReference,
     removeReference: repoEnv.removeReference,
@@ -597,14 +597,13 @@ app.post("/api/tasks", async (req, res) => {
     return res.status(409).json({ error: "remote tasks must be created through the target node" });
   }
   if (!repo_id) {
-    if (references?.length) return res.status(400).json({ error: "请在仓库 Worktree 模式中添加参考仓库。" });
     const kind = asAgentKind(agent);
     const provider = kind === "claude" && provider_id ? getProvider.get(provider_id) as Provider | undefined : undefined;
     if (provider_id && !provider) return res.status(400).json({ error: "模型后端不存在。" });
     try {
       return res.status(201).json(await createDirectoryTask(buildDirectoryEnv(db, NS, localRunner), {
         cwd: req.body?.cwd, cwdMode: req.body?.cwd_mode, title, prompt, agent: kind, model: agent_model,
-        providerId: provider?.id, env: providerEnv(provider),
+        providerId: provider?.id, env: providerEnv(provider), references,
       }));
     } catch (error: any) { return res.status(400).json({ error: error.message }); }
   }

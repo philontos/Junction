@@ -140,7 +140,7 @@ export function connectNode(hostId, taskId) {
   const codeTarget = tk.kind !== "local" && tk.hasWorktree && state.fleet[hostId]?.capabilities?.includes("code-view-v1")
     ? { id: tk.id, nodeId: hostId }
     : null;
-  const referenceTarget = tk.kind !== "local" && tk.hasWorktree
+  const referenceTarget = tk.kind !== "local" && (tk.hasWorktree || (tk.hasDirectory && state.fleet[hostId]?.capabilities?.includes("directory-task-references-v1")))
     && state.fleet[hostId]?.capabilities?.includes("task-runtime-reference-manifest-v1")
     ? {
         id: tk.id,

@@ -88,6 +88,7 @@ export const TASK_RUNTIME_REFERENCES_CAPABILITY = "task-runtime-references-v1";
 export const TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY = "task-runtime-reference-manifest-v1";
 export const TASK_CAPABILITIES = [
   "directory-task-v1",
+  "directory-task-references-v1",
   ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
   CODE_VIEW_CAPABILITY,
   NODE_CONTROL_CAPABILITY,

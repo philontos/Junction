@@ -10,6 +10,7 @@ import { syncReposManifest } from "../repo/manifest.js";
 import { createRepoTask } from "../task/createtask.js";
 import { buildDirectoryEnv, createDirectoryTask, directoryDestination } from "../task/directory.js";
 import { taskControlDir, taskCwd } from "../task/workspace.js";
+import { resolveReferenceInputs } from "../task/references.js";
 import { locateNativeJsonl } from "../session/transcript.js";
 import { isAgentKind, canShareAgent } from "../session/agent.js";
 import { JunctionClient, JunctionError, readConfig, revisionPath } from "./client.js";
@@ -242,6 +243,8 @@ async function continueContext(req: Request, progress: ContinuationProgress, sig
   const automatic = b.workspace_mode === "context";
   if (b.workspace_mode !== undefined && !automatic) throw new JunctionError(400, "工作位置模式无效。");
   if (automatic && (b.repo_id || b.cwd || b.cwd_mode)) throw new JunctionError(400, "自动准备仓库不能同时指定其他工作位置。");
+  const references = resolveReferenceInputs(db, b.references);
+  if (!references.ok) throw new JunctionError(400, references.error);
   // Validate the local destination before downloading a potentially large history.
   let destination: Awaited<ReturnType<typeof directoryDestination>> | undefined;
   if (!b.repo_id && !automatic) {
@@ -254,7 +257,7 @@ async function continueContext(req: Request, progress: ContinuationProgress, sig
   signal.throwIfAborted();
   if (destination) {
     progress("worktree", "正在准备独立工作区…");
-    const env = buildDirectoryEnv(db, NS, localRunner);
+    const env = buildDirectoryEnv(db, NS, localRunner, signal);
     env.prepare = async task => {
       const control = taskControlDir(DATA_DIR, task);
       const manifest = writeHandoff(control, snapshot, client.config.url, taskCwd(task));
@@ -273,7 +276,7 @@ async function continueContext(req: Request, progress: ContinuationProgress, sig
     try {
       const result = await createDirectoryTask(env, { cwd: destination.cwd, cwdMode: destination.mode,
         title: str(b.title, 200).trim() || `接续：${snapshot.meta.title}`.slice(0, 200),
-        agent: b.agent, model: str(b.agent_model, 100) || null, providerId: provider?.id, env: providerEnv(provider),
+        agent: b.agent, model: str(b.agent_model, 100) || null, providerId: provider?.id, env: providerEnv(provider), references: b.references,
       });
       return { ...result, context_id: b.context_id, revision_id: b.revision_id };
     } catch (e: any) { throw new JunctionError(409, e.message); }
@@ -311,7 +314,7 @@ async function continueContext(req: Request, progress: ContinuationProgress, sig
   const result = await createRepoTask(env, { id: repo.id, name: repo.name, mirror_path: repo.mirror_path! }, {
     baseBranch: source.branch || baseBranch, title: str(b.title, 200).trim() || `接续：${snapshot.meta.title}`.slice(0, 200),
     prompt: handoffPrompt(str(b.prompt, 8000)), agent: b.agent, model: str(b.agent_model, 100) || null,
-    providerId: provider?.id, env: providerEnv(provider),
+    providerId: provider?.id, env: providerEnv(provider), references: b.references,
   });
   if (!result.ok) throw new JunctionError(409, result.message);
   return { id: result.id, session: result.session, repo_id: repo.id, work_branch: result.workBranch, context_id: b.context_id, revision_id: b.revision_id };

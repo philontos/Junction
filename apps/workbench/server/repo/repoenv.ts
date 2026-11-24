@@ -79,7 +79,7 @@ export function buildRepoTaskEnv(opts: RepoEnvOpts): RepoTaskEnv {
     writeManifest: opts.writeManifest,
     setupWorktree: setupWorktreeOn(opts.runner, opts.ns, opts.signal),
     setupReference: ({ mirror, worktree, requestedRef }) =>
-      addReferenceSnapshotFromBranch(opts.runner, mirror, worktree, requestedRef),
+      addReferenceSnapshotFromBranch(opts.runner, mirror, worktree, requestedRef, opts.signal),
     startSession: (session, worktree, opening, sopts) => startSession(opts.runner, session, worktree, opening, sopts),
     removeWorktree: (mirror, worktree, workBranch) => removeWorktree(opts.runner, mirror, worktree, workBranch).then(() => {}),
     removeReference: (mirror, worktree) => removeWorktree(opts.runner, mirror, worktree).then(() => {}),

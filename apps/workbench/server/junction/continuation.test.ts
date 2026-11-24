@@ -23,10 +23,16 @@ test("continuation API prepares a cold repo, pins code and installs history befo
     GIT_COMMITTER_NAME: "Fixture", GIT_COMMITTER_EMAIL: "fixture@example.test", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" };
   const git = (args: string[], input?: string) => execFileSync("git", args, { env: { ...process.env, ...env }, input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
   git(["init", "--bare", "--initial-branch=main", remote]);
-  const tree = git(["-C", remote, "mktree"], "");
+  const blob = git(["-C", remote, "hash-object", "-w", "--stdin"], "Reference fixture");
+  const tree = git(["-C", remote, "mktree"], `100644 blob ${blob}\tguide.txt\n`);
   const commit = git(["-C", remote, "commit-tree", tree, "-m", "Recorded version"]);
   const latest = git(["-C", remote, "commit-tree", tree, "-p", commit, "-m", "Newer version"]);
   git(["-C", remote, "update-ref", "refs/heads/main", latest]);
+  const referenceMirror = path.join(root, "reference.git");
+  git(["init", "--bare", referenceMirror]); git(["-C", referenceMirror, "remote", "add", "origin", remote]);
+  db.prepare("INSERT OR IGNORE INTO hosts(id,name,target,kind,status) VALUES (1,'local','','local','online')").run();
+  db.prepare("INSERT INTO repos (host_id,name,git_url,default_branch,mirror_path,status) VALUES (1,'docs','https://fixture.example/docs.git','main',?,'ready')").run(referenceMirror);
+  const referenceId = (db.prepare("SELECT id FROM repos WHERE name='docs'").get() as any).id;
   const cid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", rid = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
   const workspace = { repo_url: repoUrl, branch: "main", commit, dirty: false };
   const context = { id: cid, title: "Fixture", revision: { id: rid, status: "ready", source_sha256: "fixture", message_count: 1, turn_count: 0,
@@ -49,14 +55,24 @@ test("continuation API prepares a cold repo, pins code and installs history befo
   const originalExec = localRunner.exec;
   const launches: string[][] = [];
   localRunner.exec = async (file, args, options = {}) => {
+    if (file === "sh" && args.includes('command -v "$1"')) return "/fixture/codex";
     if (file === "tmux") {
       if (args[0] === "new-session") {
         launches.push(args);
         const cwd = args[args.indexOf("-c") + 1];
-        const manifest = JSON.parse(fs.readFileSync(path.join(cwd, ".tdsp/context/manifest.json"), "utf8"));
+        const task = db.prepare("SELECT * FROM tasks WHERE session=?").get(args[args.indexOf("-s") + 1]) as any;
+        const control = task.kind === "directory" ? path.join(localRunner.dataDir, "tasks", String(task.id)) : cwd;
+        const manifest = JSON.parse(fs.readFileSync(path.join(control, ".tdsp/context/manifest.json"), "utf8"));
+        const refs = JSON.parse(fs.readFileSync(path.join(control, ".tdsp/refs.json"), "utf8"));
+        assert.equal(refs.references[0].alias, "docs");
+        assert.equal(refs.references[0].resolved_commit, latest);
+        const refPath = path.resolve(cwd, refs.references[0].path);
+        assert.equal(fs.readFileSync(path.join(refPath, "guide.txt"), "utf8"), "Reference fixture");
+        assert.equal(fs.existsSync(path.join(refPath, ".git")), false);
+        if (task.kind === "directory") assert.ok(args.includes(control), "agent gets the task control directory");
         assert.equal(manifest.revision_id, rid);
-        assert.equal(git(["-C", cwd, "rev-parse", "HEAD"]), commit);
-        assert.ok(args.includes("codex"));
+        if (task.kind === "repo") assert.equal(git(["-C", cwd, "rev-parse", "HEAD"]), commit);
+        assert.ok(args.includes("codex") || args.includes("/fixture/codex"));
       }
       return ""; // Never start or inspect any real task session in this test.
     }
@@ -64,7 +80,9 @@ test("continuation API prepares a cold repo, pins code and installs history befo
   };
   try {
     const url = `http://127.0.0.1:${(server.address() as any).port}/api/junction/continue`;
-    const body = { context_id: cid, revision_id: rid, workspace_mode: "context", agent: "codex", acknowledge: true };
+    const body = { context_id: cid, revision_id: rid, workspace_mode: "context", agent: "codex", acknowledge: true, references: [{ repo_id: referenceId, ref: "main", alias: "docs" }] };
+    const invalid = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, references: [{ repo_id: 999 }] }) });
+    assert.equal(invalid.status, 400); assert.equal(launches.length, 0);
     const response = await fetch(url + "?stream=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const events = (await response.text()).trim().split("\n").map(line => JSON.parse(line));
     assert.equal(events.at(-1).type, "complete", JSON.stringify(events));
@@ -78,9 +96,14 @@ test("continuation API prepares a cold repo, pins code and installs history befo
     const failed = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     assert.equal(failed.status, 409);
     assert.match((await failed.json() as any).error, /来源设备推送/);
-    assert.equal((db.prepare("SELECT count(*) AS n FROM repos").get() as any).n, 1);
+    assert.equal((db.prepare("SELECT count(*) AS n FROM repos").get() as any).n, 2);
     assert.equal((db.prepare("SELECT count(*) AS n FROM tasks").get() as any).n, 1);
     assert.equal(launches.length, 1);
+    workspace.commit = commit;
+    const directory = await fetch(url, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, workspace_mode: undefined, cwd_mode: "managed" }) });
+    assert.equal(directory.status, 201, await directory.text());
+    assert.equal(launches.length, 2);
   } finally {
     localRunner.exec = originalExec; server.closeAllConnections(); server.close(); cloud.closeAllConnections(); cloud.close(); db.close();
     if (previousData === undefined) delete process.env.TASK_DISPATCHER_DATA_DIR; else process.env.TASK_DISPATCHER_DATA_DIR = previousData;

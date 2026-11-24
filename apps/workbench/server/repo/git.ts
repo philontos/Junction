@@ -189,12 +189,14 @@ export async function ensureContextCommit(runner: Runner, mirror: string, commit
   const deadline = AbortSignal.timeout(TASK_GIT_TIMEOUT_MS);
   const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
   try {
-    await git(runner, mirror, ["cat-file", "-e", `${commit}^{commit}`], {}, undefined, signal);
+    // An existence probe on a promisor mirror must stay local: cat-file can
+    // otherwise fetch the missing commit (and its full history of blobs).
+    await git(runner, mirror, ["cat-file", "-e", `${commit}^{commit}`], { GIT_NO_LAZY_FETCH: "1" }, undefined, signal);
     return;
   } catch { signal.throwIfAborted(); }
   try {
-    await git(runner, mirror, ["fetch", "--no-tags", "origin", commit], {}, undefined, signal);
-    await git(runner, mirror, ["cat-file", "-e", `${commit}^{commit}`], {}, undefined, signal);
+    await git(runner, mirror, ["fetch", "--filter=blob:none", "--no-tags", "origin", commit], {}, undefined, signal);
+    await git(runner, mirror, ["cat-file", "-e", `${commit}^{commit}`], { GIT_NO_LAZY_FETCH: "1" }, undefined, signal);
   } catch (error: any) {
     if (/not our ref|unadvertised object|couldn't find remote ref/i.test(String(error?.message))) {
       throw new Error("仓库中找不到 Context 对应的提交。请先在来源设备推送该提交，或回原设备继续。", { cause: error });
@@ -273,8 +275,11 @@ export async function addReferenceSnapshotFromBranch(
   mirror: string,
   dest: string,
   baseBranch: string,
+  callerSignal?: AbortSignal,
 ): Promise<string> {
-  await fetchBranch(runner, mirror, baseBranch, REFERENCE_GIT_TIMEOUT_MS);
+  const deadline = AbortSignal.timeout(REFERENCE_GIT_TIMEOUT_MS);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
+  await fetchBranch(runner, mirror, baseBranch, REFERENCE_GIT_TIMEOUT_MS, signal);
   const startPoint = `origin/${baseBranch}`;
   const commit = (await git(
     runner,
@@ -282,6 +287,7 @@ export async function addReferenceSnapshotFromBranch(
     ["rev-parse", "--verify", `${startPoint}^{commit}`],
     {},
     REFERENCE_GIT_TIMEOUT_MS,
+    signal,
   )).trim();
   if (!commit) throw new Error(`could not resolve reference branch ${baseBranch}`);
   if (await runner.exists(dest)) throw new Error(`reference destination already exists: ${dest}`);
@@ -297,6 +303,7 @@ export async function addReferenceSnapshotFromBranch(
       ["worktree", "add", "--detach", staging, commit],
       {},
       REFERENCE_GIT_TIMEOUT_MS,
+      signal,
     );
     // The checkout above is only a batching mechanism. The published Ref is a
     // plain snapshot, not a linked worktree, so discard its pointer before the

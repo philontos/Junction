@@ -56,7 +56,9 @@ export class JunctionClient {
     let cursor: string | null = null;
     const seen = new Set<string>();
     do {
-      const page = await this.request(`${base}/${resource}?` + new URLSearchParams(cursor ? { cursor } : {}), { signal });
+      const query = new URLSearchParams({ limit: resource === "messages" ? "50" : "100" });
+      if (cursor) query.set("cursor", cursor);
+      const page = await this.request(`${base}/${resource}?${query}`, { signal });
       if (!Array.isArray(page.items)) throw new JunctionError(502, "Junction 分页响应无效。");
       yield page.items;
       cursor = page.next_cursor;
@@ -72,37 +74,56 @@ export class JunctionClient {
     normalized.session.turns = [];
     normalized.session.messages = [];
     normalized.diagnostics = [];
-    for await (const items of this.pages(base, "turns", signal)) normalized.session.turns.push(...items);
-    for await (const items of this.pages(base, "diagnostics", signal)) normalized.diagnostics.push(...items);
+    const cancelled = new AbortController();
+    signal = signal ? AbortSignal.any([signal, cancelled.signal]) : cancelled.signal;
     let chars = 0;
-    for await (const items of this.pages(base, "messages", signal)) {
-      for (const msg of items) {
-        if (msg.content_truncated) {
-          let offset: number | null = 0;
-          let content = "";
-          do {
-            const chunk = await this.request(`${base}/messages/${encodeURIComponent(msg.id)}/content?offset=${offset}`, { signal });
-            content += chunk.text;
-            if (content.length > 64 * 1024 * 1024 || (chunk.next_offset !== null && chunk.next_offset <= offset!)) {
-              throw new JunctionError(502, "Junction 内容分块无效或过大。");
+    const account = (value: unknown) => {
+      chars += JSON.stringify(value).length;
+      if (chars > 96 * 1024 * 1024) throw new JunctionError(413, "Context 过大，无法导入当前工作区。");
+    };
+    const collect = async (resource: string, target: any[]) => {
+      for await (const items of this.pages(base, resource, signal)) {
+        account(items); target.push(...items);
+      }
+    };
+    const messages = async () => {
+      for await (const items of this.pages(base, "messages", signal)) {
+        // Bound concurrency while preserving the original page/message order.
+        // Long tool results used to incur one round trip after another.
+        let next = 0;
+        const hydrate = async () => {
+          while (next < items.length) {
+            signal!.throwIfAborted();
+            const msg = items[next++];
+            if (msg.content_truncated) {
+              let offset: number | null = 0;
+              let content = "";
+              do {
+                const chunk = await this.request(`${base}/messages/${encodeURIComponent(msg.id)}/content?offset=${offset}`, { signal });
+                content += chunk.text;
+                if (content.length > 64 * 1024 * 1024 || (chunk.next_offset !== null && chunk.next_offset <= offset!)) {
+                  throw new JunctionError(502, "Junction 内容分块无效或过大。");
+                }
+                offset = chunk.next_offset;
+              } while (offset !== null);
+              msg.content = JSON.parse(content);
             }
-            offset = chunk.next_offset;
-          } while (offset !== null);
-          msg.content = JSON.parse(content);
-        }
-        for (const key of ["content_truncated", "content_chars", "content_preview", "content_url"]) delete msg[key];
-        chars += JSON.stringify(msg).length;
-        if (chars > 96 * 1024 * 1024) throw new JunctionError(413, "Context 过大，无法导入当前工作区。");
-        normalized.session.messages.push(msg);
+            for (const key of ["content_truncated", "content_chars", "content_preview", "content_url"]) delete msg[key];
+            account(msg);
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, items.length) }, hydrate));
+        normalized.session.messages.push(...items);
       }
-    }
+    };
+    if (normalized.record_index != null) normalized.records = [];
+    try {
+      await Promise.all([
+        collect("turns", normalized.session.turns), collect("diagnostics", normalized.diagnostics), messages(),
+        ...(normalized.record_index != null ? [collect("records", normalized.records)] : []),
+      ]);
+    } catch (error) { cancelled.abort(); throw error; }
     if (normalized.record_index != null) {
-      normalized.records = [];
-      for await (const items of this.pages(base, "records", signal)) {
-        chars += JSON.stringify(items).length;
-        if (chars > 96 * 1024 * 1024) throw new JunctionError(413, "Context 过大，无法导入当前工作区。");
-        normalized.records.push(...items);
-      }
       if (normalized.records.length !== normalized.record_index.indexed_records) {
         throw new JunctionError(502, "Context 原生记录索引下载不完整。");
       }

@@ -1,10 +1,10 @@
-// Runtime repository-reference attachment. Unlike dispatch-time references,
-// this operates on an existing task: materialize one pinned task-local snapshot
-// and atomically update its manifest. Because the Ref lives below the primary
-// workspace, the current agent sees it without any tmux/session mutation.
+// Attach a pinned repository snapshot and atomically update its manifest.
+// Repo tasks keep Refs under the worktree; directory tasks use their private
+// control root, granted to the agent at launch. Neither needs a session reload.
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { getOwnedTask } from "../core/ownership.js";
+import { taskControlDir, taskCwd } from "./workspace.js";
 import {
   listTaskReferences,
   publicTaskReferences,
@@ -19,6 +19,7 @@ export type RuntimeReferenceLoad = "manifest";
 
 export interface AddTaskReferenceEnv {
   db: DB;
+  dataDir?: string;
   exists(target: string): Promise<boolean>;
   setupReference(args: {
     mirror: string;
@@ -51,10 +52,10 @@ export async function addTaskReference(
 ): Promise<AddTaskReferenceResult> {
   const task = getOwnedTask(env.db, taskId);
   if (!task) return { ok: false, error: "notFound", message: "Task not found on this node" };
-  if (task.kind !== "repo") {
-    return { ok: false, error: "notRepoTask", message: "Repository references require a repository task" };
+  if (task.kind !== "repo" && (task.kind !== "directory" || !env.dataDir)) {
+    return { ok: false, error: "notRepoTask", message: "Repository references require an agent task" };
   }
-  if (!task.worktree_path || !(await env.exists(task.worktree_path).catch(() => false))) {
+  if (!taskCwd(task) || !(await env.exists(taskCwd(task)).catch(() => false))) {
     return { ok: false, error: "notReady", message: "The task worktree is not available" };
   }
 
@@ -76,7 +77,7 @@ export async function addTaskReference(
     return { ok: false, error: "limit", message: "A task can reference at most 8 repositories" };
   }
 
-  const worktree = path.join(referenceRootPath(task.worktree_path), selected.alias);
+  const worktree = path.join(referenceRootPath(taskControlDir(env.dataDir || "", task)), selected.alias);
   let commit: string;
   try {
     commit = await env.setupReference({

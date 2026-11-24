@@ -7,6 +7,7 @@ import {
   addDetachedWorktreeFromBranch,
   addReferenceSnapshotFromBranch,
   addWorktreeFromBranch,
+  ensureContextCommit,
   fetchBranch,
   fetchMirror,
   readRemoteBranches,
@@ -152,6 +153,44 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
   });
 }
 const headOf = async (wt: string) => (await git(wt, "rev-parse", "--abbrev-ref", "HEAD")).trim();
+
+test("cached Context commits do not contact origin, and existence probes never lazy-fetch", async () => {
+  const { runner, calls } = fakeRunner();
+  await ensureContextCommit(runner, "/m.git", "a".repeat(40));
+  assert.equal(calls.filter(c => c.args[0] === "fetch").length, 0);
+  assert.equal(calls.find(c => c.args[0] === "cat-file")?.opts.env.GIT_NO_LAZY_FETCH, "1");
+});
+
+test("cold Context checkout downloads current files in a batch while retaining blobless ancestry", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "junction-context-git-"));
+  try {
+    const { origin, seed, mirror } = await scaffold(root);
+    await git(origin, "config", "uploadpack.allowFilter", "true");
+    await git(mirror, "remote", "set-url", "origin", `file://${origin}`);
+    const parent = (await git(seed, "rev-parse", "HEAD")).trim();
+    const oldBlob = (await git(seed, "rev-parse", "HEAD:a.txt")).trim();
+    fs.writeFileSync(path.join(seed, "a.txt"), "Current version only");
+    for (let n = 0; n < 24; n++) fs.writeFileSync(path.join(seed, `file-${n}.txt`), `Unique contents ${n}`);
+    await git(seed, "add", "."); await git(seed, "commit", "-m", "Context snapshot");
+    await git(seed, "push", "origin", "feat/base");
+    const commit = (await git(seed, "rev-parse", "HEAD")).trim();
+    await ensureContextCommit(localRunner, mirror, commit);
+    assert.equal((await git(mirror, "config", "remote.origin.partialclonefilter")).trim(), "blob:none");
+    await git(mirror, "merge-base", "--is-ancestor", parent, commit);
+    const checkAbsent = () => assert.rejects(localRunner.exec("git", ["cat-file", "-e", oldBlob], {
+      cwd: mirror, env: { GIT_NO_LAZY_FETCH: "1" },
+    }), "historical blobs must not be downloaded");
+    await checkAbsent();
+    const packs = () => fs.readdirSync(path.join(mirror, "objects/pack")).filter(p => p.endsWith(".pack")).length;
+    const before = packs();
+    const cwd = path.join(root, "task");
+    await addWorktreeFromBranch(localRunner, mirror, cwd, "feat/continue", commit);
+    assert.equal(fs.readFileSync(path.join(cwd, "file-23.txt"), "utf8"), "Unique contents 23");
+    assert.equal((await git(cwd, "rev-parse", "HEAD")).trim(), commit);
+    assert.ok(packs() - before <= 2, "checkout batches missing file blobs");
+    await checkAbsent();
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 // origin.git (bare) + a mirror with `origin` configured, plus `main` and an extra
 // branch already pushed. Returns the dir paths; caller removes `root` when done.

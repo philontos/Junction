@@ -4,6 +4,7 @@ import { agentCatalog, loadAgentCatalog, requireAgent } from "../core/agents.js"
 // (archive / remove-worktree / delete), and connect() which attaches the dock
 // to a task's tmux session. paintSelection() reflects the currently-open card
 // and is shared with hosts.js (a remote shell clears the task selection).
+import { createReferencePicker } from "../core/reference-picker.js";
 import { $, api } from "../core/dom.js";
 import { requireDirectoryTasks, populateWorkspaceOptions, workspaceSelection } from "../core/directory-tasks.js";
 import { toast, showLoading, hideLoading } from "../core/feedback.js";
@@ -36,35 +37,12 @@ let nodeTask = null;   // { hostId, repo } or null
 let directoryCheckPending = false;
 const escapeText = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const TASK_REFERENCES_CAPABILITY = "task-references-v1";
-let taskReferences = [], referenceSeq = 0;
 // key of the task whose title is being edited inline. While set, renderList()
 // (the single place that rebuilds #m-list) bails, so NONE of the re-render paths
 // — loadTasks (4s), loadHosts (5s), loadRepos, a language switch — can blow the
 // open input away mid-edit. finish() re-renders once, on commit/cancel.
 let editingTaskKey = null;
 export function isEditingTask() { return editingTaskKey != null; }
-
-function referenceAlias(value, repoId) {
-  const slug = String(value || "").toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^[._-]+|[._-]+$/g, "")
-    .slice(0, 32);
-  return slug || `repo-${repoId}`;
-}
-
-function uniqueReferenceAlias(value, repoId, key = null) {
-  const seed = referenceAlias(value, repoId);
-  const used = new Set(taskReferences
-    .filter(reference => reference.key !== key)
-    .map(reference => referenceAlias(reference.alias, reference.repoId)));
-  if (!used.has(seed)) return seed;
-  for (let n = 2; n < 1000; n++) {
-    const suffix = `-${n}`;
-    const candidate = seed.slice(0, 32 - suffix.length) + suffix;
-    if (!used.has(candidate)) return candidate;
-  }
-  return `${seed.slice(0, 28)}-ref`;
-}
 
 function referenceCatalog() {
   const primaryId = Number(nodeTask?.repo?.id ?? taskRepoId);
@@ -79,151 +57,15 @@ function referencesSupported() {
   return (state.fleet[nodeTask.hostId]?.capabilities || []).includes(TASK_REFERENCES_CAPABILITY);
 }
 
-function abortReferenceRequests() {
-  taskReferences.forEach(reference => reference.controller?.abort());
-}
-
-function resetTaskReferences() {
-  abortReferenceRequests();
-  taskReferences = [];
-  renderTaskReferences();
-}
-
-function option(value, label, selected = false) {
-  const el = document.createElement("option");
-  el.value = String(value);
-  el.textContent = String(label);
-  el.selected = selected;
-  return el;
-}
-
-function renderTaskReferences() {
-  const sec = $("t-ref-sec"), list = $("t-ref-list"), add = $("t-ref-add"), hint = $("t-ref-hint");
-  if (!sec || !list || !add || !hint) return;
-  const supported = referencesSupported();
-  const repos = referenceCatalog();
-  sec.classList.toggle("has-refs", taskReferences.length > 0);
-  add.disabled = !supported || !repos.length || taskReferences.length >= 8;
-  hint.textContent = !supported
-    ? t("task.referencesUnsupported")
-    : repos.length ? t("task.referencesHint") : t("task.noReferenceRepos");
-  list.replaceChildren();
-
-  for (const reference of taskReferences) {
-    const row = document.createElement("div");
-    row.className = "tm-ref-row";
-
-    const repoSelect = document.createElement("select");
-    repoSelect.setAttribute("aria-label", t("task.referenceRepo"));
-    for (const repo of repos) repoSelect.append(option(repo.id, repo.name, Number(repo.id) === reference.repoId));
-    repoSelect.addEventListener("change", () => {
-      reference.repoId = Number(repoSelect.value);
-      const repo = repos.find(candidate => Number(candidate.id) === reference.repoId);
-      reference.alias = uniqueReferenceAlias(repo?.name, reference.repoId, reference.key);
-      reference.branch = repo?.default_branch || "main";
-      reference.branches = [];
-      void loadReferenceBranches(reference);
-      renderTaskReferences();
-    });
-
-    const branchSelect = document.createElement("select");
-    branchSelect.setAttribute("aria-label", t("task.referenceBranch"));
-    if (reference.loading) {
-      branchSelect.append(option("", t("task.referenceLoading"), true));
-      branchSelect.disabled = true;
-    } else {
-      const branches = reference.branches.length ? reference.branches : [reference.branch].filter(Boolean);
-      for (const branch of branches) branchSelect.append(option(branch, branch, branch === reference.branch));
-      branchSelect.addEventListener("change", () => { reference.branch = branchSelect.value; });
-    }
-
-    const alias = document.createElement("input");
-    alias.className = "tm-ref-alias";
-    alias.value = reference.alias;
-    alias.placeholder = t("task.referenceAlias");
-    alias.setAttribute("aria-label", t("task.referenceAlias"));
-    alias.addEventListener("input", () => {
-      reference.alias = alias.value;
-    });
-    alias.addEventListener("blur", () => {
-      reference.alias = uniqueReferenceAlias(alias.value, reference.repoId, reference.key);
-      alias.value = reference.alias;
-    });
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "tm-ref-remove";
-    remove.textContent = "×";
-    remove.title = t("task.referenceRemove");
-    remove.setAttribute("aria-label", t("task.referenceRemove"));
-    remove.addEventListener("click", () => {
-      reference.controller?.abort();
-      taskReferences = taskReferences.filter(candidate => candidate.key !== reference.key);
-      renderTaskReferences();
-    });
-
-    row.append(repoSelect, branchSelect, alias, remove);
-    list.append(row);
-  }
-}
-
-async function loadReferenceBranches(reference) {
-  reference.controller?.abort();
-  const controller = reference.controller = new AbortController();
-  reference.loading = true;
-  renderTaskReferences();
-  const repo = referenceCatalog().find(candidate => Number(candidate.id) === reference.repoId);
-  try {
-    const url = nodeTask
-      ? `/api/nodes/${nodeTask.hostId}/repos/${reference.repoId}/branches`
-      : `/api/repos/${reference.repoId}/branches`;
-    const branches = await api(url, { signal: controller.signal });
-    reference.branches = branches;
-    reference.branch = branches.includes(reference.branch)
-      ? reference.branch
-      : (branches.includes(repo?.default_branch) ? repo.default_branch : branches[0] || repo?.default_branch || "");
-  } catch (error) {
-    if (error.name === "AbortError") return;
-    reference.branches = [repo?.default_branch || reference.branch || "main"];
-    reference.branch = reference.branches[0];
-  } finally {
-    if (reference.controller === controller) {
-      reference.loading = false;
-      renderTaskReferences();
-    }
-  }
-}
-
-export function addTaskReference() {
-  if (!referencesSupported() || taskReferences.length >= 8) return;
-  const repos = referenceCatalog();
-  const used = new Set(taskReferences.map(reference => reference.repoId));
-  const repo = repos.find(candidate => !used.has(Number(candidate.id))) || repos[0];
-  if (!repo) return;
-  const reference = {
-    key: ++referenceSeq,
-    repoId: Number(repo.id),
-    branch: repo.default_branch || "main",
-    branches: [],
-    alias: uniqueReferenceAlias(repo.name, repo.id),
-    loading: false,
-    controller: null,
-  };
-  taskReferences.push(reference);
-  renderTaskReferences();
-  void loadReferenceBranches(reference);
-}
-
-export function repaintTaskReferences() { renderTaskReferences(); }
-
-function referencePayload() {
-  if (taskReferences.some(reference => reference.loading || !reference.branch || !String(reference.alias).trim())) return null;
-  return taskReferences.map(reference => ({
-    repo_id: reference.repoId,
-    ref: reference.branch,
-    alias: reference.alias,
-  }));
-}
+const taskReferencePicker = createReferencePicker({
+  root: () => $("t-ref-sec"), catalog: referenceCatalog, supported: referencesSupported,
+  loadBranches: (id, signal) => api(nodeTask ? `/api/nodes/${nodeTask.hostId}/repos/${id}/branches` : `/api/repos/${id}/branches`, { signal }),
+});
+const resetTaskReferences = () => taskReferencePicker.reset();
+const abortReferenceRequests = () => taskReferencePicker.dispose();
+const referencePayload = () => taskReferencePicker.payload();
+export function addTaskReference() { taskReferencePicker.add(); }
+export function repaintTaskReferences() { taskReferencePicker.render(); }
 
 // reflect the current selection onto the cards already in the DOM (no refetch).
 // Three kinds of card, matched by which key they carry:
@@ -268,7 +110,7 @@ export function connect(id) {
   if (hid != null) state.lastTaskByHost[hid] = id;
   paintSelection();
   const codeTarget = t.kind !== "local" && t.hasWorktree ? { id: t.id, nodeId: null } : null;
-  const referenceTarget = t.kind !== "local" && t.hasWorktree ? {
+  const referenceTarget = t.kind !== "local" && (t.hasWorktree || t.hasDirectory) ? {
     id: t.id,
     nodeId: null,
     repoId: t.repo_id,
@@ -379,7 +221,7 @@ export function closeTaskModal() {
   modal.style.display = "none";
   branchReq?.abort();
   abortReferenceRequests();
-  taskReferences = [];
+  resetTaskReferences();
   nodeTask = null;
 }
 // Cancel paths (取消 button / backdrop / Esc) additionally consume the sheet's
@@ -551,7 +393,7 @@ export async function addTask() {
   directoryCheckPending = true;
   try { await requireAgent(selectedAgent); } catch (e) { return toast(e.message, "error"); }
   finally { directoryCheckPending = false; }
-  const references = taskRepoId ? referencePayload() : [];
+  const references = referencePayload();
   if (references == null) return toast(t("toast.taskFieldsRequired"), "error");
   // provider_id belongs to the target node's own provider catalog. A hidden picker
   // sends null, which means the target node's default Claude login.
@@ -568,7 +410,10 @@ export async function addTask() {
   if (body.repo_id && (!body.base_branch || !body.title)) return toast(t("toast.taskFieldsRequired"), "error");
   if (!body.repo_id) {
     directoryCheckPending = true;
-    try { await requireDirectoryTasks(body.cwd_mode === "managed"); }
+    try {
+      const capabilities = await requireDirectoryTasks(body.cwd_mode === "managed");
+      if (references.length && !capabilities.directory_references) throw new Error(t("task.referencesUnsupported"));
+    }
     catch (e) { return toast(e.message, "error", 8000); }
     finally { directoryCheckPending = false; }
   }

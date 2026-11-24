@@ -75,7 +75,7 @@ test("dispatch supports task-scoped repository references on local and capable r
   assert.match(tasks, /const TASK_REFERENCES_CAPABILITY = "task-references-v1"/);
   assert.match(tasks, /state\.fleet\[nodeTask\.hostId\]\?\.capabilities/);
   assert.match(tasks, /\breferences,\s*\n/);
-  assert.match(tasks, /\/api\/nodes\/\$\{nodeTask\.hostId\}\/repos\/\$\{reference\.repoId\}\/branches/);
+  assert.match(tasks, /\/api\/nodes\/\$\{nodeTask\.hostId\}\/repos\/\$\{id\}\/branches/);
   assert.match(css, /\.tm-ref-row\s*\{[^}]*grid-template-columns:/s);
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.tm-ref-alias\s*\{[^}]*grid-column:\s*1 \/ 3;/s);
 });

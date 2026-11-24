@@ -1,6 +1,7 @@
 import { agentCatalog, agentName, canShareAgent, loadAgentCatalog, requireAgent } from "../core/agents.js";
 import { $, api, nodePath } from "../core/dom.js";
-import { requireDirectoryTasks } from "../core/directory-tasks.js";
+import { requireDirectoryTasks, matchingWorkspaceRepo } from "../core/directory-tasks.js";
+import { createReferencePicker } from "../core/reference-picker.js";
 import { state } from "../core/state.js";
 import { reconcileChildren } from "../core/keyed-list.js";
 import { toast } from "../core/feedback.js";
@@ -12,6 +13,7 @@ let hooks, status, listCursor, generation = 0, listRequest = 0, activeShare = nu
 let selectedContext = null, launchingContext = false, connectingJunction = false;
 let listController, listItems = [], listReady = false, listScope = 'all';
 let settings = {};
+let continuationReferences;
 const call = (url, options = {}) => settings.request ? settings.request(url, options) : api("/api/junction" + url, options);
 const send = (url, body, method = "POST") => call(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const base = meta => `/contexts/${meta.id}/revisions/${meta.revision.id}`;
@@ -63,6 +65,7 @@ function closeContextDialog(restoreFocus = true) {
   if (launchingContext || connectingJunction) return false;
   if (!contextDialogIsOpen()) return true;
   ++generation;
+  continuationReferences?.dispose(); continuationReferences = null;
   $("jx-task-modal").hidden = true;
   setDialogInert(false);
   $("junction-modal").inert = false;
@@ -75,6 +78,7 @@ function closeContextDialog(restoreFocus = true) {
   return true;
 }
 function detailRoot(title = L("新建任务", "New task")) {
+  continuationReferences?.dispose(); continuationReferences = null;
   const opening = !contextDialogIsOpen();
   $("jx-task-modal").dataset.view = "task";
   $("jx-task-heading").textContent = title;
@@ -468,6 +472,22 @@ function showContinue(meta) {
   const fields = el("fieldset"); form.append(fields);
   const agentField = el("div", undefined, "jx-field"); agentField.append(el("span", "Agent"), agents);
   fields.append(agentField, field(L("任务标题", "Task title"), title), field(L("补充要求（可选）", "Instructions (optional)"), prompt));
+  const refs = el("div", undefined, "tm-ref-sec"); refs.id = "jx-task-references";
+  const refHead = el("div", undefined, "tm-ref-head");
+  const refAdd = el("button", I18N.t("task.addReference"), "tm-ref-add"); refAdd.type = "button";
+  refHead.append(el("span", I18N.t("task.referencesLabel"), "tm-lbl"), refAdd);
+  refs.append(refHead, el("div", undefined, "tm-ref-list"), el("div", undefined, "hint"));
+  fields.append(refs);
+  let referenceRepos = [];
+  const picker = continuationReferences = createReferencePicker({ root: () => refs,
+    catalog: () => referenceRepos.filter(repo => repo.status === "ready" && !matchingWorkspaceRepo([repo], hint?.repo_url)),
+    loadBranches: (id, signal) => api(`/api/repos/${id}/branches`, { signal }),
+  });
+  picker.render();
+  api("/api/repos").then(repos => {
+    if (continuationReferences !== picker) return;
+    referenceRepos = repos; picker.render();
+  }).catch(error => { if (continuationReferences === picker) showError(error); });
   const options = el("details", undefined, "jx-section"); options.append(el("summary", L("更多设置", "More options")));
   options.append(field(L("模型", "Model"), model));
   fields.append(options);
@@ -505,16 +525,19 @@ function showContinue(meta) {
     e.preventDefault(); if (launchingContext) return;
     clearError();
     if (!title.value.trim()) { showError(new Error(L("请填写任务标题。", "Enter a task title."))); title.focus(); return; }
+    const references = picker.payload();
+    if (references === null) { showError(new Error(I18N.t("toast.taskFieldsRequired"))); return; }
     setBusy(true);
     let result;
     try {
       await requireAgent(agent);
       const capabilities = await api("/api/tasks/options");
+      if (references.length && (!capabilities.context_references || (!automaticRepo && !capabilities.directory_references))) throw new Error(I18N.t("task.referencesUnsupported"));
       if (automaticRepo && !capabilities.context_repository_setup) throw new Error(L("请先更新此设备的本地节点，再自动准备 Context 仓库。", "Update this device's local node before automatic repository setup."));
       const destination = automaticRepo ? { workspace_mode: "context" } : { repo_id: 0, cwd_mode: "managed" };
       if (!automaticRepo) await requireDirectoryTasks(true);
       const body = { context_id: meta.id, revision_id: meta.revision.id, ...destination, agent,
-        title: title.value.trim(), prompt: prompt.value, agent_model: model.value, acknowledge: true };
+        title: title.value.trim(), prompt: prompt.value, agent_model: model.value, acknowledge: true, references };
       if (capabilities.context_repository_setup) {
         const response = await fetch(nodePath("/api/junction/continue?stream=1"), {
           method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang },

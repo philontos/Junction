@@ -15,6 +15,9 @@ import { startSession, killSession } from "../session/tmux.js";
 import { writeTaskManifestFromDb } from "./taskmanifest.js";
 import { taskCwd, taskMarker, taskControlDir } from "./workspace.js";
 import { managedTaskDirectory } from "./workspace-layout.js";
+import { addTaskReference, type AddTaskReferenceEnv } from "./addreference.js";
+import { resolveReferenceInputs, listTaskReferences, TASK_WORKSPACE_INSTRUCTIONS, TASK_REFERENCE_MANIFEST, type TaskReferenceInput } from "./references.js";
+import { addReferenceSnapshotFromBranch, removeWorktree } from "../repo/git.js";
 
 export type DirectoryMode = "managed" | "existing";
 
@@ -27,6 +30,7 @@ export interface DirectoryOptions {
   model?: string | null;
   providerId?: number | null;
   env?: Record<string, string>;
+  references?: TaskReferenceInput[];
 }
 export interface DirectoryEnv {
   db: Database.Database;
@@ -34,6 +38,8 @@ export interface DirectoryEnv {
   dataDir: string;
   workspaceRoot?: string;
   home?: string;
+  setupReference?: AddTaskReferenceEnv["setupReference"];
+  removeReference?: AddTaskReferenceEnv["removeReference"];
   // Exposed for isolated integration tests and for pinning a Junction handoff
   // before the first agent process starts.
   prepare?(task: Task): Promise<void>;
@@ -74,6 +80,9 @@ export async function createDirectoryTask(env: DirectoryEnv, options: DirectoryO
   }
   const destination = await directoryDestination(options.cwd, options.cwdMode, env.home);
   if (!isAgentKind(options.agent)) throw new Error("请选择有效的 Agent。");
+  const references = resolveReferenceInputs(env.db, options.references);
+  if (!references.ok) throw new Error(references.error);
+  if (references.references.length && (!env.setupReference || !env.removeReference)) throw new Error("此节点尚不支持目录任务 Ref，请更新节点。");
   const owner = localHostId(env.db);
   if (owner == null) throw new Error("本机节点未初始化。");
   const title = options.title?.trim().slice(0, 200) || (destination.cwd ? `${options.agent} · ${path.basename(destination.cwd) || destination.cwd}` : "");
@@ -105,6 +114,13 @@ export async function createDirectoryTask(env: DirectoryEnv, options: DirectoryO
     }
     await fs.mkdir(taskControlDir(env.dataDir, task), { recursive: true, mode: 0o700 });
     manifest();
+    for (const reference of references.references) {
+      const result = await addTaskReference({ db: env.db, dataDir: env.dataDir,
+        exists: target => fs.stat(target).then(s => s.isDirectory()).catch(() => false),
+        setupReference: env.setupReference!, removeReference: env.removeReference!, writeManifest: manifest,
+      }, id, { repo_id: reference.repo.id, alias: reference.alias, ref: reference.requested_ref });
+      if (!result.ok) throw new Error(result.message);
+    }
     await env.prepare?.(task);
     await env.start(task, options);
     env.db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(id);
@@ -112,6 +128,10 @@ export async function createDirectoryTask(env: DirectoryEnv, options: DirectoryO
     return { id, session, cwd, cwd_mode: destination.mode };
   } catch (error) {
     await env.stop(session).catch(() => {});
+    for (const reference of listTaskReferences(env.db, id)) {
+      if (reference.mirror_path) await env.removeReference?.(reference.mirror_path, reference.worktree_path).catch(() => {});
+    }
+    env.db.prepare("DELETE FROM task_references WHERE task_id=?").run(id);
     // A failed allocation must not become resumable in a pre-existing path.
     if (!allocated) env.db.prepare("UPDATE tasks SET cwd=NULL WHERE id=?").run(id);
     env.db.prepare("UPDATE tasks SET status='error',error=? WHERE id=?").run(String((error as Error).message), id);
@@ -133,7 +153,9 @@ export async function startDirectorySession(runner: Runner, task: Task, options:
   const settings = path.join(control, ".claude", "settings.local.json");
   await fs.writeFile(settings, hookSettingsJson(control), { mode: 0o600 });
   const instructions = `${taskMarker(task)} Switchyard runs this task in its recorded working directory. ` +
-    "This directory is not necessarily a repository. Follow its applicable instructions and verify the current environment before continuing historical work.";
+    "This directory is not necessarily a repository. Follow its applicable instructions and verify the current environment before continuing historical work. " +
+    TASK_WORKSPACE_INSTRUCTIONS.replace("The primary repository in the current working directory is editable.", "The current working directory is editable.")
+      .replace(TASK_REFERENCE_MANIFEST, JSON.stringify(path.join(control, TASK_REFERENCE_MANIFEST)));
   const kimiFile = path.join(control, "kimi-agent.md");
   await fs.writeFile(kimiFile, `---\nname: switchyard-directory\ndescription: Switchyard directory task\n---\n\n\${base_prompt}\n\n${instructions}\n`, { mode: 0o600 });
   let sessionId = task.claude_session || undefined;
@@ -147,11 +169,13 @@ export async function startDirectorySession(runner: Runner, task: Task, options:
   await startSession(runner, task.session, taskCwd(task), options.prompt, {
     continue: resume, agent: options.agent, model: options.model, env: options.env,
     workspaceInstructions: instructions, kimiAgentFile: kimiFile,
-    sessionId, claudeSettings: settings, binary,
+    sessionId, claudeSettings: settings, binary, addDirs: [control],
   });
 }
 
-export function buildDirectoryEnv(db: Database.Database, ns: string, runner: Runner): DirectoryEnv {
+export function buildDirectoryEnv(db: Database.Database, ns: string, runner: Runner, signal?: AbortSignal): DirectoryEnv {
   return { db, ns, dataDir: runner.dataDir, workspaceRoot: runner.workspaceRoot, start: (task, options) => startDirectorySession(runner, task, options),
+    setupReference: ({ mirror, worktree, requestedRef }) => addReferenceSnapshotFromBranch(runner, mirror, worktree, requestedRef, signal),
+    removeReference: (mirror, worktree) => removeWorktree(runner, mirror, worktree).then(() => {}),
     stop: session => killSession(runner, session) };
 }

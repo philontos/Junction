@@ -239,7 +239,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
       writeManifest: (id) => writeTaskManifestFromDb(DATA_DIR, db, id),
     });
     return addTaskReference({
-      db,
+      db, dataDir: DATA_DIR,
       exists: (target) => localRunner.exists(target),
       setupReference: repoEnv.setupReference,
       removeReference: repoEnv.removeReference,
