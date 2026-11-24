@@ -56,16 +56,18 @@ async function sessionAddDirs(
  * count on the spawn's own environment reaching claude — we prepend an `env`
  * command that sets them on the claude process itself. Used to point claude at
  * an alternate model backend (ANTHROPIC_BASE_URL / _AUTH_TOKEN / _MODEL …).
- * Empty/blank values are dropped; each `K=V` is one argv element, so values
- * with spaces need no shell quoting here. Returns [] when there is nothing to
- * inject, so the default launch is
- * byte-for-byte unchanged.
+ * Agent tools can leave NO_COLOR=1 in a long-lived tmux server's environment.
+ * These are interactive terminals: remove that inherited flag at the process
+ * boundary, while still allowing an explicit per-task env override. Cleaning
+ * only the node process would not clean tmux's saved environment.
+ * Empty values are dropped; each `K=V` is one argv element, so values with
+ * spaces need no shell quoting here.
  */
 function envPrefix(env?: Record<string, string>): string[] {
   const pairs = Object.entries(env ?? {})
     .filter(([, v]) => v != null && v !== "")
     .map(([k, v]) => `${k}=${v}`);
-  return pairs.length ? ["env", ...pairs] : [];
+  return ["env", "-u", "NO_COLOR", ...pairs];
 }
 
 function requireOwnerNode(runner: CommandRunner): void {

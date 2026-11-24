@@ -124,7 +124,7 @@ test("hasSession checks by exact match (=), so 'tdsp-1' isn't reported live by '
 test("startSession passes the prompt as claude's opening message", async () => {
   const { runner, calls } = fakeRunner();
   await startSession(runner, "tdsp-1-x", "/wt", "do the thing");
-  assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "claude", "do the thing"] });
+  assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "env", "-u", "NO_COLOR", "claude", "do the thing"] });
 });
 
 test("startSession installs the persistent workspace contract without submitting another turn", async () => {
@@ -134,7 +134,7 @@ test("startSession installs the persistent workspace contract without submitting
   });
   assert.deepEqual(calls[0], { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "claude", "--append-system-prompt", "reread .tdsp/refs.json", "do the thing",
+    "env", "-u", "NO_COLOR", "claude", "--append-system-prompt", "reread .tdsp/refs.json", "do the thing",
   ] });
   assert.ok(!calls.some((call) => call.args[0] === "set-buffer"));
 });
@@ -144,7 +144,7 @@ test("startSession({ continue: true }) runs claude --continue and ignores any pr
   // resume must reattach to the prior conversation (claude stores it by cwd), so it
   // launches `claude --continue` and must NOT re-inject the original opening prompt.
   await startSession(runner, "tdsp-1-x", "/wt", "the original opening prompt", { continue: true });
-  assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "claude", "--continue"] });
+  assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "env", "-u", "NO_COLOR", "claude", "--continue"] });
 });
 
 test("startSession passes task reference roots through the Claude adapter", async () => {
@@ -154,7 +154,7 @@ test("startSession passes task reference roots through the Claude adapter", asyn
   });
   assert.deepEqual(calls[0], { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "claude", "--add-dir", "/refs/api", "--", "inspect api",
+    "env", "-u", "NO_COLOR", "claude", "--add-dir", "/refs/api", "--", "inspect api",
   ] });
 });
 
@@ -167,7 +167,7 @@ test("startSession injects opts.env as an `env K=V ... claude` prefix (alternate
   });
   assert.deepEqual(calls[0], { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "env", "ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic", "ANTHROPIC_MODEL=glm-4.6",
+    "env", "-u", "NO_COLOR", "ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic", "ANTHROPIC_MODEL=glm-4.6",
     "claude", "do it",
   ] });
 });
@@ -179,16 +179,16 @@ test("startSession({ continue, env }) injects env before claude --continue (resu
   });
   assert.deepEqual(calls[0], { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "env", "ANTHROPIC_AUTH_TOKEN=tok", "claude", "--continue",
+    "env", "-u", "NO_COLOR", "ANTHROPIC_AUTH_TOKEN=tok", "claude", "--continue",
   ] });
 });
 
-test("startSession drops empty/blank env values (no `env` prefix when nothing to inject)", async () => {
+test("startSession drops empty provider values while clearing inherited NO_COLOR", async () => {
   const { runner, calls } = fakeRunner();
   // a provider that only fills some fields must not emit empty K= pairs, and an
   // all-empty env must launch claude exactly as the no-env path does.
   await startSession(runner, "tdsp-1-x", "/wt", "go", { env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_MODEL: "" } });
-  assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "claude", "go"] });
+  assert.deepEqual(calls[0], { file: "tmux", args: ["new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt", "env", "-u", "NO_COLOR", "claude", "go"] });
 });
 
 test("startSession(agent='codex') launches codex full-access with the prompt", async () => {
@@ -199,7 +199,7 @@ test("startSession(agent='codex') launches codex full-access with the prompt", a
   await startSession(runner, "tdsp-1-x", "/wt", "do it", { agent: "codex" });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "codex", "-a", "on-request", "-s", "danger-full-access",
+    "env", "-u", "NO_COLOR", "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "do it",
   ] });
 });
@@ -211,7 +211,7 @@ test("startSession(agent='codex', continue) resumes with `codex resume --last`",
   await startSession(runner, "tdsp-1-x", "/wt", "the original prompt", { agent: "codex", continue: true });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "codex", "-a", "on-request", "-s", "danger-full-access",
+    "env", "-u", "NO_COLOR", "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "resume", "--last",
   ] });
 });
@@ -221,7 +221,7 @@ test("startSession(agent='codex', model) passes -m <model> before the prompt", a
   await startSession(runner, "tdsp-1-x", "/wt", "go", { agent: "codex", model: "gpt-5.4" });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "codex", "-a", "on-request", "-s", "danger-full-access",
+    "env", "-u", "NO_COLOR", "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "-m", "gpt-5.4", "go",
   ] });
 });
@@ -234,7 +234,7 @@ test("startSession(agent='codex') exposes references and their linked Git metada
   });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "codex", "-a", "on-request", "-s", "danger-full-access",
+    "env", "-u", "NO_COLOR", "codex", "-a", "on-request", "-s", "danger-full-access",
     "--add-dir", "/refs/api",
     "--add-dir", "/mirror/worktrees/1-49",
     "--add-dir", "/mirror",
@@ -247,7 +247,7 @@ test("startSession(agent='kimi') launches Kimi TUI, then submits the prompt", as
   await startSession(runner, "tdsp-1-x", "/wt", "do it", { agent: "kimi" });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror",
+    "env", "-u", "NO_COLOR", "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror",
   ] });
   const launch = calls.find((call) => call.args[0] === "new-session")!;
   assert.ok(!launch.args.includes("-p") && !launch.args.includes("--prompt"), "Kimi stays interactive");
@@ -296,7 +296,7 @@ test("startSession(agent='kimi', continue) resumes with `kimi --auto --continue`
   await startSession(runner, "tdsp-1-x", "/wt", "the original prompt", { agent: "kimi", continue: true });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "--continue",
+    "env", "-u", "NO_COLOR", "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "--continue",
   ] });
   assert.ok(!calls.some((call) => call.args[0] === "set-buffer"), "resume never re-submits the opening prompt");
 });
@@ -306,7 +306,7 @@ test("startSession(agent='kimi', model) passes -m <model>", async () => {
   await startSession(runner, "tdsp-1-x", "/wt", "go", { agent: "kimi", model: "kimi-code/kimi-for-coding" });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "-m", "kimi-code/kimi-for-coding",
+    "env", "-u", "NO_COLOR", "kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror", "-m", "kimi-code/kimi-for-coding",
   ] });
 });
 
@@ -330,6 +330,6 @@ test("startSession(agent='kimi') falls back to ~/.kimi-code/bin/kimi when kimi i
   await startSession(runner, "tdsp-1-x", "/wt", null, { agent: "kimi" });
   assert.deepEqual(calls.find((call) => call.args[0] === "new-session"), { file: "tmux", args: [
     "new-session", "-d", "-s", "tdsp-1-x", "-c", "/wt",
-    "/home/me/.kimi-code/bin/kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror",
+    "env", "-u", "NO_COLOR", "/home/me/.kimi-code/bin/kimi", "--auto", "--add-dir", "/mirror/worktrees/1-49", "--add-dir", "/mirror",
   ] });
 });
