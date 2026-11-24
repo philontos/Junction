@@ -1,12 +1,16 @@
 import path from "node:path";
 import crypto from "node:crypto";
 import { Runner } from "../fleet/runner.js";
+import { withMirrorPreparation } from "./preparation-lock.js";
 
 // Runtime Ref creation needs a deadline of its own on the owner node (local
 // operations have no SSH transport deadline). Keep it inside the controller's
 // 120s remote-node deadline so a useful domain error can still make it back.
 export const REFERENCE_GIT_TIMEOUT_MS = 90_000;
 export const TASK_GIT_TIMEOUT_MS = 90_000;
+// A blobless fetch skips historical file data, but the first checkout must still
+// download the complete current tree (large asset repos can exceed 90 seconds).
+export const WORKTREE_GIT_TIMEOUT_MS = 10 * 60_000;
 
 export function canonicalGitUrl(value: string): string {
   return String(value || "").trim().replace(/\/+$/, "").replace(/\.git$/i, "");
@@ -145,7 +149,7 @@ export async function fetchBranch(runner: Runner, mirror: string, branch: string
   await git(
     runner,
     mirror,
-    ["fetch", "--filter=blob:none", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+    ["fetch", "--filter=blob:none", "--no-tags", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
     {},
     timeoutMs,
     signal,
@@ -176,9 +180,9 @@ export async function addWorktree(runner: Runner, mirror: string, dest: string, 
   await git(runner, mirror, ["worktree", "add", "-b", workBranch, dest, startPoint], {}, undefined, signal);
 }
 
-function taskGitError(stage: string, error: any): Error {
+function taskGitError(stage: string, error: any, timeoutMs = TASK_GIT_TIMEOUT_MS): Error {
   const detail = error?.name === "TimeoutError"
-    ? `等待超过 ${TASK_GIT_TIMEOUT_MS / 1000} 秒`
+    ? `等待超过 ${timeoutMs / 1000} 秒`
     : String(error?.stderr || error?.message || error).trim().replace(/(https?:\/\/)[^\s/]+@/g, "$1[redacted]@").slice(-1200);
   return new Error(`${stage}：${detail}\n请检查此设备到仓库的网络连接和 Git 认证后重试。`, { cause: error });
 }
@@ -216,12 +220,22 @@ export async function ensureContextCommit(runner: Runner, mirror: string, commit
 export async function addWorktreeFromBranch(
   runner: Runner, mirror: string, dest: string, workBranch: string, baseBranch: string,
   callerSignal?: AbortSignal,
+  progress?: (stage: string) => void,
+) {
+  progress?.("等待仓库缓存准备");
+  return withMirrorPreparation(path.resolve(mirror), callerSignal, () => prepareWorktreeFromBranch(runner, mirror, dest, workBranch, baseBranch, callerSignal, progress));
+}
+
+async function prepareWorktreeFromBranch(
+  runner: Runner, mirror: string, dest: string, workBranch: string, baseBranch: string,
+  callerSignal?: AbortSignal, progress?: (stage: string) => void,
 ) {
   const deadline = AbortSignal.timeout(TASK_GIT_TIMEOUT_MS);
   const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
   let startRef = baseBranch;
   if (!/^[0-9a-f]{40,64}$/i.test(baseBranch)) {
     try {
+      progress?.("更新分支信息");
       await fetchBranch(runner, mirror, baseBranch, undefined, signal);
       startRef = `refs/remotes/origin/${baseBranch}`;
     } catch (error) {
@@ -231,12 +245,20 @@ export async function addWorktreeFromBranch(
       startRef = `refs/heads/${baseBranch}`;
     }
   }
+  let commit: string;
   try {
     // Pin before checkout so another fetch cannot move this task's base.
-    const commit = (await git(runner, mirror, ["rev-parse", "--verify", "--end-of-options", `${startRef}^{commit}`], {}, undefined, signal)).trim();
+    commit = (await git(runner, mirror, ["rev-parse", "--verify", "--end-of-options", `${startRef}^{commit}`], {}, undefined, signal)).trim();
     if (!/^[0-9a-f]{40,64}$/i.test(commit)) throw new Error("起始提交不存在或无效。");
-    await addWorktree(runner, mirror, dest, workBranch, commit, signal);
   } catch (error) { throw taskGitError("无法创建工作区", error); }
+  progress?.("准备工作区文件（首次使用需下载当前版本的完整文件）");
+  const checkoutDeadline = AbortSignal.timeout(WORKTREE_GIT_TIMEOUT_MS);
+  const checkoutSignal = callerSignal ? AbortSignal.any([callerSignal, checkoutDeadline]) : checkoutDeadline;
+  try { await addWorktree(runner, mirror, dest, workBranch, commit, checkoutSignal); }
+  catch (error) {
+    callerSignal?.throwIfAborted();
+    throw taskGitError("无法下载或写入工作区文件", error, WORKTREE_GIT_TIMEOUT_MS);
+  }
 }
 
 /** Create a reference-only checkout for another repository. The selected branch
@@ -326,8 +348,8 @@ export async function addReferenceSnapshotFromBranch(
   }
 }
 
-export async function removeWorktree(runner: Runner, mirror: string, dest: string, workBranch?: string) {
-  await git(runner, mirror, ["worktree", "remove", "--force", dest]).catch(async () => {
+export async function removeWorktree(runner: Runner, mirror: string, dest: string, workBranch?: string, incomplete = false) {
+  await git(runner, mirror, ["worktree", "remove", "--force", ...(incomplete ? ["--force"] : []), dest]).catch(async () => {
     // fall back to manual cleanup if worktree metadata is gone
     if (await runner.exists(dest)) await runner.rmrf(dest);
   });

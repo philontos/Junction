@@ -121,6 +121,10 @@ export interface RepoTaskEnv {
   db: DB;
   ns: string;
   workspaceRoot?: string;
+  /** A durable creating record is available; HTTP callers can now return 202. */
+  onCreated?(task: { id: number; session: string; workBranch: string }): void;
+  onProgress?(id: number, stage: string): void;
+  signal?: AbortSignal;
   // Persist the task's durable record. Both the CLI verb and HTTP route execute
   // on the owner and inject their node-local manifest writer.
   writeManifest(id: number): void | Promise<void>;
@@ -228,8 +232,13 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
   const referenceCleanup: Array<{ mirror: string; worktree: string }> = [];
 
   try {
+    await env.writeManifest(id);
+    env.onCreated?.({ id, session, workBranch });
+    env.signal?.throwIfAborted();
     const baseCommit = await env.setupWorktree({ id, mirror: repo.mirror_path, worktree, workBranch, baseBranch: opts.baseBranch, agent });
     for (const reference of resolvedReferences.references) {
+      env.signal?.throwIfAborted();
+      env.onProgress?.(id, `准备参考仓库 ${reference.alias}`);
       const referenceWorktree = path.join(referenceRoot, reference.alias);
       referenceCleanup.push({ mirror: reference.repo.mirror_path, worktree: referenceWorktree });
       const commit = await env.setupReference({
@@ -275,6 +284,8 @@ export async function createRepoTask(env: RepoTaskEnv, repo: RepoRef, opts: Crea
     await env.writeManifest(id);
 
     const opening = opts.prompt?.trim() ? opts.prompt : null;
+    env.signal?.throwIfAborted();
+    env.onProgress?.(id, "启动 Agent");
     await env.startSession(session, worktree, opening, {
       env: opts.env,
       agent,

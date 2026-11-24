@@ -30,7 +30,8 @@ import {
 } from "../task/cli.js";
 import { fleetTargets, type FleetTarget } from "../fleet/fleet.js";
 import { bootstrapMachine, validProfileName } from "../fleet/bootstrap.js";
-import { createLocalTask, createRepoTask, type RepoTaskEnv } from "../task/createtask.js";
+import { createLocalTask, type RepoTaskEnv } from "../task/createtask.js";
+import { TaskPreparations } from "../task/preparation.js";
 import { buildDirectoryEnv, createDirectoryTask, startDirectorySession } from "../task/directory.js";
 import { taskControlDir, taskCwd } from "../task/workspace.js";
 import { workspaceLayout } from "../task/workspace-layout.js";
@@ -93,6 +94,8 @@ import { setKeepAwake } from "../onboarding/power.js";
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
+
+const taskPreparations = new TaskPreparations();
 
 function restartArgs(): string[] {
   try {
@@ -556,6 +559,7 @@ app.get("/api/tasks", async (_req, res) => {
       }
       return {
         ...t,
+        preparation: taskPreparations.progress(t.id),
         references: publicTaskReferences(db, t.id),
         claude_session: claudeSession,
         alive: t.status === "cleaned" ? false : await hasSession(runner, t.session).catch(() => false),
@@ -619,8 +623,8 @@ app.post("/api/tasks", async (req, res) => {
   const provider = agentKind === "claude" && provider_id
     ? (getProvider.get(provider_id) as Provider | undefined)
     : undefined;
-  const r = await createRepoTask(
-    repoTaskEnvFor(),
+  const r = await taskPreparations.create(
+    (signal, onProgress) => buildRepoTaskEnv({ db, ns: NS, runner: localRunner, signal, onProgress, writeManifest: tid => syncTaskManifest(tid) }),
     { id: repo.id, name: repo.name, mirror_path: repo.mirror_path },
     {
       baseBranch: base_branch,
@@ -632,7 +636,9 @@ app.post("/api/tasks", async (req, res) => {
       model: agent_model ?? null,
       references,
     },
+    req.body?.background === true ? task => res.status(202).json({ id: task.id, status: "creating", session: task.session, work_branch: task.workBranch }) : undefined,
   );
+  if (res.headersSent) return;
   if (r.ok) return res.json({ id: r.id, session: r.session, work_branch: r.workBranch });
   if (r.error === "invalidReference") return res.status(400).json({ error: r.message });
   return res.status(500).json({ error: r.message });
@@ -719,6 +725,7 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
   const lang = langFromReq(req);
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (task.status === "creating" && !(await taskPreparations.cancel(task.id))) return res.status(409).json({ error: "任务正在准备中，请稍后重试。" });
   try {
     await killSession(localRunner, task.session);
     db.prepare("UPDATE tasks SET status='cleaned' WHERE id=?").run(task.id);
@@ -732,8 +739,12 @@ app.post("/api/tasks/:id/archive", async (req, res) => {
 // remove the worktree (frees disk) without deleting the task record
 app.post("/api/tasks/:id/cleanup", async (req, res) => {
   const lang = langFromReq(req);
-  const task = getTask.get(req.params.id) as Task | undefined;
+  let task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
+  if (task.status === "creating") {
+    if (!(await taskPreparations.cancel(task.id))) return res.status(409).json({ error: "任务正在准备中，请稍后重试。" });
+    task = getTask.get(req.params.id) as Task;
+  }
   const repo = getRepo.get(task.repo_id) as Repo | undefined;
   try {
     await killSession(localRunner, task.session);
@@ -819,6 +830,7 @@ app.patch("/api/tasks/:id", (req, res) => {
 app.delete("/api/tasks/:id", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(langFromReq(req), "notFound") });
+  if (task.status === "creating") return res.status(409).json({ error: "请先停止正在创建的任务。" });
   if (task.kind === "directory" && task.status !== "cleaned") return res.status(409).json({ error: "请先停止任务，再删除记录。" });
   if (task.worktree_path && (await localRunner.exists(task.worktree_path).catch(() => false))) {
     return res.status(409).json({ error: tr(langFromReq(req), "task.worktreeExists") });

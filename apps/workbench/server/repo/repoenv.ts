@@ -18,12 +18,12 @@ type DB = Database.Database;
 // The worktree-setup step bound to a machine's Runner: create the worktree,
 // inject the per-task Claude hooks, and keep them out of git status.
 // `ns` scopes the local temp path so two Switchyard instances sharing a box do not collide.
-function setupWorktreeOn(runner: Runner, ns: string, signal?: AbortSignal): RepoTaskEnv["setupWorktree"] {
+function setupWorktreeOn(runner: Runner, ns: string, signal?: AbortSignal, progress?: RepoTaskEnv["onProgress"]): RepoTaskEnv["setupWorktree"] {
   return async ({ id, mirror, worktree, workBranch, baseBranch, agent }) => {
     // create the worktree from the base branch's latest origin tip (falls back to
     // a local head for unpushed bases). The base is only a start point, so this
     // works even when a live task currently has that branch checked out.
-    await addWorktreeFromBranch(runner, mirror, worktree, workBranch, baseBranch, signal);
+    await addWorktreeFromBranch(runner, mirror, worktree, workBranch, baseBranch, signal, stage => progress?.(id, stage));
     // Capture the immutable start point before hooks are delivered and, crucially,
     // before the agent can create commits. Code preview diffs against this SHA
     // rather than HEAD, so a committed task never appears "clean".
@@ -63,6 +63,7 @@ export interface RepoEnvOpts {
   ns: string;
   runner: Runner;
   signal?: AbortSignal;
+  onProgress?: RepoTaskEnv["onProgress"];
   /** Persist the task's durable record on the owning node. */
   writeManifest: (id: number) => void | Promise<void>;
 }
@@ -77,11 +78,13 @@ export function buildRepoTaskEnv(opts: RepoEnvOpts): RepoTaskEnv {
     ns: opts.ns,
     workspaceRoot: opts.runner.workspaceRoot,
     writeManifest: opts.writeManifest,
-    setupWorktree: setupWorktreeOn(opts.runner, opts.ns, opts.signal),
+    signal: opts.signal,
+    onProgress: opts.onProgress,
+    setupWorktree: setupWorktreeOn(opts.runner, opts.ns, opts.signal, opts.onProgress),
     setupReference: ({ mirror, worktree, requestedRef }) =>
       addReferenceSnapshotFromBranch(opts.runner, mirror, worktree, requestedRef, opts.signal),
     startSession: (session, worktree, opening, sopts) => startSession(opts.runner, session, worktree, opening, sopts),
-    removeWorktree: (mirror, worktree, workBranch) => removeWorktree(opts.runner, mirror, worktree, workBranch).then(() => {}),
+    removeWorktree: (mirror, worktree, workBranch) => removeWorktree(opts.runner, mirror, worktree, workBranch, true).then(() => {}),
     removeReference: (mirror, worktree) => removeWorktree(opts.runner, mirror, worktree).then(() => {}),
     removeReferenceRoots: async (taskId, taskWorktree) => {
       if (taskWorktree) await opts.runner.rmrf(referenceRootPath(taskWorktree));

@@ -748,6 +748,11 @@ export function showPending(tmpId) {
 
 export function pendingIsActive(tmpId) { return activePending === tmpId; }
 
+export function updatePending(tmpId, text) {
+  const label = pending.get(tmpId)?.el.querySelector(".pending-text");
+  if (label) label.textContent = text;
+}
+
 // Swap a placeholder's spinner for an inline error + dismiss button. Returns false
 // if the placeholder is already gone (caller falls back to a toast).
 export function failPending(tmpId, message) {

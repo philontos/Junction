@@ -12,7 +12,7 @@ import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
 import { state } from "../core/state.js";
 import { openPty, disposePty, prunePanes, setClaudeSession, setTaskReferences,
-         openPending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
+         openPending, updatePending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
 import { rerender, expandRepo, loadFleet, connectNode } from "./hosts.js";
 import { refreshProviders, selectedProviderId, setProviderTarget } from "./providers.js";
 // One-way: mobile.js never imports tasks.js (its sheet-close callback is injected by
@@ -21,6 +21,7 @@ import { refreshProviders, selectedProviderId, setProviderTarget } from "./provi
 import { sheetOpened, sheetCancelled } from "./mobile.js";
 
 let taskRepoId = null, branchReq = null, tasksById = {}, taskOrder = [];
+const creatingViews = new Map();
 // the dispatch modal's agent pick (Claude Code | Codex | Kimi Code), remembered across opens.
 const LS_AGENT = "tdsp.agent";
 let selectedAgent = "claude";
@@ -109,6 +110,13 @@ export function connect(id) {
   const hid = hostOfTask(t);
   if (hid != null) state.lastTaskByHost[hid] = id;
   paintSelection();
+  if (t.status === "creating" || t.status === "error") {
+    const key = `creating${id}`;
+    if (!showPending(key)) openPending(key, `#${id} ${t.title}`, "", t.preparation?.stage || I18N.t("task.creating"));
+    if (t.status === "error") failPending(key, t.error);
+    else creatingViews.set(id, key);
+    return;
+  }
   const codeTarget = t.kind !== "local" && t.hasWorktree ? { id: t.id, nodeId: null } : null;
   const referenceTarget = t.kind !== "local" && (t.hasWorktree || t.hasDirectory) ? {
     id: t.id,
@@ -429,11 +437,11 @@ export async function addTask() {
   addPendingCard(tmpId, { kind: body.repo_id ? "repo" : "directory", repoId: body.repo_id, hostId: body.repo_id ? null : localHostId(), title: body.title || t("term.creating"), agent: body.agent, automaticTitle: !body.title });
   $("t-title").value = ""; $("t-prompt").value = "";
   try {
-    const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
+    const r = await api("/api/tasks", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ ...body, background: !!body.repo_id }) });
     dropPendingCard(tmpId);          // the real card replaces the placeholder
     await loadTasks();
     settlePending(tmpId, r.id);
-    toast(t("toast.taskDispatched", { session: r.session }), "success");
+    if (r.status !== "creating") toast(t("toast.taskDispatched", { session: r.session }), "success");
   } catch (e) {
     dropPendingCard(tmpId);
     await loadTasks();
@@ -586,7 +594,7 @@ export function taskCard(t, online, orderKey = null) {
   // (cleaned, worktree kept). Offer a one-click relaunch (claude --continue) that
   // reattaches the prior conversation; resuming an archived task flips it back to
   // running (server side), so it rejoins the active list on the next poll.
-  const resumable = (active || t.status === "cleaned") && !t.alive && (t.hasWorktree || t.hasDirectory);
+  const resumable = t.status !== "creating" && (active || t.status === "cleaned") && !t.alive && (t.hasWorktree || t.hasDirectory);
   const resumeBtn = resumable
     ? `<button class="t-resume" title="${I18N.t("task.resumeTitle")}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();resume(${t.id})">⟳ ${I18N.t("task.resume")}</button>`
     : "";
@@ -606,7 +614,8 @@ export function taskCard(t, online, orderKey = null) {
     ${meta}`;
   // only attach-on-click when there's a live session to attach to; a resumable
   // (dead-session) card routes through its Resume button instead.
-  const open = (active && t.alive) ? ` clickable" onclick="connect(${t.id})` : "";
+  const open = (active && (t.alive || t.status === "creating" || t.status === "error")) ? ` clickable" onclick="connect(${t.id})` : "";
+  if (t.status === "creating") note = `<div class="muted">${escapeText(t.preparation?.stage || I18N.t("task.creating"))}</div>`;
   // selection is painted post-render by paintSelection, NOT baked into the markup —
   // see pendingCard's note (keeps the list's rebuild cache selection-agnostic).
   // data-order-key marks a card as drag-reorderable (reorder.js). The renderer
@@ -627,6 +636,14 @@ export async function loadTasks(options = {}) {
   if (!tasks) return false;
   tasksById = Object.fromEntries(tasks.map(t => [t.id, t]));
   taskOrder = tasks.map(t => t.id);          // preserve the API's id-DESC order
+  for (const [id, key] of creatingViews) {
+    const task = tasksById[id];
+    if (task?.status === "creating") { updatePending(key, task.preparation?.stage || I18N.t("task.creating")); continue; }
+    creatingViews.delete(id);
+    if (task?.status === "error") { failPending(key, task.error); continue; }
+    if (task?.status === "running" && pendingIsActive(key)) connect(id);
+    closePending(key);
+  }
   // push each task's latest Claude session id into its live pane so the term-bar
   // chip lights up as soon as claude writes its id — no reconnect needed.
   for (const t of tasks) {

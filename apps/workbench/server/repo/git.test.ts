@@ -7,6 +7,8 @@ import {
   addDetachedWorktreeFromBranch,
   addReferenceSnapshotFromBranch,
   addWorktreeFromBranch,
+  TASK_GIT_TIMEOUT_MS,
+  WORKTREE_GIT_TIMEOUT_MS,
   ensureContextCommit,
   fetchBranch,
   fetchMirror,
@@ -104,6 +106,39 @@ test("Context commit handoffs use the pinned local commit without fetching a bra
   await addWorktreeFromBranch(runner, "/m.git", "/work/task", "feat/task", commit);
   assert.ok(!calls.some(c => c.args[0] === "fetch"));
   assert.equal(calls.find(c => c.args[0] === "worktree")!.args.at(-1), commit);
+});
+
+test("a healthy first checkout can outlast the branch-fetch deadline", async t => {
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, "timeout", (ms: number) => timeout(ms === TASK_GIT_TIMEOUT_MS ? 25 : 500));
+  const { runner } = fakeRunner(args => args[0] === "rev-parse" ? "a".repeat(40) : "");
+  const exec = runner.exec.bind(runner);
+  runner.exec = async (file, args, opts) => {
+    if (args[0] === "worktree") {
+      await new Promise(resolve => setTimeout(resolve, 60));
+      opts?.signal?.throwIfAborted();
+    }
+    return exec(file, args, opts);
+  };
+  assert.ok(WORKTREE_GIT_TIMEOUT_MS > TASK_GIT_TIMEOUT_MS);
+  await addWorktreeFromBranch(runner, "/slow.git", "/work/task", "feat/slow", "main");
+});
+
+test("failed task cleanup removes the initialization lock without disturbing other worktrees", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "junction-locked-worktree-"));
+  try {
+    const { mirror } = await scaffold(root);
+    await fetchBranch(localRunner, mirror, "main");
+    const failed = path.join(root, "failed"), kept = path.join(root, "kept");
+    await git(mirror, "worktree", "add", "--no-checkout", "-b", "feat/failed", failed, "origin/main");
+    await git(mirror, "worktree", "lock", "--reason", "initializing", failed);
+    await git(mirror, "worktree", "add", "--detach", kept, "origin/main");
+    await removeWorktree(localRunner, mirror, failed, "feat/failed", true);
+    assert.ok(!fs.existsSync(failed));
+    assert.doesNotMatch(await git(mirror, "worktree", "list", "--porcelain"), /failed/);
+    assert.equal(fs.readFileSync(path.join(kept, "a.txt"), "utf8"), "a");
+    await assert.rejects(git(mirror, "show-ref", "--verify", "refs/heads/feat/failed"));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test("reference snapshots bound every Git phase on the owner node", async () => {

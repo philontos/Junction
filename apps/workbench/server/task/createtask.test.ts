@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { initSchema } from "../core/schema.ts";
+import { TaskPreparations } from "./preparation.ts";
 import { writeTaskManifestFromDb } from "./taskmanifest.ts";
 import {
   createLocalTask,
@@ -210,6 +211,51 @@ function makeRepoEnv(overrides: Partial<RepoTaskEnv> = {}) {
   };
   return { env, dir, db, calls, getSetup: () => setupArgs, getStart: () => startArgs };
 }
+
+test("background creation acknowledges a durable task before checkout and cancellation cleans it without launching an agent", async () => {
+  const { env, db, dir, calls } = makeRepoEnv();
+  const jobs = new TaskPreparations();
+  let accepted!: (id: number) => void;
+  const acknowledgement = new Promise<number>(resolve => { accepted = resolve; });
+  let started!: () => void;
+  const checkoutStarted = new Promise<void>(resolve => { started = resolve; });
+  const done = jobs.create((signal, onProgress) => ({ ...env, signal, onProgress,
+    setupWorktree: async ({ id }) => {
+      onProgress(id, "下载工作区文件");
+      started();
+      return new Promise<string>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        if (signal.aborted) reject(signal.reason);
+      });
+    },
+  }), REPO, { baseBranch: "main", title: "large repo" }, task => accepted(task.id));
+  try {
+    const id = await acknowledgement;
+    assert.equal((db.prepare("SELECT status FROM tasks WHERE id=?").get(id) as any).status, "creating");
+    assert.ok(fs.existsSync(path.join(dir, "tasks", String(id), "task.json")));
+    await checkoutStarted;
+    assert.equal(jobs.progress(id)?.stage, "下载工作区文件");
+    assert.equal(await jobs.cancel(id), true);
+    const result = await done;
+    assert.equal(result.ok, false);
+    assert.match((db.prepare("SELECT error FROM tasks WHERE id=?").get(id) as any).error, /已取消/);
+    assert.ok(calls.includes("remove"));
+    assert.ok(!calls.some(value => value.startsWith("start:")));
+    assert.equal(jobs.progress(id), null);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); db.close(); }
+});
+
+test("background creation publishes running status after preparation without a connected requester", async () => {
+  const { env, db, dir } = makeRepoEnv();
+  const jobs = new TaskPreparations();
+  let taskId = 0;
+  try {
+    const result = await jobs.create(() => env, REPO, { baseBranch: "main", title: "background" }, task => { taskId = task.id; });
+    assert.ok(result.ok);
+    assert.equal((db.prepare("SELECT status FROM tasks WHERE id=?").get(taskId) as any).status, "running");
+    assert.equal(jobs.progress(taskId), null);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); db.close(); }
+});
 
 test("createRepoTask inserts a running task, prepares the worktree, starts the session, writes manifest", async () => {
   const { env, dir, db, calls, getSetup } = makeRepoEnv();
