@@ -2,7 +2,7 @@
 export async function readShareStream(response, onProgress, operation = "共享") {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `${operation}请求失败。`);
+    throw Object.assign(new Error(body.error || `${operation}请求失败。`), { report: body.report });
   }
   if (!response.headers.get("content-type")?.includes("application/x-ndjson") || !response.body) {
     throw new Error(`${operation}进度响应无效。`);
@@ -19,7 +19,7 @@ export async function readShareStream(response, onProgress, operation = "共享"
       for (const line of lines) {
         if (!line.trim()) continue;
         const event = JSON.parse(line);
-        if (event.type === "error") throw new Error(event.message || `${operation}未完成。`);
+        if (event.type === "error") throw Object.assign(new Error(event.message || `${operation}未完成。`), { report: event.report });
         if (event.type === "progress") onProgress(event);
         if (event.type === "complete") {
           if (!event.result?.id || !event.result?.context_id) throw new Error(`${operation}完成回执无效。`);

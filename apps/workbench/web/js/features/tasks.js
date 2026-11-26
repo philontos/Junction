@@ -1,3 +1,4 @@
+import { handoffReportButton } from "./handoff-report.js";
 import { readWorkbenchData } from "../core/workbench-data.js";
 import { agentCatalog, loadAgentCatalog, requireAgent } from "../core/agents.js";
 // Tasks: the dispatch-task modal, the live/archived card lists, task lifecycle
@@ -609,7 +610,7 @@ export function taskCard(t, online, orderKey = null) {
   const dot = `<span class="sdot ${runtime.dot}" title="${escapeText(runtime.label)}"></span>`;
   if (active && runtime.detail) note = `<div class="muted">${escapeText(runtime.detail)}</div>`;
   // Single-clicking the title opens the card; double-clicking still renames it.
-  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" ondblclick="renameTask(event,${t.id})">${escapeText(t.title)}</span></div>
+  const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" ondblclick="renameTask(event,${t.id})">${escapeText(t.title)}</span>${handoffReportButton(t)}</div>
     ${meta}`;
   // Retained exited panes stay readable; only Resume starts another process.
   const open = (lifecycle.connectable || (active && (t.status === "creating" || t.status === "error"))) ? ` clickable" onclick="connect(${t.id})` : "";

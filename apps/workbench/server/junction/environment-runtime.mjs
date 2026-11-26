@@ -263,8 +263,9 @@ export function boundEnvironment(environment, otherExtensions) {
     const extensions = { ...otherExtensions, [ENVIRONMENT_EXTENSION]: copy };
     return encodedSize(extensions) <= 7800 && new URLSearchParams({ extensions: JSON.stringify(extensions) }).toString().length <= 11_000;
   };
-  for (const key of ["resources", "tools", "skills", "variables", "dependencies", "services", "access", "runtimes", "agent"]) {
+  for (const key of ["resources", "tools", "skills", "variables", "dependencies", "services", "access", "runtimes", "agent", "repositories"]) {
     const group = copy.groups[key];
+    if (!group) continue;
     while (!fits() && group.items.length) {
       group.items.pop(); group.coverage = "partial"; group.reason = "metadata_size_limit";
       group.omitted_count = (group.omitted_count || 0) + 1;

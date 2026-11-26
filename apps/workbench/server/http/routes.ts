@@ -10,6 +10,7 @@ import { spawn as spawnChild } from "node:child_process";
 import QRCode from "qrcode";
 import { db, Repo, Task, Host, Provider } from "../core/db.js";
 import { renameTask } from "../task/tasks.js";
+import { readContinuationReport, reportSummary } from "../junction/report.js";
 import { removeWorktree } from "../repo/git.js";
 import { startShellSession, hasSession, killSession, listSessions } from "../session/tmux.js";
 import { asAgentKind, isAgentKind, agentCatalog } from "../session/agent.js";
@@ -533,7 +534,7 @@ app.delete("/api/repos/:id", async (req, res) => {
 });
 
 // ---------- tasks ----------
-app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, managed_workspaces: true, context_repository_setup: true, context_references: true, directory_references: true, workspace: workspaceLayout(DATA_DIR, localRunner.workspaceRoot), agents: agentCatalog(), home: os.homedir() }));
+app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, managed_workspaces: true, context_repository_setup: true, context_preparation_report: true, context_references: true, directory_references: true, workspace: workspaceLayout(DATA_DIR, localRunner.workspaceRoot), agents: agentCatalog(), home: os.homedir() }));
 app.get("/api/tasks", async (_req, res) => {
   const tasks = listOwnedTasks(db);
   const live = await taskLiveness(localRunner, tasks);
@@ -561,6 +562,7 @@ app.get("/api/tasks", async (_req, res) => {
       return {
         ...t,
         preparation: taskPreparations.progress(t.id),
+        handoff: reportSummary(readContinuationReport(db, t.id)),
         references: publicTaskReferences(db, t.id),
         claude_session: claudeSession,
         ...observation,
@@ -945,6 +947,18 @@ function sendMissingNodeCommand(req: Request, res: Response, command: string, ou
 // Remote Read is a semantic owner-local RPC. The controller relays only an opaque
 // cursor/source plus numeric ids; the target node resolves its own DB row and
 // transcript path, then returns the same normalized shape as the local endpoint.
+app.get("/api/nodes/:hostId/tasks/:taskId/handoff", async (req, res) => {
+  if (!/^[1-9][0-9]*$/.test(req.params.taskId)) return res.status(400).json({ error: "Invalid task ID" });
+  const host = remoteHost(req, res); if (!host) return;
+  res.setHeader("cache-control", "no-store");
+  try {
+    const out = await runNodeCommand(host, ["context", "report", req.params.taskId, "--json"], { timeoutMs: 10_000 });
+    const report = parseNodeJson(out.stdout);
+    if (report?.schema_version !== "junction.continuation/1") return res.status(404).json({ error: "此任务没有可读取的环境准备记录。" });
+    res.json(report);
+  } catch { res.status(502).json({ error: "暂时无法读取设备上的启动记录，请重试。" }); }
+});
+
 app.get("/api/nodes/:hostId/tasks/:taskId/transcript", async (req, res) => {
   const request = transcriptRequest(req.params.taskId, req);
   if (!request) return res.status(400).json({ error: "Invalid transcript request" });

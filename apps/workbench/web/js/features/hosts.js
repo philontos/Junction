@@ -1,3 +1,4 @@
+import { handoffReportButton } from "./handoff-report.js";
 // Machines (hosts): col1 icon rail + col2 list. Loads the host list, renders the
 // rail (renderRail) and the active machine's repos+tasks (renderList, via
 // repoGroupHead from repos.js and taskCard from tasks.js), the register-machine
@@ -262,7 +263,7 @@ function fleetCard(hostId, tk, orderKey = null) {
     : "";
   return `<div class="card task task-${agent}${open}" data-pane="${paneId}"${drag}>
       <button class="card-x${icon.cls}" title="${icon.title}" aria-label="${icon.title}" onclick="event.stopPropagation();${icon.fn}">${icon.glyph}</button>
-      <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname" title="${t("task.renameHint")}" ondblclick="renameTask(event,${tk.id},${hostId})">${esc(tk.title)}</span></div>
+      <div class="t">${fleetDot(tk)}#${tk.id} <span class="tname" title="${t("task.renameHint")}" ondblclick="renameTask(event,${tk.id},${hostId})">${esc(tk.title)}</span>${handoffReportButton(tk, hostId)}</div>
       ${meta}
       ${note}${resumeBtn}
     </div>`;

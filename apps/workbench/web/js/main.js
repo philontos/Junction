@@ -6,6 +6,7 @@
 //   3. run the boot sequence (init terminal + selects, first data load);
 //   4. register global listeners (modal backdrop / Esc) and pollers.
 import { closeJunction, junctionIsOpen, openPinnedContext } from "./features/junction.js";
+import { showTaskHandoff } from "./features/handoff-report.js";
 import { initWorkspaceNavigation } from "./features/workspace-navigation.js";
 import { contextReference } from "../cloud/context-link.js";
 import { initCloudWorkspace, repaintCloudWorkspace, restoreCloudWorkspace } from "./features/cloud-workspace.js";
@@ -49,6 +50,7 @@ import {
 // global, since ES module scope is not. This is the single, auditable place
 // that exposes them. (I18N is already global, set by i18n.js.)
 Object.assign(window, {
+  showTaskHandoff,
   // tasks
   addTask, addTaskReference, openTaskModal, cancelTaskModal, connect, archive, removeWt, deleteTask, resume,
   addLocalTask, renameTask, focusPending, openNodeTaskModal, selectAgent, selectTaskWorkspace,

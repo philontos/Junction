@@ -153,3 +153,11 @@ The CLI accepts `junction import ... --source-key tool:task:123 --extensions-fil
 - Receiving-device checks belong in a separate local report tied to context/revision, receiving directory and check time. They do not mutate the source manifest.
 
 The existing 8192-character extensions budget and raw archive deduplication still apply. A client fixes capture results before retries so a newly generated timestamp does not create duplicate revisions. A changed manifest produces a new revision, which can reference the same original JSONL. Configure a reverse proxy to accept the existing import API's encoded metadata query (16 KiB request-line/header capacity is recommended), as well as the 32 MiB body limit.
+
+## Optional repository references
+
+`extensions["junction.repositories/1"] = {"references": [...]}` records task references independently of the primary `switchyard.workspace/1`. Each entry contains `alias`, credential-free `repo_url` (nullable), `repo_name`, `requested_ref`, full `commit`, and `mode: "reference"`. Local repository IDs, machine-specific paths and credentials are not portable identity. An empty array means none were recorded on the source task; an omitted extension means unknown.
+
+The receiver resolves each entry on its selected device, attempts a commit-pinned read-only snapshot and reports failures individually. It must not substitute the current branch tip for a missing pinned commit. The service retains this descriptive extension without executing it.
+
+`junction.share-check/1` optionally records the source Git check, including `dirty` and publication (`published`, `unpublished`, `unknown`, `not_applicable`). This is evidence from the source device, not a promise that another user can access the repository. The receiving node's `junction.continuation/1` report is local execution state, tied to its task and the fixed Context revision; it is not written back into the immutable shared revision.

@@ -39,6 +39,14 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Immutable startup observations survive terminal exits and worktree cleanup.
+CREATE TABLE IF NOT EXISTS task_continuations (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  report_json TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS remove_task_continuation AFTER DELETE ON tasks
+BEGIN DELETE FROM task_continuations WHERE task_id=OLD.id; END;
+
 -- Additional repository snapshots attached to one task. New rows live below
 -- <primary-worktree>/.tdsp/refs/<alias>; older rows may retain the legacy
 -- worktrees/refs/<task-id>/<alias> linked-worktree path until task cleanup.

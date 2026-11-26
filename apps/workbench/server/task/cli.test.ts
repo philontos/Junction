@@ -43,6 +43,7 @@ test("taskListPayload wraps the local tasks in a versioned envelope", async () =
   const payload = await taskListPayload(db, noLive);
   assert.equal(payload.schema_version, 3);
   assert.deepEqual(payload.capabilities, [
+    "context-preparation-report-v1",
     "task-process-state-v1",
     "directory-task-v1",
     "directory-task-references-v1",

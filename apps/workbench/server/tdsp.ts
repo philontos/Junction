@@ -9,6 +9,7 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { runCli } from "./task/cli.js";
+import { runContextCommand } from "./junction/cli.js";
 import { db, type Provider, type Task } from "./core/db.js";
 import { NS, DATA_DIR, ROOT } from "./core/paths.js";
 import { ServeLifecycle, serveOptionsToArgs } from "./core/serve-lifecycle.js";
@@ -111,6 +112,7 @@ const serveLifecycle = new ServeLifecycle({
 });
 
 process.exitCode = await runCli(process.argv.slice(2), {
+  context: args => runContextCommand(args, message => console.error(message)),
   db,
   out: (s) => process.stdout.write(s + "\n"),
   err: (s) => process.stderr.write(s + "\n"),

@@ -1,4 +1,5 @@
 import { agentCatalog, isAgentKind } from "../agents/index.js";
+import { readContinuationReport, reportSummary } from "../junction/report.js";
 // The `tdsp` node-local API: pure functions that take a DB handle (like tasks.ts
 // / schema.ts), so they're testable against an in-memory sqlite and reusable by
 // both the HTTP server (tdsp serve) and the one-shot CLI verbs. A node is the
@@ -88,6 +89,7 @@ export const TASK_REFERENCES_CAPABILITY = "task-references-v1";
 export const TASK_RUNTIME_REFERENCES_CAPABILITY = "task-runtime-references-v1";
 export const TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY = "task-runtime-reference-manifest-v1";
 export const TASK_CAPABILITIES = [
+  "context-preparation-report-v1",
   "task-process-state-v1",
   "directory-task-v1",
   "directory-task-references-v1",
@@ -139,6 +141,7 @@ export interface TaskLive {
 // the same dependency-injection seam aggregateNodes uses for its ssh fetch.
 export type TaskLiveness = (tasks: Task[]) => Promise<Map<number, TaskLive>>;
 export interface NodeTask {
+  handoff?: ReturnType<typeof reportSummary>;
   id: number;
   repo_id: number;
   base_branch: string;
@@ -201,7 +204,7 @@ function referencesForList(rows: unknown): NodeTaskReference[] {
   });
 }
 
-function taskForList(task: Task, live?: Partial<TaskLive>, references?: unknown): NodeTask {
+function taskForList(task: Task, live?: Partial<TaskLive>, references?: unknown, handoff?: NodeTask["handoff"]): NodeTask {
   const hasLive = !!live && ("alive" in live || "hasWorktree" in live || "waiting" in live);
   const runtime = live?.runtime;
   const publicRuntime = runtime && ["running", "exited", "missing", "unknown"].includes(runtime.state) ? {
@@ -221,6 +224,8 @@ function taskForList(task: Task, live?: Partial<TaskLive>, references?: unknown)
     cwd: task.cwd,
     agent: task.agent,
     references: referencesForList(references),
+    ...(handoff && ["preparing", "started", "failed"].includes(handoff.launch) && ["repo", "directory"].includes(handoff.mode)
+      ? { handoff: { launch: handoff.launch, mode: handoff.mode, issues: Number.isSafeInteger(handoff.issues) && handoff.issues >= 0 ? handoff.issues : 0 } } : {}),
     ...(hasLive ? {
       alive: live?.alive ?? false,
       ...(publicRuntime ? { runtime: publicRuntime } : {}),
@@ -246,6 +251,7 @@ export async function taskListPayload(db: DB, liveness: TaskLiveness): Promise<T
       t,
       l ?? { alive: false, hasWorktree: false, waiting: false },
       publicTaskReferences(db, t.id),
+      reportSummary(readContinuationReport(db, t.id)),
     );
   });
   return {
@@ -322,7 +328,7 @@ export async function aggregateNodes<T extends NodeRef>(
         // Older list payloads exposed the full task row. Re-project at the
         // controller boundary so those owner-private fields never reach its UI.
         tasks: (Array.isArray(payload.tasks) ? payload.tasks : [])
-          .map((task) => taskForList(task as unknown as Task, task, (task as NodeTask).references)),
+          .map((task) => taskForList(task as unknown as Task, task, (task as NodeTask).references, (task as NodeTask).handoff)),
         // v1/v2 nodes exposed git_url + mirror_path. Strip those again at the
         // controller boundary before the aggregate reaches the browser.
         repos: (Array.isArray(payload.repos) ? payload.repos : [])
@@ -341,6 +347,7 @@ export function isUnknownTdspCommand(output: string, command: string): boolean {
 // IO the dispatch layer needs, injected so runCli is testable without opening the
 // real DB or booting the server. The bin (`tdsp`) supplies the real handles.
 export interface CliDeps {
+  context?: (args: string[]) => Promise<any>;
   db: DB;
   out: (s: string) => void;
   err: (s: string) => void;
@@ -539,6 +546,11 @@ function networkStatusText(status: TailscaleStatus): string {
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   const [cmd] = argv;
   switch (cmd) {
+    case "context": {
+      if (!deps.context) { deps.err("Context commands are unavailable on this node"); return 1; }
+      try { deps.out(JSON.stringify(await deps.context(argv.slice(1)))); return 0; }
+      catch (error) { deps.err(error instanceof Error ? error.message : String(error)); return 1; }
+    }
     case "serve": {
       const action = argv[1];
       if (action === "status") {
@@ -1012,7 +1024,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       return 0;
     }
     default:
-      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|list|inspect-code|transcript|create-local|create|add-reference|repo-create|repo-fetch|repo-branches|repo-delete|rename|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|doctor|install|uninstall|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
+      deps.err(`Usage: tdsp <serve [status|stop|restart]|network|context|list|inspect-code|transcript|create-local|create|add-reference|repo-create|repo-fetch|repo-branches|repo-delete|rename|stop|resume|cleanup|delete-task|paste-image|providers-list|providers-test|providers-create|providers-delete|doctor|install|uninstall|update>\n${cmd ? `unknown command: ${cmd}` : "no command given"}`);
       return 1;
   }
 }

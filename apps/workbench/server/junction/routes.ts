@@ -1,21 +1,21 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { db, type Repo, type Task, type Provider } from "../core/db.js";
+import { db, type Repo, type Task } from "../core/db.js";
 import { DATA_DIR, NS } from "../core/paths.js";
-import { getRepo, getTask, getProvider, providerEnv, syncTaskManifest } from "../http/context.js";
+import { getRepo, getTask } from "../http/context.js";
 import { localRunner } from "../fleet/runner.js";
-import { buildRepoTaskEnv } from "../repo/repoenv.js";
-import { syncReposManifest } from "../repo/manifest.js";
-import { createRepoTask } from "../task/createtask.js";
-import { buildDirectoryEnv, createDirectoryTask, directoryDestination } from "../task/directory.js";
 import { taskControlDir, taskCwd } from "../task/workspace.js";
-import { resolveReferenceInputs } from "../task/references.js";
 import { locateNativeJsonl } from "../session/transcript.js";
-import { isAgentKind, canShareAgent } from "../session/agent.js";
+import { canShareAgent } from "../session/agent.js";
 import { JunctionClient, JunctionError, readConfig, revisionPath } from "./client.js";
-import { WORKSPACE_EXTENSION, publicRepoUrl, writeHandoff, handoffPrompt } from "./handoff.js";
-import { contextRepository, prepareContextRepository, type ContinuationProgress } from "./repository.js";
+import { WORKSPACE_EXTENSION, publicRepoUrl } from "./handoff.js";
+import type { ContinuationProgress } from "./repository.js";
+import { continueContext, ContinuationError } from "./continuation.js";
+import { captureReferences, REPOSITORIES_EXTENSION } from "./references.js";
+import { checkShare } from "./preflight.js";
+import { readContinuationReport } from "./report.js";
+import { getOwnedTask } from "../core/ownership.js";
 import { collectEnvironment, ENVIRONMENT_EXTENSION } from "./environment-runtime.mjs";
 import { pinEnvironment } from "./environment.js";
 import { connectionInfo, connectJunction } from "./connection.js";
@@ -30,7 +30,8 @@ const wrap = (fn: (req: Request, res: Response) => Promise<any>) => async (req: 
     }
     await fn(req, res);
   } catch (error) {
-    if (error instanceof JunctionError) res.status(error.status).json({ error: error.message });
+    if (error instanceof JunctionError) res.status(error.status).json({ error: error.message,
+      ...(error instanceof ContinuationError && error.report ? { report: error.report } : {}) });
     else { console.error("Junction operation failed:", error instanceof Error ? error.name : "Error"); res.status(500).json({ error: "Junction 操作失败，请查看本机服务日志。" }); }
   }
 };
@@ -73,8 +74,9 @@ async function taskSource(id: unknown) {
     branch, commit, dirty: dirty === null ? null : !!dirty,
     ...(derivedFrom ? { derived_from: derivedFrom } : {}),
   };
+  const references = captureReferences(db, task.id);
   const workspace = remoteUrl && commit && branch && dirty !== null ? capture : null;
-  return { task, file, bytes: stat.size, workspace, capture, notes };
+  return { task, file, bytes: stat.size, workspace, capture, notes, references };
 }
 
 async function sourceBytes(file: string, size: number) {
@@ -141,6 +143,18 @@ export function registerJunctionRoutes(app: Express) {
     });
     res.json(result || { revoked: true });
   }));
+  app.get("/api/junction/tasks/:id/report", wrap(async (req, res) => {
+    const task = getOwnedTask(db, Number(req.params.id));
+    if (!task) throw new JunctionError(404, "任务不存在。");
+    const report = readContinuationReport(db, task.id);
+    if (!report) throw new JunctionError(404, "此任务没有环境准备记录。");
+    res.json(report);
+  }));
+  app.get("/api/junction/tasks/:id/preflight", wrap(async (req, res) => {
+    const task = getOwnedTask(db, Number(req.params.id));
+    if (!task || task.kind === "local") throw new JunctionError(404, "Agent 任务不存在。");
+    res.json(await checkShare(localRunner, task));
+  }));
   app.get("/api/junction/tasks/:id/preview", wrap(async (req, res) => {
     const src = await taskSource(req.params.id);
     res.json({ task_id: src.task.id, title: src.task.title, provider: src.task.agent, source_name: path.basename(src.file), bytes: src.bytes, workspace: src.workspace, capture: src.capture, notes: src.notes });
@@ -158,14 +172,24 @@ export function registerJunctionRoutes(app: Express) {
     try {
       progress("collect", "正在读取当前任务与会话记录…");
       const client = clientFor(req);
-      const src = await taskSource(req.body?.task_id);
+      let src = await taskSource(req.body?.task_id);
+      const check = await checkShare(localRunner, src.task);
+      if (check.notes.length && req.body?.acknowledge !== true) throw new JunctionError(409, "共享前检查发现未提交修改或代码可获取性未确认，请查看检查结果后继续。");
+      src = await taskSource(req.body?.task_id);
+      if ((check.commit && src.capture.commit !== check.commit) || (check.dirty !== null && src.capture.dirty !== check.dirty)) throw new JunctionError(409, "检查期间代码状态发生变化，请重新共享以固定最新切片。");
       const raw = await sourceBytes(src.file, src.bytes);
       progress("snapshot", `已固定会话快照，${raw.length} 字节；已记录可用的仓库和分支信息。`);
       for (const item of src.notes) progress("annotation", item.detail);
       const extensions: Record<string, any> = src.workspace ? { [WORKSPACE_EXTENSION]: src.workspace } : { "switchyard.capture/1": { ...src.capture, notes: src.notes } };
+      extensions[REPOSITORIES_EXTENSION] = { references: src.references };
+      const { checked_at: _checkedAt, changed_files: _changedFiles, ...checkState } = check;
+      extensions["junction.share-check/1"] = checkState;
       progress("environment", "正在记录工作环境与任务中使用过的工具…");
       const captured = await collectEnvironment({ cwd: taskCwd(src.task), agent: src.task.agent, raw,
         workspaceExtension: src.workspace ? WORKSPACE_EXTENSION : "switchyard.capture/1" });
+      captured.groups.repositories = { coverage: "collected", reference: REPOSITORIES_EXTENSION,
+        items: src.references.map(ref => ({ id: ref.alias, observed: { status: ref.repo_url && ref.commit ? "present" : "unknown",
+          value: { repo_name: ref.repo_name, commit: ref.commit, mode: ref.mode }, source: { kind: "task_metadata", reference: ref.alias } } })) };
       extensions[ENVIRONMENT_EXTENSION] = await pinEnvironment(
         path.join(DATA_DIR, "tasks", String(src.task.id), "environment-snapshots"), raw, extensions, captured,
       );
@@ -217,7 +241,7 @@ export function registerJunctionRoutes(app: Express) {
     }
     const heartbeat = streaming ? setInterval(() => emit({ type: "progress", ...lastProgress }), 10_000) : undefined;
     try {
-      const result = await continueContext(req, progress, signal);
+      const result = await continueContext(req.body || {}, clientFor(req), progress, signal);
       if (streaming) emit({ type: "complete", result });
       else res.status(201).json(result);
     } catch (error) {
@@ -225,97 +249,11 @@ export function registerJunctionRoutes(app: Express) {
       const message = error instanceof JunctionError ? error.message : signal.aborted
         ? "准备超时或连接已中断，请检查任务列表后重试。" : "任务创建失败，请重试或查看本机服务日志。";
       if (!(error instanceof JunctionError) && !signal.aborted) console.error("Context continuation failed:", error instanceof Error ? error.name : "Error");
-      emit({ type: "error", message });
+      emit({ type: "error", message, ...(error instanceof ContinuationError && error.report ? { report: error.report } : {}) });
     } finally { clearInterval(heartbeat); res.removeListener("close", abort); if (streaming) res.end(); }
   }));
   app.use("/api/junction", (error: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = error?.type === "entity.too.large" ? 413 : error?.type === "entity.parse.failed" ? 400 : 500;
     res.status(status).set("Cache-Control", "no-store").json({ error: status === 413 ? "请求过大；JSONL 最多 32 MiB。" : "请求内容无效。" });
   });
-}
-
-async function continueContext(req: Request, progress: ContinuationProgress, signal: AbortSignal) {
-  const b = req.body || {};
-  const client = clientFor(req);
-  if (!isAgentKind(b.agent)) throw new JunctionError(400, "请选择有效的 Agent。");
-  const provider = b.agent === "claude" && b.provider_id ? getProvider.get(Number(b.provider_id)) as Provider | undefined : undefined;
-  if (b.provider_id && !provider) throw new JunctionError(400, "模型后端不存在。");
-  const automatic = b.workspace_mode === "context";
-  if (b.workspace_mode !== undefined && !automatic) throw new JunctionError(400, "工作位置模式无效。");
-  if (automatic && (b.repo_id || b.cwd || b.cwd_mode)) throw new JunctionError(400, "自动准备仓库不能同时指定其他工作位置。");
-  const references = resolveReferenceInputs(db, b.references);
-  if (!references.ok) throw new JunctionError(400, references.error);
-  // Validate the local destination before downloading a potentially large history.
-  let destination: Awaited<ReturnType<typeof directoryDestination>> | undefined;
-  if (!b.repo_id && !automatic) {
-    try { destination = await directoryDestination(b.cwd, b.cwd_mode); }
-    catch (e: any) { throw new JunctionError(400, e.message); }
-  }
-  progress("context", "正在读取 Context…");
-  const snapshot = await client.snapshot(b.context_id, b.revision_id, signal);
-  if (snapshot.meta.revision.status === "failed") throw new JunctionError(409, "该 Context 解析失败，不能接续。");
-  signal.throwIfAborted();
-  if (destination) {
-    progress("worktree", "正在准备独立工作区…");
-    const env = buildDirectoryEnv(db, NS, localRunner, signal);
-    env.prepare = async task => {
-      const control = taskControlDir(DATA_DIR, task);
-      const manifest = writeHandoff(control, snapshot, client.config.url, taskCwd(task));
-      await fs.writeFile(path.join(control, "context.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 });
-      const prompt = handoffPrompt(str(b.prompt, 8000), path.join(control, ".tdsp/context"));
-      task.prompt = prompt;
-      db.prepare("UPDATE tasks SET prompt=? WHERE id=?").run(prompt, task.id);
-      syncTaskManifest(task.id);
-    };
-    const start = env.start;
-    env.start = (task, options) => {
-      signal.throwIfAborted();
-      progress("agent", "正在加载 Context 并启动 Agent…");
-      return start(task, { ...options, prompt: task.prompt });
-    };
-    try {
-      const result = await createDirectoryTask(env, { cwd: destination.cwd, cwdMode: destination.mode,
-        title: str(b.title, 200).trim() || `接续：${snapshot.meta.title}`.slice(0, 200),
-        agent: b.agent, model: str(b.agent_model, 100) || null, providerId: provider?.id, env: providerEnv(provider), references: b.references,
-      });
-      return { ...result, context_id: b.context_id, revision_id: b.revision_id };
-    } catch (e: any) { throw new JunctionError(409, e.message); }
-  }
-  const source = contextRepository(snapshot.normalized);
-  if ((source.dirty !== false || !source.commit || snapshot.meta.revision.status !== "ready") && b.acknowledge !== true) {
-    throw new JunctionError(409, "请确认未提交代码、缺失环境或解析诊断，再接续任务。");
-  }
-  const repo = await prepareContextRepository({ db, runner: localRunner, syncRepos: syncReposManifest },
-    source, automatic ? undefined : Number(b.repo_id), progress, signal);
-  const baseBranch = source.commit || source.branch || str(b.base_branch, 200) || repo.default_branch;
-  if (!baseBranch || baseBranch.startsWith("-")) throw new JunctionError(400, "起始分支无效。");
-  signal.throwIfAborted();
-  progress("worktree", "正在创建独立分支和 Worktree…");
-  const env = buildRepoTaskEnv({ db, ns: NS, runner: localRunner, writeManifest: syncTaskManifest, signal });
-  const originalSetup = env.setupWorktree;
-  env.setupWorktree = async args => {
-    signal.throwIfAborted();
-    const sha = await originalSetup({ ...args, baseBranch });
-    if (source.commit && sha !== source.commit) throw new JunctionError(409, "工作区提交与共享快照不一致。");
-    return sha;
-  };
-  const originalStart = env.startSession;
-  env.startSession = async (session, worktree, opening, options) => {
-    signal.throwIfAborted();
-    progress("agent", "正在加载 Context 并启动 Agent…");
-    const manifest = writeHandoff(worktree, snapshot, client.config.url);
-    // A node-local durable provenance record survives worktree cleanup.
-    const taskId = Number(session.split("-")[2]);
-    const taskDir = path.join(DATA_DIR, "tasks", String(taskId));
-    await fs.mkdir(taskDir, { recursive: true });
-    await fs.writeFile(path.join(taskDir, "context.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 });
-    await originalStart(session, worktree, opening, options);
-  };
-  const result = await createRepoTask(env, { id: repo.id, name: repo.name, mirror_path: repo.mirror_path! }, {
-    baseBranch: source.branch || baseBranch, title: str(b.title, 200).trim() || `接续：${snapshot.meta.title}`.slice(0, 200),
-    prompt: handoffPrompt(str(b.prompt, 8000)), agent: b.agent, model: str(b.agent_model, 100) || null,
-    providerId: provider?.id, env: providerEnv(provider), references: b.references,
-  });
-  if (!result.ok) throw new JunctionError(409, result.message);
-  return { id: result.id, session: result.session, repo_id: repo.id, work_branch: result.workBranch, context_id: b.context_id, revision_id: b.revision_id };
 }

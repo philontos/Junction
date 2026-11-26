@@ -7,6 +7,7 @@ import { reconcileChildren } from "../core/keyed-list.js";
 import { toast } from "../core/feedback.js";
 import { readShareStream } from "./junction-stream.js";
 import { createContextReader } from "./junction-reader.js";
+import { showHandoffReport, confirmShareCheck } from "./handoff-report.js";
 
 const L = (zh, en) => I18N.lang === "zh" ? zh : en;
 let hooks, status, listCursor, generation = 0, listRequest = 0, activeShare = null, shareDismissTimer;
@@ -478,6 +479,8 @@ function showContinue(meta) {
   refHead.append(el("span", I18N.t("task.referencesLabel"), "tm-lbl"), refAdd);
   refs.append(refHead, el("div", undefined, "tm-ref-list"), el("div", undefined, "hint"));
   fields.append(refs);
+  const inheritedRefs = meta.revision.normalized.extensions?.["junction.repositories/1"]?.references;
+  if (Array.isArray(inheritedRefs) && inheritedRefs.length) refs.append(note(L(`将自动准备来源的 ${inheritedRefs.length} 个参考仓库。`, `${inheritedRefs.length} source references will be prepared automatically.`)));
   let referenceRepos = [];
   const picker = continuationReferences = createReferencePicker({ root: () => refs,
     catalog: () => referenceRepos.filter(repo => repo.status === "ready" && !matchingWorkspaceRepo([repo], hint?.repo_url)),
@@ -505,7 +508,9 @@ function showContinue(meta) {
   progressBar.setAttribute("aria-labelledby", progressLabel.id);
   preparation.append(progressLabel, progressBar); form.append(preparation);
   const stages = { context: [1, "读取 Context…", "Reading context…"], repository: [2, "准备仓库…", "Preparing repository…"],
-    fetch: [3, "拉取代码版本…", "Fetching code…"], worktree: [4, "创建工作区…", "Creating workspace…"], agent: [5, "启动 Agent…", "Starting agent…"] };
+    fetch: [3, "拉取代码版本…", "Fetching code…"], worktree: [4, "创建工作区…", "Creating workspace…"],
+    fallback: [4, "准备普通 Agent 任务…", "Preparing an independent agent task…"], references: [4, "准备参考仓库…", "Preparing references…"],
+    environment: [4, "核对当前环境…", "Checking environment…"], agent: [5, "启动 Agent…", "Starting agent…"] };
   const updateProgress = event => {
     const stage = stages[event.stage]; if (!stage) return;
     progressBar.value = Math.max(progressBar.value, stage[0]);
@@ -545,13 +550,18 @@ function showContinue(meta) {
         });
         result = await readShareStream(response, updateProgress, "任务创建");
       } else result = await send("/continue", body);
-    } catch (error) { setBusy(false); showError(error); void hooks.loadRepos(); return; }
+    } catch (error) {
+      setBusy(false); showError(error); void hooks.loadRepos();
+      if (error.report) { closeJunction(); settings.showWorkbench?.(); showHandoffReport(error.report); void hooks.loadTasks(); }
+      return;
+    }
     setBusy(false); closeJunction(); settings.showWorkbench?.();
     try {
       await hooks.loadRepos(); await hooks.loadTasks(); hooks.connect(result.id); toast(L("已创建接续任务", "Continuation task created"), "success");
     } catch {
       toast(L(`任务 #${result.id} 已创建，请刷新任务列表后打开。`, `Task #${result.id} was created. Refresh the task list to open it.`), "error");
     }
+    if (result.report) showHandoffReport(result.report);
   };
   target.append(form);
 }
@@ -573,9 +583,15 @@ async function shareTask(taskId) {
   $("term-share-context").disabled = true;
   renderShare(job);
   try {
+    const check = await api(`/api/junction/tasks/${taskId}/preflight`);
+    if (check.notes?.length) {
+      $("jx-share-feedback").hidden = true;
+      if (!await confirmShareCheck(check)) { hooks.connect(taskId); return; }
+      renderShare(job);
+    }
     const response = await fetch(nodePath("/api/junction/publish?stream=1"), {
       method: "POST", headers: { "content-type": "application/json", "X-Lang": I18N.lang },
-      body: JSON.stringify({ task_id: taskId }), signal: AbortSignal.timeout(180000),
+      body: JSON.stringify({ task_id: taskId, acknowledge: !!check.notes?.length }), signal: AbortSignal.timeout(180000),
     });
     const result = await readShareStream(response, event => {
       // Overall milestones: snapshot captured, records stored, receipt confirmed.

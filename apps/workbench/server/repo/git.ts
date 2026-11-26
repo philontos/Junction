@@ -312,6 +312,20 @@ export async function addReferenceSnapshotFromBranch(
     signal,
   )).trim();
   if (!commit) throw new Error(`could not resolve reference branch ${baseBranch}`);
+  return materializeReferenceSnapshot(runner, mirror, dest, commit, signal);
+}
+
+/** Restore a shared Ref at its recorded commit, never at today's branch tip. */
+export async function addReferenceSnapshotFromCommit(
+  runner: Runner, mirror: string, dest: string, commit: string, callerSignal?: AbortSignal,
+): Promise<string> {
+  const deadline = AbortSignal.timeout(REFERENCE_GIT_TIMEOUT_MS);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
+  await ensureContextCommit(runner, mirror, commit, signal);
+  return materializeReferenceSnapshot(runner, mirror, dest, commit, signal);
+}
+
+async function materializeReferenceSnapshot(runner: Runner, mirror: string, dest: string, commit: string, signal: AbortSignal) {
   if (await runner.exists(dest)) throw new Error(`reference destination already exists: ${dest}`);
 
   const parent = path.dirname(dest);

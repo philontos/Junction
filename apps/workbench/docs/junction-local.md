@@ -70,11 +70,11 @@ Junction v0.2 的快照还包含原生记录索引（行号、字节位置、校
 
 发布任务时附带 `extensions["switchyard.workspace/1"]`：来源节点与任务 ID、无凭据仓库地址、分支、完整 commit、dirty 状态，以及可选 `derived_from`。Junction 将其作为不可执行的附加数据保存，核心协议不依赖 Switchyard。工作目录已移除或 Git 信息不可读，但日志仍可定位时，使用 `switchyard.capture/1` 保存可用字段及缺失说明，不阻断会话归档。
 
-接续只使用接收方已经登记的仓库，不依据历史 URL 自动克隆或执行命令。有工作区元数据时必须匹配仓库，并从固定 commit 创建 worktree；缺少该提交时尝试从目标仓库已有 origin 获取，失败则明确提示先同步提交。JSONL 单独导入没有工作区信息时，由接收方指定仓库与分支。
+接续在选定设备上匹配仓库，缺少时自动添加；使用本机 Git 认证获取来源固定 commit，再创建独立分支和 Worktree。获取失败则启动普通 Agent 任务并明确代码尚未恢复，不改用主分支。共享包含 `junction.repositories/1` Ref 清单；接续逐个恢复固定版本，缺失项进入报告，不阻断 Agent。原始日志没有环境信息时使用独立任务目录。
 
 未提交代码、未跟踪文件、附件内容、工具安装、skill 路径和凭据不随 Context 迁移。接续界面会说明未提交代码及解析缺口，点击继续后从已提交代码开始。原始工具调用不重放，也不伪造 Codex/Claude 的原生 session 文件。工作区查询文件不依赖在线令牌，后续 Junction 离线仍能读取已下载快照。
 
-第一版新增的发布与创建接续任务在当前 Switchyard 节点执行；远程节点现有功能保留。自动把 Context 调度到任意远程节点尚未接入。
+共享与接续都在用户选定设备的节点服务执行。本机直连；其他在线设备通过云端网关中转。
 
 ## 环境清单
 
@@ -107,6 +107,8 @@ node .tdsp/context/read.mjs check-environment system,runtimes,dependencies
 | GET | 上述版本路径 + `/export` | 下载完整标准化 JSON |
 | GET / PUT / DELETE | 上述版本路径 + `/grants` 或 `/grants/:user` | 查看、授予、撤销版本权限 |
 | GET | `/tasks/:id/preview` | 预览本机任务的归档范围和代码状态 |
+| GET | `/tasks/:id/preflight` | 只读 Git 检查；有问题时共享请求须携带 `acknowledge: true` |
+| GET | `/tasks/:id/report` | 持久化启动与环境报告 |
 | POST | `/publish` | 按任务 ID 自动整理并分享；`?stream=1` 返回 NDJSON 处理日志及完成回执 |
 | POST | `/import?provider=claude&name=...&title=...` | 上传并分享 JSONL，最多 32 MiB |
 | POST | `/continue` | 固定版本、仓库、Agent 创建接续任务 |
@@ -119,15 +121,16 @@ node .tdsp/context/read.mjs check-environment system,runtimes,dependencies
 {
   "context_id": "UUID",
   "revision_id": "UUID",
-  "repo_id": 1,
+  "workspace_mode": "context",
   "agent": "codex",
   "title": "接续任务",
-  "prompt": "本次补充要求",
-  "acknowledge": false
+  "prompt": "本次补充要求"
 }
 ```
 
-无环境元数据时可传 `base_branch`；可选 `agent_model`，Claude 可选当前节点 `provider_id`。来源信息保存在工作区和节点的任务目录中。
+可选 `agent_model`，Claude 可选当前节点 `provider_id`。接续成功响应带 `report`；任务分配后启动失败的响应也带 `report`，不会自动重试另一个 Agent。UI 展示手动关闭的结果弹窗，任务卡片提供重开入口。CLI `tdsp context check/report <task-id> --json` 和 `tdsp context continue <context-id> --revision <revision-id> --agent codex --json` 复用同一实现。
+
+交接文件绑定目标 `task_id`：仓库任务位于独立 Worktree 的 `.tdsp/context/`；目录任务位于节点 `tasks/<task-id>/.tdsp/context/`。`SKILL.md` 是读取流程，`manifest.json` 固定来源 Context/版本和目标目录，`preparation.json` 是本次准备报告；持久报告另存节点任务目录与数据库。
 
 ## 验证
 
