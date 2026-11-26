@@ -7,8 +7,8 @@ import type { CommandRunner } from "../fleet/runner.ts";
 const runner = (output: string): CommandRunner => ({ kind: "local", exec: async () => output });
 test("pane observations distinguish clean exit, failure, signal and mixed live panes", async () => {
   const snapshot = await readSessionRuntimes(runner([
-    "a\t%0\t1\t0\t", "b\t%1\t1\t1\t", "c\t%2\t1\t\t15",
-    "d\t%3\t1\t1\t", "d\t%4\t0\t\t",
+    "a|%0|1|0|", "b|%1|1|1|", "c|%2|1||15",
+    "d|%3|1|1|", "d|%4|0||",
   ].join("\n")));
   assert.deepEqual(snapshot.get("a"), { state: "exited", exitCode: 0 });
   assert.deepEqual(snapshot.get("b"), { state: "exited", exitCode: 1 });

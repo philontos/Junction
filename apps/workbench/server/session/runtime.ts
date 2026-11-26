@@ -14,7 +14,9 @@ interface Pane {
   signal?: string;
 }
 
-const FORMAT = "#{session_name}\t#{pane_id}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_dead_signal}";
+// launchd often has no UTF-8 locale. tmux then renders literal tabs as `_`;
+// a printable ASCII separator works in both interactive and daemon environments.
+const FORMAT = "#{session_name}|#{pane_id}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}";
 
 /** One bounded query covers every task. A retained terminal is not a live agent. */
 export async function readSessionRuntimes(runner: CommandRunner) {
@@ -23,12 +25,14 @@ export async function readSessionRuntimes(runner: CommandRunner) {
   try {
     const output = await runner.exec("tmux", ["list-panes", "-a", "-F", FORMAT], { timeoutMs: 3000 });
     for (const line of output.split("\n").filter(Boolean)) {
-      const [session, id, dead, code, signal] = line.split("\t");
+      const fields = line.split("|");
+      const signal = fields.pop(), code = fields.pop(), dead = fields.pop(), id = fields.pop();
+      const session = fields.join("|"); // tolerate delimiters in unrelated session names
       if (!session || !/^%\d+$/.test(id || "") || !/^[01]$/.test(dead || "")) {
         throw new Error("Invalid tmux pane observation");
       }
       const pane: Pane = {
-        id, dead: dead === "1",
+        id: id!, dead: dead === "1",
         ...(dead === "1" && /^\d+$/.test(code || "") ? { exitCode: Number(code) } : {}),
         ...(dead === "1" && signal && signal !== "0" ? { signal } : {}),
       };

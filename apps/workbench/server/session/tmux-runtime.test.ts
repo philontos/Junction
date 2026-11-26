@@ -12,7 +12,7 @@ test("retained exit is readable and can restart without replacing another live p
   if (spawnSync("tmux", ["-V"]).status !== 0) return t.skip("tmux unavailable");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jx-runtime-"));
   const socket = path.join(dir, "socket");
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = { ...process.env, LANG: "C", LC_ALL: "C" };
   delete env.TMUX; delete env.TMUX_PANE;
   const tmux = (args: string[]) => execFileSync("tmux", ["-S", socket, ...args], { env, encoding: "utf8", timeout: 3000 });
   t.after(() => {

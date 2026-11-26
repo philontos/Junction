@@ -220,11 +220,7 @@ export async function deleteNodeTask(hostId, taskId) {
   }
 }
 
-// The status dot for a remote node's task — mirrors taskCard's local dot so the
-// remote breathing light reads identically: a live session breathes green, one
-// blocked on a permission prompt is steady amber ("needs you"), otherwise the dot
-// falls to its status colour. Prefers the node's OWN liveness (alive/waiting,
-// shipped since `tdsp list` v2 — the node is the authority on its own tmux); for
+// Match the local card using observations from the process's owning node.
 // Older nodes without observations show unknown instead of a guessed green light.
 function fleetDot(tk) {
   const runtime = taskRuntimePresentation(tk, t);

@@ -8,7 +8,7 @@ test("HTTP and CLI share one pane probe and ignore stale waiting files after exi
   let probes = 0;
   const runner = { kind: "local", dataDir: "/fixture", exec: async () => {
     probes++;
-    return "live\t%1\t0\t\t\ndead\t%2\t1\t1\t\narchived\t%3\t0\t\t\n";
+    return "live|%1|0||\ndead|%2|1|1|\narchived|%3|0||\n";
   }, exists: async () => true } as unknown as Runner;
   const tasks = ["live", "dead", "archived", "missing"].map((session, id) => ({
     id, session, kind: "repo", worktree_path: "/fixture/wt", status: session === "archived" ? "cleaned" : "running",

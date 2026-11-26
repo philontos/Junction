@@ -46,3 +46,10 @@ test("creating tasks and unknown process state cannot trigger resume", () => {
   ]) assert.equal(taskLifecycle({ status: "running", alive: false, hasWorktree: true, ...task }).resumable, false);
   assert.equal(taskRuntimePresentation({ status: "running" }, key => key).dot, "", "old nodes without observations never pretend to be live");
 });
+
+test("a failed status probe does not block inspecting the recorded terminal", () => {
+  const task = { status: "running", alive: false, session: "tdsp-1", hasWorktree: true, runtime: { state: "unknown" } };
+  assert.equal(taskLifecycle(task).connectable, true);
+  assert.equal(taskLifecycle(task).resumable, false, "unknown state cannot authorize another process");
+  assert.equal(taskLifecycle({ ...task, session: "" }).connectable, false);
+});

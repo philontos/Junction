@@ -29,7 +29,7 @@ for (const history of [false, true]) test(`restart ${history ? "resumes its own 
     exec: async (file: string, args: string[]) => {
       if (file === "sh") return "/fixture/bin/pi";
       calls.push(args);
-      return args[0] === "list-panes" ? `${task.session}\t%1\t1\t1\t\n` : "";
+      return args[0] === "list-panes" ? `${task.session}|%1|1|1|\n` : "";
     },
   } as unknown as Runner;
   await restartTaskSession(db, runner, task);

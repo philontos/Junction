@@ -9,7 +9,8 @@ export function taskLifecycle(task) {
     action: active ? "stop" : hasWorktree ? "removeWorktree" : "deleteRecord",
     resumable: task.kind !== "local" && task.status !== "creating" && task.runtime?.state !== "unknown"
       && !task.alive && (hasWorktree || !!task.hasDirectory),
-    connectable: active && (!!task.alive || task.runtime?.state === "exited"),
+    connectable: active && (!!task.alive || task.runtime?.state === "exited"
+      || (task.runtime?.state === "unknown" && !!task.session)),
   };
 }
 

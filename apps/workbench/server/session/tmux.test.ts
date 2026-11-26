@@ -116,7 +116,7 @@ test("killSession targets the session by exact match (=), so a name can't prefix
 });
 
 test("hasSession checks the exact session's live process, not a retained pane or prefix", async () => {
-  const { runner } = fakeRunner(async () => "tdsp-1\t%1\t1\t1\t\ntdsp-12\t%2\t0\t\t\n");
+  const { runner } = fakeRunner(async () => "tdsp-1|%1|1|1|\ntdsp-12|%2|0||\n");
   assert.equal(await hasSession(runner, "tdsp-1"), false);
   assert.equal(await hasSession(runner, "tdsp-12"), true);
   assert.equal(await hasSession(runner, "tdsp-"), false);
