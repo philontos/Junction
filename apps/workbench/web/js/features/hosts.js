@@ -9,7 +9,7 @@ import { refreshCloudHosts } from "./cloud-workspace.js";
 import { hideLoading, showLoading, toast } from "../core/feedback.js";
 import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
-import { taskLifecycle } from "../core/task-lifecycle.js";
+import { taskLifecycle, taskRuntimePresentation } from "../core/task-lifecycle.js";
 import { orderTasks, repoOrderKey } from "../core/task-order.js";
 import { remoteFollowTasks } from "../core/host-follow.js";
 import { replaceHostList } from "../core/host-list-scroll.js";
@@ -190,7 +190,11 @@ export async function removeNodeWt(hostId, taskId) {
   }
 }
 
+const resumingNodeTasks = new Set();
 export async function resumeNodeTask(hostId, taskId) {
+  const key = `${hostId}:${taskId}`;
+  if (resumingNodeTasks.has(key)) return;
+  resumingNodeTasks.add(key);
   showLoading(t("loading.default"));
   try {
     await api(`/api/nodes/${hostId}/tasks/${taskId}/resume`, { method: "POST" });
@@ -201,6 +205,7 @@ export async function resumeNodeTask(hostId, taskId) {
     revealNodeUpdate(hostId, e);
     toast(t("toast.resumeFailed", { error: String(e?.message || e) }), "error", 6000);
   } finally {
+    resumingNodeTasks.delete(key);
     hideLoading();
   }
 }
@@ -220,24 +225,15 @@ export async function deleteNodeTask(hostId, taskId) {
 // blocked on a permission prompt is steady amber ("needs you"), otherwise the dot
 // falls to its status colour. Prefers the node's OWN liveness (alive/waiting,
 // shipped since `tdsp list` v2 — the node is the authority on its own tmux); for
-// an un-updated node that ships neither, it degrades to a status guess so a
-// running task still breathes instead of going dark.
+// Older nodes without observations show unknown instead of a guessed green light.
 function fleetDot(tk) {
-  if (tk.alive !== undefined) {                 // node ships true liveness
-    if (!tk.alive) return `<span class="sdot ${tk.status}" title="${tk.status}"></span>`;
-    return tk.waiting
-      ? `<span class="sdot waiting" title="${t("task.waiting")}"></span>`
-      : `<span class="sdot live" title="live"></span>`;
-  }
-  // old node (no liveness on the wire): approximate from the static status string
-  if (tk.status === "running") return `<span class="sdot live" title="live"></span>`;
-  if (tk.status === "creating") return `<span class="sdot cloning" title="${t("task.creating")}"></span>`;
-  return `<span class="sdot ${tk.status}" title="${tk.status}"></span>`;
+  const runtime = taskRuntimePresentation(tk, t);
+  return `<span class="sdot ${runtime.dot}" title="${esc(runtime.label)}"></span>`;
 }
 
 // A card for a task owned by a remote node (from the fleet snapshot). Its actions
 // mirror taskCard: stop while active; resume/remove-worktree/delete-record once
-// archived. Only a live active session is connectable.
+// archived. Retained exited terminals remain readable too.
 function fleetCard(hostId, tk, orderKey = null) {
   const paneId = `n${hostId}:${tk.id}`;
   // selection is painted post-render by paintSelection, not baked into the markup
@@ -259,6 +255,8 @@ function fleetCard(hostId, tk, orderKey = null) {
   } else {
     icon = { glyph: "🗑", cls: "", title: t("task.deleteRecord"), fn: `deleteNodeTask(${hostId},${tk.id})` };
   }
+  const runtime = taskRuntimePresentation(tk, t);
+  if (lifecycle.active && runtime.detail) note = `<div class="muted">${esc(runtime.detail)}</div>`;
   const resumeBtn = lifecycle.resumable
     ? `<button class="t-resume" title="${t("task.resumeTitle")}" onclick="event.stopPropagation();resumeNodeTask(${hostId},${tk.id})">⟳ ${t("task.resume")}</button>`
     : "";

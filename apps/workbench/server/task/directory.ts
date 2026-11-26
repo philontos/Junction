@@ -140,7 +140,7 @@ export async function createDirectoryTask(env: DirectoryEnv, options: DirectoryO
   }
 }
 
-export async function startDirectorySession(runner: Runner, task: Task, options: DirectoryOptions, resume = false) {
+export async function startDirectorySession(runner: Runner, task: Task, options: DirectoryOptions & { restartExited?: boolean }, resume = false) {
   // tmux can outlive installation changes and retain an older PATH. Resolve on
   // the owning node before launching, and report a missing CLI immediately.
   const binary = (await runner.exec("sh", ["-c", 'command -v "$1"', "sh", options.agent]).catch(() => "")).trim();
@@ -168,6 +168,7 @@ export async function startDirectorySession(runner: Runner, task: Task, options:
   }
   await startSession(runner, task.session, taskCwd(task), options.prompt, {
     continue: resume, agent: options.agent, model: options.model, env: options.env,
+    restartExited: options.restartExited,
     workspaceInstructions: instructions, kimiAgentFile: kimiFile,
     sessionId, claudeSettings: settings, binary, addDirs: [control],
   });

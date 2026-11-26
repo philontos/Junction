@@ -11,6 +11,7 @@ import { toast, showLoading, hideLoading } from "../core/feedback.js";
 import { confirmDialog, confirmDialogWithCheckbox } from "../core/dialog.js";
 import { Selects } from "../core/select.js";
 import { state } from "../core/state.js";
+import { taskLifecycle, taskRuntimePresentation } from "../core/task-lifecycle.js";
 import { openPty, disposePty, prunePanes, setClaudeSession, setTaskReferences,
          openPending, updatePending, failPending, closePending, pendingIsActive, showPending } from "./terminal.js";
 import { rerender, expandRepo, loadFleet, connectNode } from "./hosts.js";
@@ -110,7 +111,7 @@ export function connect(id) {
   const hid = hostOfTask(t);
   if (hid != null) state.lastTaskByHost[hid] = id;
   paintSelection();
-  if (t.status === "creating" || t.status === "error") {
+  if (t.status === "creating" || (t.status === "error" && t.runtime?.state !== "exited")) {
     const key = `creating${id}`;
     if (!showPending(key)) openPending(key, `#${id} ${t.title}`, "", t.preparation?.stage || I18N.t("task.creating"));
     if (t.status === "error") failPending(key, t.error);
@@ -572,7 +573,8 @@ function rejectPending(tmpId, message) {
 }
 
 export function taskCard(t, online, orderKey = null) {
-  const active = t.status !== "cleaned";
+  const lifecycle = taskLifecycle(t);
+  const active = lifecycle.active;
   // agent picks the card's colour (task-claude / task-codex / task-kimi accent bar + tint).
   const agent = normalizeAgent(t.agent);
   // one corner action per state — stop (active) / cleanup (cleaned)
@@ -594,7 +596,7 @@ export function taskCard(t, online, orderKey = null) {
   // (cleaned, worktree kept). Offer a one-click relaunch (claude --continue) that
   // reattaches the prior conversation; resuming an archived task flips it back to
   // running (server side), so it rejoins the active list on the next poll.
-  const resumable = t.status !== "creating" && (active || t.status === "cleaned") && !t.alive && (t.hasWorktree || t.hasDirectory);
+  const resumable = lifecycle.resumable;
   const resumeBtn = resumable
     ? `<button class="t-resume" title="${I18N.t("task.resumeTitle")}" ${disabled ? "disabled" : ""} onclick="event.stopPropagation();resume(${t.id})">⟳ ${I18N.t("task.resume")}</button>`
     : "";
@@ -603,18 +605,14 @@ export function taskCard(t, online, orderKey = null) {
   const meta = t.kind === "local" || t.kind === "directory"
     ? `<div class="muted">📂 <code>${safeCwd}</code> <span class="tag-local">${t.kind === "directory" ? agent : I18N.t("local.tag")}</span></div>`
     : `<div class="muted">${t.base_branch} → <code>${t.work_branch}</code></div>`;
-  // dot: alive+waiting (blocked on a permission prompt) → yellow; alive → green; else status
-  const dot = t.alive
-    ? (t.waiting
-        ? `<span class="sdot waiting" title="${I18N.t("task.waiting")}"></span>`
-        : `<span class="sdot live" title="live"></span>`)
-    : `<span class="sdot ${t.status}" title="${t.status}"></span>`;
+  const runtime = taskRuntimePresentation(t, I18N.t);
+  const dot = `<span class="sdot ${runtime.dot}" title="${escapeText(runtime.label)}"></span>`;
+  if (active && runtime.detail) note = `<div class="muted">${escapeText(runtime.detail)}</div>`;
   // Single-clicking the title opens the card; double-clicking still renames it.
   const head = `<div class="t">${dot}#${t.id} <span class="tname" title="${I18N.t("task.renameHint")}" ondblclick="renameTask(event,${t.id})">${escapeText(t.title)}</span></div>
     ${meta}`;
-  // only attach-on-click when there's a live session to attach to; a resumable
-  // (dead-session) card routes through its Resume button instead.
-  const open = (active && (t.alive || t.status === "creating" || t.status === "error")) ? ` clickable" onclick="connect(${t.id})` : "";
+  // Retained exited panes stay readable; only Resume starts another process.
+  const open = (lifecycle.connectable || (active && (t.status === "creating" || t.status === "error"))) ? ` clickable" onclick="connect(${t.id})` : "";
   if (t.status === "creating") note = `<div class="muted">${escapeText(t.preparation?.stage || I18N.t("task.creating"))}</div>`;
   // selection is painted post-render by paintSelection, NOT baked into the markup —
   // see pendingCard's note (keeps the list's rebuild cache selection-agnostic).
@@ -764,7 +762,10 @@ export async function removeWt(id){
 // Resume: relaunch the dead tmux session (claude --continue, same worktree) so it
 // reattaches the prior conversation. After it reloads, the card goes live again
 // and a normal click connects.
+const resumingTasks = new Set();
 export async function resume(id){
+  if (resumingTasks.has(id)) return;
+  resumingTasks.add(id);
   showLoading(t("loading.default"));
   try {
     await api(`/api/tasks/${id}/resume`,{method:"POST"});
@@ -774,6 +775,7 @@ export async function resume(id){
   } catch (e) {
     toast(t("toast.resumeFailed",{error:e.message}),"error",6000);
   } finally {
+    resumingTasks.delete(id);
     hideLoading();
   }
 }

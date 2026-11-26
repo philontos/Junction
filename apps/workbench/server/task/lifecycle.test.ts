@@ -56,6 +56,17 @@ test("resumeTask refuses a task whose retained worktree is gone", async () => {
   assert.deepEqual(result, { ok: false, error: "worktreeGone" });
 });
 
+test("resumeTask refuses to relaunch when process state cannot be checked", async () => {
+  const db = seed();
+  const result = await resumeTask({ db, exists: async () => true,
+    hasSession: async () => { throw new Error("process probe timed out"); },
+    startSession: async () => assert.fail("must not start"), writeManifest: () => assert.fail("must not mutate lifecycle"),
+  }, 7);
+  assert.equal(result.ok, false);
+  assert.equal((db.prepare("SELECT status FROM tasks WHERE id=7").get() as any).status, "cleaned");
+  db.close();
+});
+
 test("resumeTask refuses a task whose pinned reference worktree is gone", async () => {
   const db = seed();
   db.prepare(

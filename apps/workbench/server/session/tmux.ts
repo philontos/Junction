@@ -1,5 +1,6 @@
 import type { CommandRunner } from "../fleet/runner.js";
 import { agentAdapter, type AgentKind, type LaunchOpts } from "../agents/index.js";
+import { readSessionRuntimes } from "./runtime.js";
 
 async function tmux(runner: CommandRunner, args: string[]): Promise<string> {
   return runner.exec("tmux", args);
@@ -88,6 +89,7 @@ export async function startSession(
   prompt?: string | null,
   opts?: {
     continue?: boolean;
+    restartExited?: boolean;
     env?: Record<string, string>;
     agent?: AgentKind;
     model?: string | null;
@@ -115,7 +117,21 @@ export async function startSession(
   const finalOpts = { ...launchOpts, ...prepared };
   const launch = adapter.launch(finalOpts);
   if (finalOpts.binary) launch[0] = finalOpts.binary;
-  const cmd = ["new-session", "-d", "-s", session, "-c", cwd, ...pre, ...launch];
+  let target: string[] = ["new-session", "-d", "-s", session];
+  if (opts?.restartExited) {
+    const snapshot = await readSessionRuntimes(runner);
+    const runtime = snapshot.get(session);
+    if (runtime.state === "unknown") throw new Error("暂时无法确认任务进程状态，请稍后重试。");
+    if (runtime.state === "running") throw new Error("任务已经在运行，请直接打开任务。");
+    if (runtime.state === "exited") {
+      const pane = snapshot.exitedPane(session);
+      if (!pane) throw new Error("任务包含多个终端，请先检查并归档，再恢复任务。");
+      // No -k: tmux refuses to replace a process another request just started.
+      // Keep the pane identity so existing web terminals remain attached.
+      target = ["respawn-pane", "-t", pane];
+    }
+  }
+  const cmd = [...target, "-c", cwd, ...pre, ...launch];
   await tmux(runner, cmd);
   await ensureSessionOptions(runner, session);
   if (adapter.initialPrompt === "afterReady" && !opts?.continue && prompt?.trim()) {
@@ -169,14 +185,9 @@ export async function ensureSessionOptions(runner: CommandRunner, session: strin
 
 export async function hasSession(runner: CommandRunner, session: string): Promise<boolean> {
   if (!session || !session.trim()) return false;
-  try {
-    // "=" forces exact match — otherwise tmux prefix-matches and "tdsp-1" would be
-    // reported live whenever "tdsp-12" exists (a wrong green/alive light).
-    await tmux(runner, ["has-session", "-t", "=" + session]);
-    return true;
-  } catch {
-    return false;
-  }
+  const runtime = (await readSessionRuntimes(runner)).get(session);
+  if (runtime.state === "unknown") throw new Error("暂时无法确认任务进程状态，请稍后重试。");
+  return runtime.state === "running";
 }
 
 export async function killSession(runner: CommandRunner, session: string) {

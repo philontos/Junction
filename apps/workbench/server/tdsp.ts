@@ -15,10 +15,8 @@ import { ServeLifecycle, serveOptionsToArgs } from "./core/serve-lifecycle.js";
 import { applyInstall, applyProfileInstall } from "./fleet/bootstrap.js";
 import { uninstallProfile } from "./fleet/profile-uninstall.js";
 import { localRunner } from "./fleet/runner.js";
-import { startSession, startShellSession, hasSession, killSession, listSessions } from "./session/tmux.js";
+import { startShellSession, hasSession, killSession } from "./session/tmux.js";
 import { createLocalTask, createRepoTask, stopTask } from "./task/createtask.js";
-import { startDirectorySession } from "./task/directory.js";
-import { taskControlDir } from "./task/workspace.js";
 import { addTaskReference } from "./task/addreference.js";
 import { cleanupTask, deleteTaskRecord, resumeTask } from "./task/lifecycle.js";
 import { asAgentKind } from "./session/agent.js";
@@ -32,12 +30,7 @@ import { branchesForOwnedRepo, deleteOwnedRepo, fetchOwnedRepo, registerOwnedRep
 import { syncReposManifest } from "./repo/manifest.js";
 import { pasteImageIntoOwnedTask } from "./task/paste-service.js";
 import { renameTask } from "./task/tasks.js";
-import {
-  externalReferenceWorktreePaths,
-  kimiWorkspaceAgentPath,
-  referenceRootPaths,
-  TASK_WORKSPACE_INSTRUCTIONS,
-} from "./task/references.js";
+import { referenceRootPaths } from "./task/references.js";
 import {
   configureTailscalePeerRelay,
   diagnoseTailscale,
@@ -48,6 +41,8 @@ import {
 } from "./network/tailscale.js";
 import { forgetOwnedServeRoute, recordOwnedServeRoute } from "./network/serve-ownership.js";
 import { readTranscript } from "./session/transcript.js";
+import { taskLiveness } from "./task/runtime.js";
+import { restartTaskSession } from "./task/restart.js";
 
 // Ensure child processes (tmux/git/claude) find Homebrew binaries regardless of
 // how tdsp was launched — a bare non-interactive ssh PATH otherwise can't resolve
@@ -170,28 +165,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
   },
   serveStatus: () => serveLifecycle.status(),
   serveStop: () => serveLifecycle.stop(),
-  // This node's own task liveness, for `tdsp list`. The node is the sole authority
-  // for its tmux server + worktrees, so it computes the same three signals the
-  // local HTTP API computes in GET /api/tasks — green when the session
-  // is alive, yellow when it's blocked on a permission prompt — and ships them so a
-  // remote card lights up identically. One `tmux list-sessions` covers every task
-  // (set membership) instead of an exec per task.
-  liveness: async (tasks) => {
-    const live = new Set(await listSessions(localRunner));
-    const out = new Map<number, { alive: boolean; hasWorktree: boolean; hasDirectory: boolean; waiting: boolean }>();
-    for (const t of tasks) {
-      const cleaned = t.status === "cleaned";
-      const hasWt = !!t.worktree_path && (await localRunner.exists(t.worktree_path).catch(() => false));
-      out.set(t.id, {
-        alive: !cleaned && !!t.session && live.has(t.session),
-        hasWorktree: hasWt,
-        hasDirectory: t.kind === "directory" && !!t.cwd && (await localRunner.exists(t.cwd).catch(() => false)),
-        waiting:
-          !cleaned && !!taskControlDir(DATA_DIR, t) && (await localRunner.exists(path.join(taskControlDir(DATA_DIR, t), ".claude/waiting")).catch(() => false)),
-      });
-    }
-    return out;
-  },
+  liveness: tasks => taskLiveness(localRunner, tasks),
   createLocal: (opts) =>
     createLocalTask(
       {
@@ -308,23 +282,7 @@ process.exitCode = await runCli(process.argv.slice(2), {
         db,
         exists: (target) => localRunner.exists(target),
         hasSession: (session) => hasSession(localRunner, session),
-        startSession: async (task) => {
-          const provider = task.provider_id
-            ? (db.prepare("SELECT * FROM providers WHERE id=?").get(task.provider_id) as Provider | undefined)
-            : undefined;
-          if (task.kind === "directory") return startDirectorySession(localRunner, task, {
-            agent: asAgentKind(task.agent), model: task.agent_model, env: providerEnv(provider),
-          }, true);
-          await startSession(localRunner, task.session, task.worktree_path, null, {
-            continue: true,
-            env: providerEnv(provider),
-            agent: asAgentKind(task.agent),
-            model: task.agent_model,
-            addDirs: externalReferenceWorktreePaths(db, task),
-            workspaceInstructions: TASK_WORKSPACE_INSTRUCTIONS,
-            kimiAgentFile: kimiWorkspaceAgentPath(task.worktree_path),
-          });
-        },
+        startSession: task => restartTaskSession(db, localRunner, task),
         writeManifest: (tid) => writeTaskManifestFromDb(DATA_DIR, db, tid),
       },
       id,

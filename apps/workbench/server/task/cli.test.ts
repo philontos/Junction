@@ -43,6 +43,7 @@ test("taskListPayload wraps the local tasks in a versioned envelope", async () =
   const payload = await taskListPayload(db, noLive);
   assert.equal(payload.schema_version, 3);
   assert.deepEqual(payload.capabilities, [
+    "task-process-state-v1",
     "directory-task-v1",
     "directory-task-references-v1",
     ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
@@ -74,6 +75,24 @@ test("taskListPayload enriches each task with alive/waiting/hasWorktree from the
   assert.equal(payload.tasks[0].alive, true);
   assert.equal(payload.tasks[0].waiting, true);
   assert.equal(payload.tasks[0].hasWorktree, true);
+});
+
+test("taskListPayload preserves process exit evidence for a remote controller", async () => {
+  const db = seed();
+  const payload = await taskListPayload(db, async tasks => new Map(tasks.map(task => [task.id, {
+    alive: false, waiting: false, hasWorktree: true, runtime: { state: "exited" as const, exitCode: 1 },
+  }])));
+  assert.equal(payload.tasks[0].status, "running", "lifecycle is not rewritten by an observation");
+  assert.equal(payload.tasks[0].alive, false);
+  assert.deepEqual(payload.tasks[0].runtime, { state: "exited", exitCode: 1 });
+  db.close();
+});
+
+test("aggregateNodes only forwards public process state fields", async () => {
+  const [node] = await aggregateNodes([{ id: 2, name: "B" }], async () => JSON.stringify({
+    schema_version: 3, tasks: [{ id: 7, alive: false, runtime: { state: "exited", exitCode: 1, signal: "", command: "private command" } }], repos: [],
+  }));
+  assert.deepEqual(node.tasks?.[0].runtime, { state: "exited", exitCode: 1 });
 });
 
 // A task the probe doesn't know about (or a node that can't probe) degrades to

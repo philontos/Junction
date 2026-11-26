@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { taskLifecycle } from "./task-lifecycle.js";
+import { taskLifecycle, taskRuntimePresentation } from "./task-lifecycle.js";
 
 test("an archived remote task with a retained worktree can resume or remove it", () => {
   assert.deepEqual(taskLifecycle({ status: "cleaned", alive: false, hasWorktree: true }), {
@@ -27,4 +27,22 @@ test("a live active remote task remains connectable and stoppable", () => {
     resumable: false,
     connectable: true,
   });
+});
+
+test("exited terminals remain readable and resumable without a false green light", () => {
+  const task = { status: "running", alive: false, hasWorktree: true, runtime: { state: "exited", exitCode: 1 } };
+  assert.equal(taskLifecycle(task).connectable, true);
+  assert.equal(taskLifecycle(task).resumable, true);
+  const translate = (key, params) => key + (params ? JSON.stringify(params) : "");
+  assert.deepEqual(taskRuntimePresentation(task, translate), {
+    dot: "error", label: 'task.failedExit · task.exitCode{"code":1}', detail: 'task.failedExit · task.exitCode{"code":1}',
+  });
+  assert.equal(taskRuntimePresentation({ ...task, runtime: { state: "exited", exitCode: 0 } }, translate).dot, "");
+});
+
+test("creating tasks and unknown process state cannot trigger resume", () => {
+  for (const task of [
+    { status: "creating" }, { runtime: { state: "unknown" } }, { kind: "local" },
+  ]) assert.equal(taskLifecycle({ status: "running", alive: false, hasWorktree: true, ...task }).resumable, false);
+  assert.equal(taskRuntimePresentation({ status: "running" }, key => key).dot, "", "old nodes without observations never pretend to be live");
 });

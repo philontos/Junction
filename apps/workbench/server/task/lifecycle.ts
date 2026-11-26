@@ -56,7 +56,7 @@ function messageOf(error: unknown): string {
 export async function resumeTask(env: ResumeTaskEnv, id: number): Promise<LifecycleResult> {
   const task = getOwnedTask(env.db, id);
   if (!task) return { ok: false, error: "notFound" };
-  if (task.kind === "local" || !task.session || !taskCwd(task)) return { ok: false, error: "notResumable" };
+  if (task.status === "creating" || task.kind === "local" || !task.session || !taskCwd(task)) return { ok: false, error: "notResumable" };
 
   let hasWorktree = false;
   try {
@@ -72,7 +72,7 @@ export async function resumeTask(env: ResumeTaskEnv, id: number): Promise<Lifecy
   }
 
   try {
-    const alreadyAlive = await env.hasSession(task.session).catch(() => false);
+    const alreadyAlive = await env.hasSession(task.session);
     if (!alreadyAlive) await env.startSession(task);
     env.db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(id);
     await env.writeManifest(id);

@@ -27,6 +27,7 @@ import type {
   ServeStopResult,
 } from "../core/serve-lifecycle.js";
 import type { ProfileUninstallResult } from "../fleet/profile-uninstall.js";
+import type { SessionRuntime } from "../session/runtime.js";
 import { publicTaskReferences, type TaskReferenceInput } from "./references.js";
 import type { AddTaskReferenceResult } from "./addreference.js";
 import {
@@ -87,6 +88,7 @@ export const TASK_REFERENCES_CAPABILITY = "task-references-v1";
 export const TASK_RUNTIME_REFERENCES_CAPABILITY = "task-runtime-references-v1";
 export const TASK_RUNTIME_REFERENCE_MANIFEST_CAPABILITY = "task-runtime-reference-manifest-v1";
 export const TASK_CAPABILITIES = [
+  "task-process-state-v1",
   "directory-task-v1",
   "directory-task-references-v1",
   ARCHIVED_TASK_LIFECYCLE_CAPABILITY,
@@ -126,7 +128,8 @@ function repoForList(repo: Repo | NodeRepo): NodeRepo {
 // them about itself (it's the sole authority for its tmux server + worktrees). This
 // is what lets a remote card light its breathing dot exactly like a local one.
 export interface TaskLive {
-  alive: boolean;        // its tmux session is live
+  alive: boolean;        // a process is alive in its tmux session
+  runtime?: SessionRuntime;
   hasWorktree: boolean;  // its worktree is still on disk
   hasDirectory?: boolean;
   waiting: boolean;      // blocked on a permission prompt (the .claude/waiting marker)
@@ -147,6 +150,7 @@ export interface NodeTask {
   cwd: string | null;
   agent: string;
   alive?: boolean;
+  runtime?: SessionRuntime;
   hasWorktree?: boolean;
   hasDirectory?: boolean;
   waiting?: boolean;
@@ -199,6 +203,12 @@ function referencesForList(rows: unknown): NodeTaskReference[] {
 
 function taskForList(task: Task, live?: Partial<TaskLive>, references?: unknown): NodeTask {
   const hasLive = !!live && ("alive" in live || "hasWorktree" in live || "waiting" in live);
+  const runtime = live?.runtime;
+  const publicRuntime = runtime && ["running", "exited", "missing", "unknown"].includes(runtime.state) ? {
+    state: runtime.state,
+    ...(runtime.state === "exited" && Number.isInteger(runtime.exitCode) && runtime.exitCode! >= 0 ? { exitCode: runtime.exitCode } : {}),
+    ...(runtime.state === "exited" && typeof runtime.signal === "string" && /^[A-Za-z0-9_+-]{1,32}$/.test(runtime.signal) ? { signal: runtime.signal } : {}),
+  } : undefined;
   return {
     id: task.id,
     repo_id: task.repo_id,
@@ -213,6 +223,7 @@ function taskForList(task: Task, live?: Partial<TaskLive>, references?: unknown)
     references: referencesForList(references),
     ...(hasLive ? {
       alive: live?.alive ?? false,
+      ...(publicRuntime ? { runtime: publicRuntime } : {}),
       hasWorktree: live?.hasWorktree ?? false,
       ...(task.kind === "directory" ? { hasDirectory: live?.hasDirectory ?? false } : {}),
       waiting: live?.waiting ?? false,

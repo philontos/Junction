@@ -11,7 +11,7 @@ import QRCode from "qrcode";
 import { db, Repo, Task, Host, Provider } from "../core/db.js";
 import { renameTask } from "../task/tasks.js";
 import { removeWorktree } from "../repo/git.js";
-import { startSession, startShellSession, hasSession, killSession, listSessions } from "../session/tmux.js";
+import { startShellSession, hasSession, killSession, listSessions } from "../session/tmux.js";
 import { asAgentKind, isAgentKind, agentCatalog } from "../session/agent.js";
 import {
   isTranscriptReadRequest,
@@ -32,19 +32,18 @@ import { fleetTargets, type FleetTarget } from "../fleet/fleet.js";
 import { bootstrapMachine, validProfileName } from "../fleet/bootstrap.js";
 import { createLocalTask, type RepoTaskEnv } from "../task/createtask.js";
 import { TaskPreparations } from "../task/preparation.js";
-import { buildDirectoryEnv, createDirectoryTask, startDirectorySession } from "../task/directory.js";
+import { taskLiveness } from "../task/runtime.js";
+import { restartTaskSession } from "../task/restart.js";
+import { buildDirectoryEnv, createDirectoryTask } from "../task/directory.js";
 import { taskControlDir, taskCwd } from "../task/workspace.js";
 import { workspaceLayout } from "../task/workspace-layout.js";
 import { addTaskReference, type AddTaskReferenceResult } from "../task/addreference.js";
 import {
   listTaskReferences,
   publicTaskReferences,
-  externalReferenceWorktreePaths,
-  kimiWorkspaceAgentPath,
   referenceRootPaths,
   referenceWorktreePaths,
   removeTaskReferenceRows,
-  TASK_WORKSPACE_INSTRUCTIONS,
 } from "../task/references.js";
 import { buildRepoTaskEnv } from "../repo/repoenv.js";
 import { probeHost } from "../fleet/liveness.js";
@@ -537,16 +536,18 @@ app.delete("/api/repos/:id", async (req, res) => {
 app.get("/api/tasks/options", (_req, res) => res.json({ directory_tasks: true, managed_workspaces: true, context_repository_setup: true, context_references: true, directory_references: true, workspace: workspaceLayout(DATA_DIR, localRunner.workspaceRoot), agents: agentCatalog(), home: os.homedir() }));
 app.get("/api/tasks", async (_req, res) => {
   const tasks = listOwnedTasks(db);
+  const live = await taskLiveness(localRunner, tasks);
   const withLive = await Promise.all(
     tasks.map(async (t) => {
       const runner = localRunner;
-      const hasWt = !!t.worktree_path && (await runner.exists(t.worktree_path).catch(() => false));
+      const observation = live.get(t.id)!;
+      const hasWt = observation.hasWorktree;
       // Claude session id: the SessionStart hook writes it to <wt>/.claude/session-id;
       // read it back the same way the yellow light reads .claude/waiting, and persist
       // it so the value survives once the worktree is gone (e.g. archived). It only
       // changes on /clear (a fresh conversation), so refreshing each poll keeps it
       // accurate; we fall back to the stored value when the worktree isn't there.
-      const hasDirectory = t.kind === "directory" && !!t.cwd && (await runner.exists(t.cwd).catch(() => false));
+      const hasDirectory = observation.hasDirectory;
       const control = taskControlDir(DATA_DIR, t);
       let claudeSession = t.claude_session ?? null;
       if ((hasWt || hasDirectory) && t.agent === "claude" && t.status !== "cleaned") {
@@ -562,14 +563,7 @@ app.get("/api/tasks", async (_req, res) => {
         preparation: taskPreparations.progress(t.id),
         references: publicTaskReferences(db, t.id),
         claude_session: claudeSession,
-        alive: t.status === "cleaned" ? false : await hasSession(runner, t.session).catch(() => false),
-        hasWorktree: hasWt,
-        hasDirectory,
-        // yellow light: the session's hook touches <wt>/.claude/waiting when it
-        // blocks on a permission prompt; runner.exists reads it back the same way
-        // on this owning node's local filesystem. No worktree → never.
-        waiting: t.status !== "cleaned" && (hasWt || hasDirectory)
-          && (await runner.exists(path.join(control, ".claude/waiting")).catch(() => false)),
+        ...observation,
       };
     })
   );
@@ -777,7 +771,7 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
   const task = getTask.get(req.params.id) as Task | undefined;
   if (!task) return res.status(404).json({ error: tr(lang, "notFound") });
   const cwd = taskCwd(task);
-  if (task.kind === "local" || !task.session || !cwd) return res.status(409).json({ error: tr(lang, "task.notResumable") });
+  if (task.status === "creating" || task.kind === "local" || !task.session || !cwd) return res.status(409).json({ error: tr(lang, "task.notResumable") });
   if (!(await localRunner.exists(cwd).catch(() => false))) {
     return res.status(409).json({ error: tr(lang, "task.worktreeGone") });
   }
@@ -788,23 +782,8 @@ app.post("/api/tasks/:id/resume", async (req, res) => {
     }
   }
   try {
-    const alreadyAlive = await hasSession(localRunner, task.session).catch(() => false);
-    // resume on the SAME agent + model/backend the task was created with: claude
-    // re-injects its provider env; codex re-runs `codex resume --last` with its
-    // recorded model. providerEnv is empty for a codex task (provider_id is NULL).
-    const provider = task.provider_id ? (getProvider.get(task.provider_id) as Provider | undefined) : undefined;
-    if (!alreadyAlive && task.kind === "directory") await startDirectorySession(localRunner, task, {
-      agent: asAgentKind(task.agent), model: task.agent_model, env: providerEnv(provider),
-    }, true);
-    else if (!alreadyAlive) await startSession(localRunner, task.session, task.worktree_path, null, {
-      continue: true,
-      env: providerEnv(provider),
-      agent: asAgentKind(task.agent),
-      model: task.agent_model,
-      addDirs: externalReferenceWorktreePaths(db, task),
-      workspaceInstructions: TASK_WORKSPACE_INSTRUCTIONS,
-      kimiAgentFile: kimiWorkspaceAgentPath(task.worktree_path),
-    });
+    const alreadyAlive = await hasSession(localRunner, task.session);
+    if (!alreadyAlive) await restartTaskSession(db, localRunner, task);
     db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(task.id);
     syncTaskManifest(task.id);
     res.json({ ok: true, alreadyAlive });
@@ -904,16 +883,7 @@ app.get("/api/fleet", async (_req, res) => {
   const hosts = db.prepare("SELECT * FROM hosts ORDER BY (kind='local') DESC, id DESC").all() as Host[];
   const [aggregated, localPayload] = await Promise.all([
     aggregateNodes(fleetTargets(hosts), nodeListFetch),
-    taskListPayload(db, async (tasks) => new Map(await Promise.all(tasks.map(async (task) => [
-      task.id,
-      {
-        alive: task.status !== "cleaned" && await hasSession(localRunner, task.session).catch(() => false),
-        hasWorktree: !!task.worktree_path && await localRunner.exists(task.worktree_path).catch(() => false),
-        hasDirectory: task.kind === "directory" && !!task.cwd && await localRunner.exists(task.cwd).catch(() => false),
-        waiting: task.status !== "cleaned" && !!taskControlDir(DATA_DIR, task)
-          && await localRunner.exists(path.join(taskControlDir(DATA_DIR, task), ".claude/waiting")).catch(() => false),
-      },
-    ] as const)))),
+    taskListPayload(db, tasks => taskLiveness(localRunner, tasks)),
   ]);
   const byId = new Map(aggregated.map((a) => [a.node.id, a]));
   const nodes = hosts.map((h) => {

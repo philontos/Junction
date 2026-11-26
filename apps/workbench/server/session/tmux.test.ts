@@ -115,10 +115,11 @@ test("killSession targets the session by exact match (=), so a name can't prefix
   assert.deepEqual(calls[0], { file: "tmux", args: ["kill-session", "-t", "=tdsp-1-x"] });
 });
 
-test("hasSession checks by exact match (=), so 'tdsp-1' isn't reported live by 'tdsp-12'", async () => {
-  const { runner, calls } = fakeRunner();
-  await hasSession(runner, "tdsp-1");
-  assert.deepEqual(calls[0], { file: "tmux", args: ["has-session", "-t", "=tdsp-1"] });
+test("hasSession checks the exact session's live process, not a retained pane or prefix", async () => {
+  const { runner } = fakeRunner(async () => "tdsp-1\t%1\t1\t1\t\ntdsp-12\t%2\t0\t\t\n");
+  assert.equal(await hasSession(runner, "tdsp-1"), false);
+  assert.equal(await hasSession(runner, "tdsp-12"), true);
+  assert.equal(await hasSession(runner, "tdsp-"), false);
 });
 
 test("startSession passes the prompt as claude's opening message", async () => {
