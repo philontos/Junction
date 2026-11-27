@@ -1,15 +1,15 @@
 /* Shared product identity and navigation on cloud, relay and local pages. */
 .brand { gap: 9px; color: var(--text); }
 .product-layout { display: flex; flex: 1; min-width: 0; min-height: 0; }
-.primary-nav { display: flex; flex-direction: column; flex: 0 0 72px; align-items: stretch; gap: 10px; padding: 16px 8px; border-right: 1px solid var(--border); background: var(--surface); }
+.primary-nav { display: flex; flex-direction: column; flex: 0 0 60px; min-width: 0; align-items: stretch; gap: 8px; padding: 16px 3px; border-right: 1px solid var(--border); background: var(--surface); }
 .primary-nav[hidden] { display: none; }
-.primary-nav a { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 62px; padding: 9px 3px; border: 1px solid transparent; border-radius: 9px; color: var(--muted); font-size: 10px; font-weight: 500; text-decoration: none; white-space: nowrap; transition: color .12s, background .12s; }
+.primary-nav a { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 62px; padding: 9px 0; border: 1px solid transparent; border-radius: 9px; color: var(--muted); font-size: 9px; font-weight: 500; letter-spacing: 0; text-decoration: none; white-space: nowrap; transition: color .12s, background .12s; }
 .primary-nav svg { width: 21px; height: 21px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .primary-nav a:hover { color: var(--text); background: var(--surface-2); }
 .primary-nav a[aria-current=page] { color: var(--accent-text-hi); background: color-mix(in srgb, var(--accent) 11%, transparent); border-color: color-mix(in srgb, var(--accent) 18%, transparent); }
 .brand:focus-visible, .primary-nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 760px) {
-  .primary-nav { flex-basis: 60px; padding: 12px 5px; gap: 6px; }
+  .primary-nav { flex-basis: 56px; padding: 12px 1px; gap: 6px; }
   .primary-nav a { min-height: 58px; font-size: 9px; }
   .brand-logo { width: 120px; height: 26px; }
 }
